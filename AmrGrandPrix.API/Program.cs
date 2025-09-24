@@ -4,6 +4,12 @@ var builder = WebApplication.CreateBuilder(args);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
+// Add SPA services
+builder.Services.AddSpaStaticFiles(configuration =>
+{
+    configuration.RootPath = "../AmrGrandPrix.Client/dist";
+});
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -13,6 +19,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseRouting();
+
+app.UseStaticFiles();
+app.UseSpaStaticFiles();
 
 var summaries = new[]
 {
@@ -32,6 +43,16 @@ app.MapGet("/weatherforecast", () =>
     return forecast;
 })
 .WithName("GetWeatherForecast");
+
+app.UseSpa(spa =>
+{
+    spa.Options.SourcePath = "../AmrGrandPrix.Client";
+
+    if (app.Environment.IsDevelopment())
+    {
+        spa.UseProxyToSpaDevelopmentServer("http://localhost:5173");
+    }
+});
 
 app.Run();
 
