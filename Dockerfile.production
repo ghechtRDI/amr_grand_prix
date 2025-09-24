@@ -1,0 +1,63 @@
+# Production Dockerfile - Multi-stage build
+# This builds the React app and serves it through the .NET application
+
+# Stage 1: Build React Application
+FROM node:20-alpine AS client-build
+WORKDIR /client
+
+# Copy client package files
+COPY AmrGrandPrix.Client/package*.json ./
+RUN npm ci --only=production
+
+# Copy client source and build
+COPY AmrGrandPrix.Client/ ./
+RUN npm run build
+
+# Stage 2: Build .NET Application
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS api-build
+WORKDIR /api
+
+# Copy API project file and restore
+COPY AmrGrandPrix.API/*.csproj ./
+RUN dotnet restore
+
+# Copy API source and publish
+COPY AmrGrandPrix.API/ ./
+RUN dotnet publish -c Release -o /app/publish --no-restore
+
+# Stage 3: Runtime
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+WORKDIR /app
+
+# Create non-root user for security
+RUN groupadd -r amrapp && useradd -r -g amrapp amrapp
+
+# Copy published API
+COPY --from=api-build /app/publish .
+
+# Copy built client assets to wwwroot
+COPY --from=client-build /client/dist ./wwwroot
+
+# Create directories and set permissions
+RUN mkdir -p /app/logs && \
+    chown -R amrapp:amrapp /app
+
+# Switch to non-root user
+USER amrapp
+
+# Expose ports
+EXPOSE 5000
+EXPOSE 5001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:5000/health || exit 1
+
+# Set environment variables
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV ASPNETCORE_URLS=http://+:5000
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+ENV DOTNET_EnableDiagnostics=0
+
+# Start application
+ENTRYPOINT ["dotnet", "AmrGrandPrix.API.dll"]

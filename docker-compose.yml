@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # .NET API Service
+  api:
+    build:
+      context: ./AmrGrandPrix.API
+      dockerfile: Dockerfile
+      target: development
+    container_name: amr-api-dev
+    ports:
+      - "8080:8080"   # HTTP
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
+      - ConnectionStrings__DefaultConnection=Server=db;Database=AmrGrandPrix;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True;
+    # volumes:
+      # - ./AmrGrandPrix.API:/app:delegated
+      # - nuget-cache:/root/.nuget/packages
+    # Note: Volume mounting disabled to avoid NuGet conflicts in development
+    # For hot reload, rebuild the container after changes
+    depends_on:
+      - client
+    networks:
+      - amr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # React Client Service
+  client:
+    build:
+      context: ./AmrGrandPrix.Client
+      dockerfile: Dockerfile
+      target: development
+    container_name: amr-client-dev
+    ports:
+      - "5173:5173"   # Vite dev server
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://api:8080
+    volumes:
+      - ./AmrGrandPrix.Client:/app:delegated
+      - /app/node_modules
+    networks:
+      - amr-network
+    restart: unless-stopped
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+
+  # SQL Server Database (optional for development)
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: amr-db-dev
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong@Passw0rd
+      - MSSQL_PID=Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    networks:
+      - amr-network
+    restart: unless-stopped
+
+networks:
+  amr-network:
+    driver: bridge
+    name: amr-grand-prix-network
+
+volumes:
+  mssql-data:
+    name: amr-mssql-data
+  nuget-cache:
+    name: amr-nuget-cache

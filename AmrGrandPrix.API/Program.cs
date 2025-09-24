@@ -4,6 +4,26 @@ var builder = WebApplication.CreateBuilder(args);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
+// Add CORS for container networking
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("DevPolicy", policy =>
+    {
+        policy.WithOrigins(
+            "http://localhost:5173",
+            "http://client:5173",
+            "http://localhost:3000",
+            "http://localhost:4173"
+        )
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials();
+    });
+});
+
+// Add health checks
+builder.Services.AddHealthChecks();
+
 // Add SPA services
 builder.Services.AddSpaStaticFiles(configuration =>
 {
@@ -18,9 +38,16 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+// Only redirect to HTTPS in production
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseRouting();
+
+// Enable CORS
+app.UseCors("DevPolicy");
 
 app.UseStaticFiles();
 app.UseSpaStaticFiles();
@@ -29,6 +56,9 @@ var summaries = new[]
 {
     "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
 };
+
+// Map health check endpoint
+app.MapHealthChecks("/health");
 
 app.MapGet("/weatherforecast", () =>
 {
@@ -50,7 +80,11 @@ app.UseSpa(spa =>
 
     if (app.Environment.IsDevelopment())
     {
-        spa.UseProxyToSpaDevelopmentServer("http://localhost:5173");
+        // Check if running in container (use container networking)
+        var spaUrl = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true"
+            ? "http://client:5173"
+            : "http://localhost:5173";
+        spa.UseProxyToSpaDevelopmentServer(spaUrl);
     }
 });
 

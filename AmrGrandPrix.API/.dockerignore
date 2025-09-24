@@ -1,0 +1,32 @@
+# .NET API Docker ignore
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+*.cache
+*.log
+*.tmp
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE files
+*.swp
+*.swo
+*~
+
+# Test results
+TestResults/
+[Bb]uild[Ll]og.*
+*.trx
+
+# Documentation
+README.md
+*.md
+
+# Git
+.git/
+.gitignore

@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # Production application (single container)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    container_name: amr-grand-prix-prod
+    ports:
+      - "80:5000"
+      - "443:5001"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000;https://+:5001
+      - ConnectionStrings__DefaultConnection=${CONNECTION_STRING}
+    networks:
+      - amr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Production Database
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: amr-db-prod
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=${DB_SA_PASSWORD}
+      - MSSQL_PID=Standard
+    volumes:
+      - mssql-prod-data:/var/opt/mssql
+    networks:
+      - amr-network
+    restart: unless-stopped
+
+networks:
+  amr-network:
+    driver: bridge
+    name: amr-grand-prix-prod-network
+
+volumes:
+  mssql-prod-data:
+    name: amr-mssql-prod-data
