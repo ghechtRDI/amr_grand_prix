@@ -22,6 +22,5 @@ namespace AmrGrandPrix.API.Controllers
 
             return forecast;
         }
-
     }
 }

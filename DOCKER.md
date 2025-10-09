@@ -125,8 +125,8 @@ CONNECTION_STRING=Server=db;Database=AmrGrandPrix;...
 
 | Service | Development | Production |
 |---------|-------------|------------|
-| API HTTP | 5000 | 80 |
-| API HTTPS | 5001 | 443 |
+| API HTTP | 8080 | 80 |
+| API HTTPS | NA | 443 |
 | Client | 5173 | - |
 | Database | 1433 | 1433 |
 
@@ -174,7 +174,7 @@ The production Dockerfile uses multi-stage builds:
 
 ### API Health Check
 ```bash
-curl http://localhost:5000/health
+curl http://localhost:8080/health
 ```
 
 ### Container Health
@@ -218,7 +218,7 @@ lsof -ti:5000 | xargs kill -9
 #### Database Connection Issues
 ```bash
 # Test database connectivity
-docker-compose exec api curl -f http://localhost:5000/health
+docker-compose exec api curl -f http://localhost:8080/health
 ```
 
 ### Performance Issues
