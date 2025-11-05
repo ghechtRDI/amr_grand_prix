@@ -1,9 +1,13 @@
 using AmrGrandPrix.API.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace AmrGrandPrix.API.Controllers
 {
-    public class WeatherForecastController
+    [ApiController]
+    [Route("[controller]")]
+    public class WeatherForecastController : ControllerBase
     {
+        [HttpGet]
         public WeatherForecast[] GetWeatherForecast()
         {
             var summaries = new[]

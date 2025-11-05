@@ -4,6 +4,9 @@ var builder = WebApplication.CreateBuilder(args);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
+// Add controllers
+builder.Services.AddControllers();
+
 // Add CORS for container networking
 builder.Services.AddCors(options =>
 {
@@ -24,12 +27,6 @@ builder.Services.AddCors(options =>
 // Add health checks
 builder.Services.AddHealthChecks();
 
-// Add SPA services
-builder.Services.AddSpaStaticFiles(configuration =>
-{
-    configuration.RootPath = "../AmrGrandPrix.Client/dist";
-});
-
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -49,31 +46,9 @@ app.UseRouting();
 // Enable CORS
 app.UseCors("DevPolicy");
 
-app.UseStaticFiles();
-app.UseSpaStaticFiles();
-
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
 // Map health check endpoint
 app.MapHealthChecks("/health");
 
 app.MapControllers();
-
-app.UseSpa(spa =>
-{
-    spa.Options.SourcePath = "../AmrGrandPrix.Client";
-
-    if (app.Environment.IsDevelopment())
-    {
-        // Check if running in container (use container networking)
-        var spaUrl = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true"
-            ? "http://client:5173"
-            : "http://localhost:5173";
-        spa.UseProxyToSpaDevelopmentServer(spaUrl);
-    }
-});
 
 app.Run();

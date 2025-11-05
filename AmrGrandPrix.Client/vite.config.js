@@ -9,12 +9,14 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_URL || 'http://localhost:8080',
+        // Use host.docker.internal to reach host machine from container
+        target: 'http://host.docker.internal:5000',
         changeOrigin: true,
         secure: false,
       },
       '/weatherforecast': {
-        target: process.env.VITE_API_URL || 'http://localhost:8080',
+        // Use host.docker.internal to reach host machine from container
+        target: 'http://host.docker.internal:5000',
         changeOrigin: true,
         secure: false,
       }
