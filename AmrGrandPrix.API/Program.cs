@@ -13,9 +13,18 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 
-// Add DbContext with PostgreSQL
+// Add DbContext with PostgreSQL (or InMemory for testing)
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+{
+    if (builder.Environment.IsEnvironment("Testing"))
+    {
+        options.UseInMemoryDatabase("TestDatabase");
+    }
+    else
+    {
+        options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"));
+    }
+});
 
 // Add Identity
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
@@ -76,6 +85,9 @@ builder.Services.AddAuthorization(options =>
 // Add Email Service
 builder.Services.AddScoped<IEmailService, EmailService>();
 
+// Add Token Service
+builder.Services.AddScoped<ITokenService, TokenService>();
+
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
@@ -105,21 +117,24 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
-// Seed roles on startup
-using (var scope = app.Services.CreateScope())
+// Seed roles on startup (skip in test environment)
+if (!app.Environment.IsEnvironment("Testing"))
 {
-    var services = scope.ServiceProvider;
-    try
+    using (var scope = app.Services.CreateScope())
     {
-        var roleManager = services.GetRequiredService<RoleManager<IdentityRole>>();
-        var logger = services.GetRequiredService<ILogger<RoleSeedingService>>();
-        var roleSeedingService = new RoleSeedingService(roleManager, logger);
-        await roleSeedingService.SeedRolesAsync();
-    }
-    catch (Exception ex)
-    {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while seeding roles");
+        var services = scope.ServiceProvider;
+        try
+        {
+            var roleManager = services.GetRequiredService<RoleManager<IdentityRole>>();
+            var logger = services.GetRequiredService<ILogger<RoleSeedingService>>();
+            var roleSeedingService = new RoleSeedingService(roleManager, logger);
+            await roleSeedingService.SeedRolesAsync();
+        }
+        catch (Exception ex)
+        {
+            var logger = services.GetRequiredService<ILogger<Program>>();
+            logger.LogError(ex, "An error occurred while seeding roles");
+        }
     }
 }
 
@@ -150,3 +165,6 @@ app.MapHealthChecks("/health");
 app.MapControllers();
 
 app.Run();
+
+// Make the implicit Program class public for integration tests
+public partial class Program { }
