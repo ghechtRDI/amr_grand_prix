@@ -1,0 +1,155 @@
+/* Pages Styling */
+
+.page-container {
+  min-height: 100vh;
+  background: #f7fafc;
+  padding: 2rem;
+}
+
+.page-header {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+  margin-bottom: 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.page-header h1 {
+  margin: 0;
+  color: #2d3748;
+  font-size: 1.75rem;
+}
+
+.user-info {
+  text-align: right;
+}
+
+.user-info p {
+  margin: 0.25rem 0;
+  color: #4a5568;
+}
+
+.user-roles {
+  font-size: 0.85rem;
+  color: #667eea;
+  font-weight: 500;
+}
+
+.page-content {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.welcome-card,
+.info-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.welcome-card h2,
+.info-card h3 {
+  margin-top: 0;
+  color: #2d3748;
+}
+
+.welcome-card p {
+  color: #4a5568;
+  line-height: 1.6;
+}
+
+.coming-soon {
+  font-style: italic;
+  color: #718096;
+  margin-top: 1.5rem;
+}
+
+.info-card ul {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0 0;
+}
+
+.info-card li {
+  padding: 0.5rem 0;
+  color: #4a5568;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.info-card li:last-child {
+  border-bottom: none;
+}
+
+.btn-secondary {
+  background: white;
+  color: #667eea;
+  border: 2px solid #667eea;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  background: #667eea;
+  color: white;
+}
+
+.error-page {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 4rem 2rem;
+  text-align: center;
+  max-width: 600px;
+  margin: 4rem auto;
+}
+
+.error-page h1 {
+  color: #e53e3e;
+  margin: 0 0 1rem 0;
+}
+
+.error-page p {
+  color: #4a5568;
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+}
+
+.error-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .page-container {
+    padding: 1rem;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .page-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .user-info {
+    text-align: left;
+  }
+
+  .error-page {
+    padding: 2rem 1rem;
+  }
+}

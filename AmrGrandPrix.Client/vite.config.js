@@ -9,14 +9,14 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        // Use host.docker.internal to reach host machine from container
-        target: 'http://host.docker.internal:5000',
+        // Proxy to API running on port 8080
+        // Use localhost for local dev, host.docker.internal in Docker
+        target: process.env.DOCKER_ENV ? 'http://api:8080' : 'http://localhost:8080',
         changeOrigin: true,
         secure: false,
       },
       '/weatherforecast': {
-        // Use host.docker.internal to reach host machine from container
-        target: 'http://host.docker.internal:5000',
+        target: process.env.DOCKER_ENV ? 'http://api:8080' : 'http://localhost:8080',
         changeOrigin: true,
         secure: false,
       }

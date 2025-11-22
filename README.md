@@ -1,92 +1,101 @@
 # Alaska Mountain Runners Grand Prix
 
-This is a .NET/React application used to manage and publicize Alaska Mountain Runners Grand Prix race result history, overall standings, and race statistics.
+A full-stack web application for managing and displaying Alaska Mountain Runners Grand Prix race results, overall standings, and statistics. Features secure user authentication, role-based access control, and email confirmation.
 
 ## 🏃‍♂️ Tech Stack
 
-- **Backend**: .NET 9 Web API with SPA proxy
-- **Frontend**: React 19 with Vite
-- **Database**: SQL Server
+- **Backend**: .NET 9 Web API with ASP.NET Identity & JWT Authentication
+- **Frontend**: React 19 with Vite & React Router
+- **Database**: PostgreSQL 16
+- **Email**: MailHog (development) / SMTP (production)
 - **Containerization**: Docker & Docker Compose
+
+## ✨ Features
+
+### Implemented
+- ✅ User registration with email confirmation
+- ✅ JWT token-based authentication
+- ✅ Role-based authorization (ReadOnly, Manager, Admin)
+- ✅ Automatic token refresh
+- ✅ Protected routes
+- ✅ Responsive UI with modern design
+
+### Planned
+- [ ] Race result management
+- [ ] Overall Grand Prix standings
+- [ ] Race statistics and analytics
+- [ ] Runner profiles and history
+- [ ] Race registration integration
 
 ## 🚀 Quick Start
 
-### Option 1: Docker (Recommended)
+### Recommended: Local Development with Docker Infrastructure
+
+This setup runs the database and email server in Docker while running the API and frontend locally for the best development experience with hot reload.
+
 ```bash
-# Start development environment
+# 1. Start infrastructure services (PostgreSQL + MailHog)
+docker-compose up -d db mailhog
+
+# 2. Start the API (Terminal 1)
+cd AmrGrandPrix.API
+dotnet ef database update  # First time only
+dotnet run                  # Runs on http://localhost:8080
+
+# 3. Start the Frontend (Terminal 2)
+cd AmrGrandPrix.Client
+npm install                 # First time only
+npm run dev                 # Runs on http://localhost:5173
+
+# Access the application at http://localhost:5173
+```
+
+### Alternative: Full Docker
+
+Run everything in Docker (note: frontend hot reload works, but API requires rebuild for changes):
+
+```bash
+# Start all services
 ./docker-dev.sh start
 
-# Access the application
-# Frontend: http://localhost:5173
-# API: http://localhost:5000
+# Access:
+# - Frontend: http://localhost:5173
+# - API: http://localhost:8080
+# - MailHog UI: http://localhost:8025
 ```
 
-### Option 2: Local Development
-```bash
-# Start the .NET API
-cd AmrGrandPrix.API
-dotnet run
+## 📁 Documentation
 
-# Start the React client (in another terminal)
-cd AmrGrandPrix.Client
-npm install
-npm run dev
-```
-
-## 🐳 Docker Setup
-
-For detailed Docker setup and deployment instructions, see [DOCKER.md](DOCKER.md).
-
-### Quick Commands
-- **Development**: `./docker-dev.sh start`
-- **Production**: `./docker-prod.sh deploy`
-- **View Logs**: `./docker-dev.sh logs`
-- **Stop Services**: `./docker-dev.sh stop`
-
-## 📁 Project Structure
-
-```
-├── AmrGrandPrix.API/          # .NET 9 Web API
-├── AmrGrandPrix.Client/       # React + Vite frontend
-├── docker-compose.yml         # Development containers
-├── docker-compose.prod.yml    # Production containers
-├── Dockerfile.production      # Production build
-├── docker-dev.sh             # Development helper
-├── docker-prod.sh            # Production helper
-└── DOCKER.md                 # Docker documentation
-```
+- [CLAUDE.md](CLAUDE.md) - Development context & architecture
+- [TESTING_AUTH.md](TESTING_AUTH.md) - Authentication testing guide
+- [DOCS/AUTH_PLAN.md](DOCS/AUTH_PLAN.md) - Auth implementation details
+- [DOCKER.md](DOCKER.md) - Docker setup & deployment
 
 ## 🛠️ Development
-
-The application uses SPA proxy configuration where the .NET API serves as the primary entry point and proxies frontend requests to the Vite development server.
 
 ### Prerequisites
 - .NET 9 SDK
 - Node.js 20+
-- Docker Desktop (for containerized development)
+- Docker Desktop
+
+### Services & Ports
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:5173 |
+| API | http://localhost:8080 |
+| MailHog UI | http://localhost:8025 |
+| PostgreSQL | localhost:5432 |
 
 ### Local Development Setup
 1. Clone the repository
 2. Run `./docker-dev.sh start` for containerized development
 3. Or follow manual setup in [DOCKER.md](DOCKER.md)
 
-## 🏭 Production Deployment
-
-See [DOCKER.md](DOCKER.md) for comprehensive production deployment instructions.
-
-## 📊 Features (Planned)
-
-- [ ] Race result management
-- [ ] Overall Grand Prix standings
-- [ ] Race statistics and analytics
-- [ ] Runner profiles and history
-- [ ] Race registration integration
-- [ ] Mobile-responsive design
-
-## 🤝 Contributing
-
-[Work in progress - contributing guidelines coming soon]
-
+## 🔐 Authentication
+JWT token-based authentication with email confirmation. Three role levels:
+- **ReadOnly** (default) - View data
+- **Manager** - Manage races & results
+- **Admin** - Full system access
 ## 📄 License
 
 [License information coming soon]
