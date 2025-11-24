@@ -403,19 +403,20 @@ Endpoint decorated with [Authorize(Policy = "Manager")]
 
 ## Environment Configuration
 
-### Development (Local)
-- PostgreSQL: localhost:5432
-- MailHog SMTP: localhost:1025
-- MailHog Web UI: http://localhost:8025
-- API: http://localhost:8080
-- Client: http://localhost:5173
+### Development (Local - Recommended)
+- PostgreSQL: localhost:5432 (running on host, database: amr_grand_prix)
+- MailHog SMTP: localhost:1025 (Docker)
+- MailHog Web UI: http://localhost:8025 (Docker)
+- API: http://localhost:8080 (running on host)
+- Client: http://localhost:5173 (running on host)
+- Connection String: Configured via .NET user secrets
 
-### Development (Docker)
-- PostgreSQL: db:5432
-- MailHog SMTP: mailhog:1025
-- MailHog Web UI: http://localhost:8025
-- API: http://localhost:8080 (exposed)
-- Client: http://localhost:5173 (exposed)
+### Development (Full Docker - Alternative)
+- PostgreSQL: db:5432 (Docker container)
+- MailHog SMTP: mailhog:1025 (Docker)
+- MailHog Web UI: http://localhost:8025 (exposed)
+- API: http://localhost:8080 (Docker, exposed)
+- Client: http://localhost:5173 (Docker, exposed)
 
 ### Production (Future)
 - Use environment variables for:

@@ -14,11 +14,6 @@ export default defineConfig({
         target: process.env.DOCKER_ENV ? 'http://api:8080' : 'http://localhost:8080',
         changeOrigin: true,
         secure: false,
-      },
-      '/weatherforecast': {
-        target: process.env.DOCKER_ENV ? 'http://api:8080' : 'http://localhost:8080',
-        changeOrigin: true,
-        secure: false,
       }
     }
   },

@@ -195,7 +195,6 @@ Page layout styling:
 #### **vite.config.js**
 Proxy configuration:
 - `/api` proxied to `http://localhost:8080` (local dev)
-- `/weatherforecast` proxied to API
 - Docker environment detection
 - CORS handled by proxy
 

@@ -29,21 +29,30 @@ A full-stack web application for managing and displaying Alaska Mountain Runners
 
 ## 🚀 Quick Start
 
-### Recommended: Local Development with Docker Infrastructure
+### Recommended: Local Development with Localhost PostgreSQL
 
-This setup runs the database and email server in Docker while running the API and frontend locally for the best development experience with hot reload.
+This setup uses your localhost PostgreSQL database and runs MailHog in Docker for email testing, while running the API and frontend locally for the best development experience with hot reload.
+
+**Prerequisites:**
+- PostgreSQL 16 running locally with database `amr_grand_prix`
+- Connection string configured in .NET user secrets (see below)
 
 ```bash
-# 1. Start infrastructure services (PostgreSQL + MailHog)
-docker-compose up -d db mailhog
-
-# 2. Start the API (Terminal 1)
+# 1. Configure database connection (first time only)
 cd AmrGrandPrix.API
-dotnet ef database update  # First time only
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Database=amr_grand_prix;Username=YOUR_USERNAME;Password=YOUR_PASSWORD"
+
+# 2. Start MailHog for email testing
+docker-compose up -d mailhog
+
+# 3. Apply database migrations (first time only)
+dotnet ef database update
+
+# 4. Start the API (Terminal 1)
 dotnet run                  # Runs on http://localhost:8080
 
-# 3. Start the Frontend (Terminal 2)
-cd AmrGrandPrix.Client
+# 5. Start the Frontend (Terminal 2)
+cd ../AmrGrandPrix.Client
 npm install                 # First time only
 npm run dev                 # Runs on http://localhost:5173
 
@@ -79,12 +88,13 @@ Run everything in Docker (note: frontend hot reload works, but API requires rebu
 - Docker Desktop
 
 ### Services & Ports
-| Service | URL |
-|---------|-----|
-| Frontend | http://localhost:5173 |
-| API | http://localhost:8080 |
-| MailHog UI | http://localhost:8025 |
-| PostgreSQL | localhost:5432 |
+| Service | URL | Notes |
+|---------|-----|-------|
+| Frontend | http://localhost:5173 | Vite dev server |
+| API | http://localhost:8080 | .NET Web API |
+| MailHog UI | http://localhost:8025 | Email testing interface |
+| MailHog SMTP | localhost:1025 | SMTP server |
+| PostgreSQL | localhost:5432 | Local PostgreSQL (not Docker) |
 
 ### Local Development Setup
 1. Clone the repository
