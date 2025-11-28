@@ -3,9 +3,33 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  /* Color Palette */
+  --primary: #FECC31;
+  --primary-dark: #d9ab1f;
+  --primary-light: #ffdb5c;
+  --secondary: #898AF4;
+  --secondary-dark: #6f70d8;
+  --secondary-light: #a3a4f7;
+
+  /* Dark Theme Colors */
+  --bg-primary: #121212;
+  --bg-secondary: #1e1e1e;
+  --bg-tertiary: #2a2a2a;
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-tertiary: rgba(255, 255, 255, 0.5);
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-color-hover: rgba(255, 255, 255, 0.2);
+
+  /* Error and Success */
+  --error: #ff5252;
+  --error-bg: #3a1f1f;
+  --success: #4caf50;
+  --success-bg: #1f3a20;
+
+  color-scheme: dark;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -15,11 +39,12 @@
 
 a {
   font-weight: 500;
-  color: #646cff;
+  color: var(--primary);
   text-decoration: inherit;
+  transition: color 0.2s;
 }
 a:hover {
-  color: #535bf2;
+  color: var(--primary-light);
 }
 
 body {
@@ -33,6 +58,11 @@ body {
 h1 {
   font-size: 3.2em;
   line-height: 1.1;
+  color: var(--text-primary);
+}
+
+h2, h3, h4, h5, h6 {
+  color: var(--text-primary);
 }
 
 button {
@@ -42,27 +72,21 @@ button {
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #1a1a1a;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
   cursor: pointer;
-  transition: border-color 0.25s;
+  transition: all 0.25s;
 }
-button:hover {
-  border-color: #646cff;
+button:hover:not(:disabled) {
+  border-color: var(--primary);
+  background-color: var(--bg-secondary);
 }
 button:focus,
 button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

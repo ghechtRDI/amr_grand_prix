@@ -2,14 +2,15 @@
 
 .page-container {
   min-height: 100vh;
-  background: #f7fafc;
+  background: var(--bg-primary);
   padding: 2rem;
 }
 
 .page-header {
-  background: white;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   padding: 2rem;
   margin-bottom: 2rem;
   display: flex;
@@ -21,8 +22,12 @@
 
 .page-header h1 {
   margin: 0;
-  color: #2d3748;
+  color: var(--text-primary);
   font-size: 1.75rem;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .user-info {
@@ -31,12 +36,12 @@
 
 .user-info p {
   margin: 0.25rem 0;
-  color: #4a5568;
+  color: var(--text-secondary);
 }
 
 .user-roles {
   font-size: 0.85rem;
-  color: #667eea;
+  color: var(--secondary);
   font-weight: 500;
 }
 
@@ -47,9 +52,10 @@
 
 .welcome-card,
 .info-card {
-  background: white;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   padding: 2rem;
   margin-bottom: 1.5rem;
 }
@@ -57,17 +63,17 @@
 .welcome-card h2,
 .info-card h3 {
   margin-top: 0;
-  color: #2d3748;
+  color: var(--text-primary);
 }
 
 .welcome-card p {
-  color: #4a5568;
+  color: var(--text-secondary);
   line-height: 1.6;
 }
 
 .coming-soon {
   font-style: italic;
-  color: #718096;
+  color: var(--text-tertiary);
   margin-top: 1.5rem;
 }
 
@@ -79,8 +85,8 @@
 
 .info-card li {
   padding: 0.5rem 0;
-  color: #4a5568;
-  border-bottom: 1px solid #e2e8f0;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .info-card li:last-child {
@@ -88,9 +94,9 @@
 }
 
 .btn-secondary {
-  background: white;
-  color: #667eea;
-  border: 2px solid #667eea;
+  background: transparent;
+  color: var(--secondary);
+  border: 2px solid var(--secondary);
   border-radius: 6px;
   padding: 0.5rem 1rem;
   font-size: 0.9rem;
@@ -100,14 +106,16 @@
 }
 
 .btn-secondary:hover {
-  background: #667eea;
-  color: white;
+  background: var(--secondary);
+  color: var(--bg-primary);
+  box-shadow: 0 4px 12px rgba(137, 138, 244, 0.3);
 }
 
 .error-page {
-  background: white;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   padding: 4rem 2rem;
   text-align: center;
   max-width: 600px;
@@ -115,12 +123,12 @@
 }
 
 .error-page h1 {
-  color: #e53e3e;
+  color: var(--error);
   margin: 0 0 1rem 0;
 }
 
 .error-page p {
-  color: #4a5568;
+  color: var(--text-secondary);
   font-size: 1.1rem;
   margin-bottom: 2rem;
 }
