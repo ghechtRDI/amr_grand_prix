@@ -88,6 +88,19 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 // Add Token Service
 builder.Services.AddScoped<ITokenService, TokenService>();
 
+// Add File Parser Services
+builder.Services.AddScoped<AmrGrandPrix.API.Services.FileParser.IFileParserService, AmrGrandPrix.API.Services.FileParser.CsvParserService>();
+builder.Services.AddScoped<AmrGrandPrix.API.Services.FileParser.IFileParserService, AmrGrandPrix.API.Services.FileParser.ExcelParserService>();
+builder.Services.AddScoped<AmrGrandPrix.API.Services.FileParser.IFileParserService, AmrGrandPrix.API.Services.FileParser.PdfParserService>();
+builder.Services.AddScoped<AmrGrandPrix.API.Services.FileParser.FileParserFactory>();
+
+// Add Results Processing Services
+builder.Services.AddScoped<AmrGrandPrix.API.Services.ResultsProcessing.IResultsProcessingService, AmrGrandPrix.API.Services.ResultsProcessing.ResultsProcessingService>();
+builder.Services.AddScoped<AmrGrandPrix.API.Services.ResultsProcessing.IRunnerMatchingService, AmrGrandPrix.API.Services.ResultsProcessing.RunnerMatchingService>();
+
+// Add Grand Prix Calculation Service
+builder.Services.AddScoped<AmrGrandPrix.API.Services.GrandPrix.IGrandPrixCalculationService, AmrGrandPrix.API.Services.GrandPrix.GrandPrixCalculationService>();
+
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();

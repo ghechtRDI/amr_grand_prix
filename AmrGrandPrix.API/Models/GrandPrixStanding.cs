@@ -53,6 +53,16 @@ public class GrandPrixStanding
     public int SecondBestRacePoints { get; set; }
 
     /// <summary>
+    /// Points from third best race (for tiebreaker)
+    /// </summary>
+    public int ThirdBestRacePoints { get; set; }
+
+    /// <summary>
+    /// Points from fourth best race (for tiebreaker)
+    /// </summary>
+    public int FourthBestRacePoints { get; set; }
+
+    /// <summary>
     /// Whether runner has completed 7+ Grand Prix races (Run the Gamut)
     /// </summary>
     public bool RunTheGamutQualified { get; set; }

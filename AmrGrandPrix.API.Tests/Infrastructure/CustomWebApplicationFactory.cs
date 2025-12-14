@@ -7,12 +7,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
+using AmrGrandPrix.API.Services;
 
 namespace AmrGrandPrix.API.Tests.Infrastructure;
 
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     private readonly string _databaseName = $"TestDatabase_{Guid.NewGuid()}";
+    public FakeEmailService FakeEmailService { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -34,6 +36,18 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             {
                 options.UseInMemoryDatabase(_databaseName);
             });
+
+            // Remove the real email service
+            var emailServiceDescriptor = services.SingleOrDefault(
+                d => d.ServiceType == typeof(IEmailService));
+
+            if (emailServiceDescriptor != null)
+            {
+                services.Remove(emailServiceDescriptor);
+            }
+
+            // Add fake email service for testing
+            services.AddSingleton<IEmailService>(FakeEmailService);
         });
     }
 
