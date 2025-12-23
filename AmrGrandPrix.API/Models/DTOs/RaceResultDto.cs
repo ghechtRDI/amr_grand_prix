@@ -8,6 +8,7 @@ public class RaceResultDto
     public Guid ResultId { get; set; }
     public Guid RaceId { get; set; }
     public string RaceName { get; set; } = string.Empty;
+    public DateTime RaceDate { get; set; }
     public Guid RunnerId { get; set; }
     public string RunnerName { get; set; } = string.Empty;
     public int? Bib { get; set; }

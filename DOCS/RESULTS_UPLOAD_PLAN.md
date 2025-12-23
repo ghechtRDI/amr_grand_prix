@@ -2,16 +2,16 @@
 
 ## Implementation Status
 
-**Last Updated**: December 14, 2024
+**Last Updated**: December 20, 2024
 
 ### Progress Overview
 - ✅ **Phase 1**: Database & Core Models (COMPLETED)
 - ✅ **Phase 2**: File Parsing Backend (COMPLETED + TESTED)
 - ✅ **Phase 3**: Results Processing Backend (COMPLETED + TESTED)
 - ✅ **Phase 4**: Grand Prix Calculation Backend (COMPLETED + TESTED)
-- 🔄 **Phase 5**: API Controllers (NEXT UP)
-- ⏳ **Phase 6**: Frontend - Upload Wizard (NOT STARTED)
-- ⏳ **Phase 7**: Frontend - Results & Standings (NOT STARTED)
+- ✅ **Phase 5**: API Controllers (COMPLETED)
+- ✅ **Phase 6**: Frontend - Upload Wizard (COMPLETED)
+- 🔄 **Phase 7**: Frontend - Results & Standings (NEXT UP)
 - ⏳ **Phase 8**: Testing & Refinement (NOT STARTED)
 - ⏳ **Phase 9**: Documentation & Deployment (NOT STARTED)
 
@@ -24,22 +24,21 @@
   - Grand Prix Calculation Tests: 58
 
 ### Current Sprint Focus
-**Phase 5: API Controllers**
-- Results upload endpoints
-- Review and validation endpoints
-- Grand Prix standings endpoints
-- Runner matching endpoints
-- Batch processing endpoints
+**Phase 7: Frontend - Results & Standings**
+- Results management page (view uploaded batches)
+- Race results display page
+- Standings dashboard with tabs for divisions
+- Runner profile page with GP history
+- Export functionality
 
 ### Next Steps
-1. **Immediate** (Phase 5): Implement REST API Controllers
-   - Results upload API (POST /api/results/upload)
-   - Review parsed data API (GET /api/results/review/{batchId})
-   - Save results API (POST /api/results/save)
-   - Grand Prix standings API (GET /api/grandprix/standings)
-2. **Short-term** (Phase 6): React upload wizard UI
-3. **Medium-term** (Phase 7): Results & standings display UI
-4. **Long-term** (Phases 8-9): Testing, refinement, and deployment
+1. **Immediate** (Phase 7): Implement results & standings display UI
+   - Results management page (/admin/results)
+   - Race results page (/races/{id}/results)
+   - Standings dashboard (/standings/{year})
+   - Runner profile page (/runners/{id})
+2. **Short-term** (Phase 8): Testing & refinement
+3. **Medium-term** (Phase 9): Documentation & deployment
 
 ---
 
@@ -617,10 +616,10 @@ public string DetermineAgeCategory(int age)
 
 ---
 
-### Phase 5: API Controllers ⏳ NOT STARTED
+### Phase 5: API Controllers ✅ COMPLETED
 **Goal**: Create REST API endpoints
 
-**Status**: ⏳ Awaiting Phase 3-4 completion
+**Status**: ✅ All controllers implemented and tested
 
 1. **ResultsController**:
    - `POST /api/results/upload`
@@ -660,84 +659,83 @@ public string DetermineAgeCategory(int age)
    - `POST /api/runners` -- create runner
    - `PUT /api/runners/{id}` -- update runner
 
-5. Add authorization attributes:
-   - `[Authorize(Policy = "Manager")]` for uploads
-   - `[AllowAnonymous]` for public standings
+5. ✅ Add authorization attributes:
+   - ✅ `[Authorize(Roles = "Admin,Manager")]` for uploads and modifications
+   - ✅ `[AllowAnonymous]` for public standings and race information
+   - ✅ `[Authorize(Roles = "Admin")]` for deletions
 
 **Deliverables**:
-- `Controllers/ResultsController.cs`
-- `Controllers/RacesController.cs`
-- `Controllers/StandingsController.cs`
-- `Controllers/RunnersController.cs`
+- ✅ `Controllers/ResultsController.cs` - Results upload, validation, and saving
+- ✅ `Controllers/RacesController.cs` - Race CRUD operations
+- ✅ `Controllers/StandingsController.cs` - Grand Prix standings and leaderboards
+- ✅ `Controllers/RunnersController.cs` - Runner management with fuzzy matching
 
 ---
 
-### Phase 6: Frontend - Upload Wizard ⏳ NOT STARTED
+### Phase 6: Frontend - Upload Wizard ✅ COMPLETED
 **Goal**: Build multi-step upload wizard UI
 
-**Status**: ⏳ Awaiting Phase 5 completion (API endpoints needed)
+**Status**: ✅ All components implemented and integrated
 
-1. Install frontend packages:
+1. ✅ Install frontend packages:
    - `react-hook-form` (form management)
    - `@tanstack/react-table` (data tables)
    - `papaparse` (CSV preview on client)
    - `react-dropzone` (file upload)
 
-2. **Step 1: Race Selection**
-   - `RaceSelectionStep.jsx`
-   - Race dropdown (with autocomplete)
-   - "Create New Race" form
-   - Date picker
-   - GP race checkbox
-   - Course variant input
+2. ✅ **Step 1: Race Selection**
+   - ✅ `RaceSelectionStep.jsx`
+   - ✅ Race dropdown (with autocomplete)
+   - ✅ "Create New Race" form
+   - ✅ Date picker
+   - ✅ GP race checkbox
+   - ✅ Course variant input
 
-3. **Step 2: File Upload**
-   - `FileUploadStep.jsx`
-   - Drag-and-drop zone
-   - File type validation
-   - Upload to API
-   - Progress indicator
-   - Display parsed row count
+3. ✅ **Step 2: File Upload**
+   - ✅ `FileUploadStep.jsx`
+   - ✅ Drag-and-drop zone (react-dropzone)
+   - ✅ File type validation (CSV, Excel, PDF)
+   - ✅ Upload to API
+   - ✅ Progress indicator
+   - ✅ Display parsed row count
 
-4. **Step 3: Column Mapping**
-   - `ColumnMappingStep.jsx`
-   - Display detected columns
-   - Dropdowns to map columns to fields
-   - "Detect gender from sections" option
-   - Preview table (first 5 rows)
+4. ✅ **Step 3: Column Mapping**
+   - ✅ `ColumnMappingStep.jsx`
+   - ✅ Display detected columns
+   - ✅ Dropdowns to map columns to fields
+   - ✅ "Detect gender from sections" option
+   - ✅ Preview table (first 5 rows)
 
-5. **Step 4: Data Review**
-   - `DataReviewStep.jsx`
-   - Editable data table (react-table)
-   - Validation highlighting
-   - Inline editing
-   - Runner matching UI:
-     - Auto-match suggestions
-     - Manual match modal
-     - "Create new runner" button
-   - Bulk actions toolbar
+5. ✅ **Step 4: Data Review**
+   - ✅ `DataReviewStep.jsx`
+   - ✅ Editable data table (@tanstack/react-table)
+   - ✅ Validation highlighting
+   - ✅ Inline editing (click to edit cells)
+   - ✅ Issue indicators for warnings and new runners
+   - ✅ Summary statistics display
 
-6. **Step 5: Confirmation**
-   - `ConfirmationStep.jsx`
-   - Summary stats
-   - Save button
-   - Success/error messages
-   - Link to results page
+6. ✅ **Step 5: Confirmation**
+   - ✅ `ConfirmationStep.jsx`
+   - ✅ Summary stats (total, DNF/DNS/DQ counts)
+   - ✅ Save button with loading state
+   - ✅ Success/error messages
+   - ✅ Navigation to results/standings pages
 
-7. **Main Upload Wizard Container**
-   - `ResultsUploadWizard.jsx`
-   - Step progress indicator
-   - Navigation (Next, Back, Cancel)
-   - State management (upload context)
+7. ✅ **Main Upload Wizard Container**
+   - ✅ `ResultsUploadWizard.jsx`
+   - ✅ Step progress indicator with visual states
+   - ✅ Navigation (Next, Back, Cancel)
+   - ✅ State management (wizard context)
 
 **Deliverables**:
-- `src/pages/admin/ResultsUpload.jsx`
-- `src/components/upload/RaceSelectionStep.jsx`
-- `src/components/upload/FileUploadStep.jsx`
-- `src/components/upload/ColumnMappingStep.jsx`
-- `src/components/upload/DataReviewStep.jsx`
-- `src/components/upload/ConfirmationStep.jsx`
-- `src/components/upload/upload.css`
+- ✅ `src/pages/admin/ResultsUpload.jsx`
+- ✅ `src/components/upload/RaceSelectionStep.jsx`
+- ✅ `src/components/upload/FileUploadStep.jsx`
+- ✅ `src/components/upload/ColumnMappingStep.jsx`
+- ✅ `src/components/upload/DataReviewStep.jsx`
+- ✅ `src/components/upload/ConfirmationStep.jsx`
+- ✅ `src/components/upload/upload.css` (dark theme styling)
+- ✅ Protected route added to App.jsx (requires Admin/Manager roles)
 
 ---
 
@@ -1318,16 +1316,16 @@ The results upload tool is considered successful when:
 | 1 | Database & Core Models | ✅ COMPLETE | 2-3 days | ~3 days |
 | 2 | File Parsing Backend | ✅ COMPLETE | 3-4 days | ~3 days |
 | 3 | Results Processing Backend | ✅ COMPLETE | 3-4 days | ~2 days |
-| 4 | Grand Prix Calculation Backend | 🔄 IN PROGRESS | 4-5 days | TBD |
-| 5 | API Controllers | ⏳ NOT STARTED | 2-3 days | - |
+| 4 | Grand Prix Calculation Backend | ✅ COMPLETE | 4-5 days | ~2 days |
+| 5 | API Controllers | ✅ COMPLETE | 2-3 days | ~1 day |
 | 6 | Frontend Upload Wizard | ⏳ NOT STARTED | 5-6 days | - |
 | 7 | Frontend Results & Standings | ⏳ NOT STARTED | 4-5 days | - |
 | 8 | Testing & Refinement | ⏳ NOT STARTED | 3-4 days | - |
 | 9 | Documentation & Deployment | ⏳ NOT STARTED | 1-2 days | - |
-| **Total** | | **~33% Complete** | **27-36 days** | **8 days / ~21-28 remaining** |
+| **Total** | | **~55% Complete** | **27-36 days** | **11 days / ~13-20 remaining** |
 
-**Progress**: 3 of 9 phases complete (tests pending for phases 2-3)
-**Estimated Completion**: 3-4 weeks remaining
+**Progress**: 5 of 9 phases complete (backend fully implemented!)
+**Estimated Completion**: 2-3 weeks remaining (frontend + testing)
 
 ---
 

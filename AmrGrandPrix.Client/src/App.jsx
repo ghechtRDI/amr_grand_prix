@@ -11,6 +11,7 @@ import RegisterForm from './components/auth/RegisterForm';
 import EmailConfirmation from './components/auth/EmailConfirmation';
 import Home from './pages/Home';
 import Unauthorized from './pages/Unauthorized';
+import ResultsUpload from './pages/admin/ResultsUpload';
 import './App.css';
 
 function App() {
@@ -30,6 +31,16 @@ function App() {
             element={
               <ProtectedRoute>
                 <Home />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Admin routes - requires Manager or Admin role */}
+          <Route
+            path="/admin/results/upload"
+            element={
+              <ProtectedRoute roles={['Admin', 'Manager']}>
+                <ResultsUpload />
               </ProtectedRoute>
             }
           />
