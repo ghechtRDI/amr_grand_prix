@@ -66,15 +66,10 @@ export const login = async (credentials) => {
   if (data.accessToken && data.refreshToken) {
     tokenService.setTokens(data.accessToken, data.refreshToken);
 
-    // Store user data
-    const user = {
-      id: data.userId,
-      email: data.email,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      roles: data.roles,
-    };
-    tokenService.setUser(user);
+    // Store user data (from nested user object in response)
+    if (data.user) {
+      tokenService.setUser(data.user);
+    }
   }
 
   return data;

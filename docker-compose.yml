@@ -82,6 +82,18 @@ services:
       - amr-network
     restart: unless-stopped
 
+  # Ollama for local LLM inference (dev only; prod uses Anthropic API)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: amr-ollama-dev
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - amr-network
+    restart: unless-stopped
+
 networks:
   amr-network:
     driver: bridge
@@ -92,3 +104,5 @@ volumes:
     name: amr-postgres-data
   nuget-cache:
     name: amr-nuget-cache
+  ollama-data:
+    name: amr-ollama-data

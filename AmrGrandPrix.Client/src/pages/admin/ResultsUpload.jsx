@@ -1,46 +1,54 @@
 /**
  * Results Upload Wizard
- * Multi-step wizard for uploading and processing race results
+ * Multi-step wizard: Race Selection → File Upload → Data Review → Confirmation
  */
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import RaceSelectionStep from '../../components/upload/RaceSelectionStep';
-import FileUploadStep from '../../components/upload/FileUploadStep';
-import ColumnMappingStep from '../../components/upload/ColumnMappingStep';
-import DataReviewStep from '../../components/upload/DataReviewStep';
-import ConfirmationStep from '../../components/upload/ConfirmationStep';
+import FileUploadStep    from '../../components/upload/FileUploadStep';
+import DataReviewStep    from '../../components/upload/DataReviewStep';
+import ConfirmationStep  from '../../components/upload/ConfirmationStep';
 import '../../components/upload/upload.css';
 
 const STEPS = [
-  { id: 1, name: 'Race Selection', component: RaceSelectionStep },
-  { id: 2, name: 'File Upload', component: FileUploadStep },
-  { id: 3, name: 'Column Mapping', component: ColumnMappingStep },
-  { id: 4, name: 'Data Review', component: DataReviewStep },
-  { id: 5, name: 'Confirmation', component: ConfirmationStep },
+  { id: 'race-selection', name: 'Race Selection', component: RaceSelectionStep },
+  { id: 'file-upload',    name: 'File Upload',    component: FileUploadStep    },
+  { id: 'data-review',    name: 'Data Review',    component: DataReviewStep    },
+  { id: 'confirmation',   name: 'Confirmation',   component: ConfirmationStep  },
 ];
 
 export default function ResultsUpload() {
-  const [currentStep, setCurrentStep] = useState(1);
-  const [wizardData, setWizardData] = useState({});
+  const [currentStepId, setCurrentStepId] = useState('race-selection');
+  const [wizardData, setWizardData]       = useState({});
   const navigate = useNavigate();
+
+  const currentIndex        = STEPS.findIndex(s => s.id === currentStepId);
+  const CurrentStepComponent = STEPS[currentIndex]?.component;
 
   const handleNext = (stepData) => {
     setWizardData(prev => ({ ...prev, ...stepData }));
-    setCurrentStep(prev => Math.min(prev + 1, STEPS.length));
+    const nextIndex = currentIndex + 1;
+    if (nextIndex < STEPS.length) setCurrentStepId(STEPS[nextIndex].id);
   };
 
   const handleBack = () => {
-    setCurrentStep(prev => Math.max(prev - 1, 1));
+    if (currentIndex > 0) setCurrentStepId(STEPS[currentIndex - 1].id);
   };
 
   const handleCancel = () => {
-    if (window.confirm('Are you sure you want to cancel? All progress will be lost.')) {
+    if (window.confirm('Are you sure you want to cancel? All progress will be lost.'))
       navigate('/');
-    }
   };
 
-  const CurrentStepComponent = STEPS[currentStep - 1].component;
+  if (!CurrentStepComponent) return null;
+
+  const stepProps = {
+    wizardData: { ...wizardData, totalSteps: STEPS.length },
+    onNext:   handleNext,
+    onBack:   handleBack,
+    onCancel: handleCancel,
+  };
 
   return (
     <div className="results-upload-page">
@@ -52,15 +60,15 @@ export default function ResultsUpload() {
               <div
                 key={step.id}
                 className={`progress-step ${
-                  step.id === currentStep
+                  step.id === currentStepId
                     ? 'active'
-                    : step.id < currentStep
+                    : idx < currentIndex
                       ? 'completed'
                       : ''
                 }`}
               >
                 <div className="step-number">
-                  {step.id < currentStep ? '✓' : step.id}
+                  {idx < currentIndex ? '✓' : idx + 1}
                 </div>
                 <div className="step-name">{step.name}</div>
                 {idx < STEPS.length - 1 && <div className="step-connector" />}
@@ -70,12 +78,7 @@ export default function ResultsUpload() {
         </div>
 
         <div className="upload-content">
-          <CurrentStepComponent
-            wizardData={wizardData}
-            onNext={handleNext}
-            onBack={handleBack}
-            onCancel={handleCancel}
-          />
+          <CurrentStepComponent {...stepProps} />
         </div>
       </div>
     </div>

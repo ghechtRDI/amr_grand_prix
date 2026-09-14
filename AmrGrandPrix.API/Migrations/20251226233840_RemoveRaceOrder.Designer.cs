@@ -3,6 +3,7 @@ using System;
 using AmrGrandPrix.API.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AmrGrandPrix.API.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251226233840_RemoveRaceOrder")]
+    partial class RemoveRaceOrder
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -232,8 +235,8 @@ namespace AmrGrandPrix.API.Migrations
                     b.Property<string>("CreatedBy")
                         .HasColumnType("text");
 
-                    b.Property<DateOnly>("Date")
-                        .HasColumnType("date");
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("IsGrandPrixRace")
                         .HasColumnType("boolean");
@@ -393,20 +396,8 @@ namespace AmrGrandPrix.API.Migrations
                     b.Property<int>("FileType")
                         .HasColumnType("integer");
 
-                    b.Property<int>("LlmInputTokens")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("LlmModel")
-                        .HasColumnType("text");
-
-                    b.Property<int>("LlmOutputTokens")
-                        .HasColumnType("integer");
-
                     b.Property<Guid>("RaceId")
                         .HasColumnType("uuid");
-
-                    b.Property<string>("RawLlmJson")
-                        .HasColumnType("text");
 
                     b.Property<int>("RecordsUploaded")
                         .HasColumnType("integer");

@@ -100,7 +100,7 @@ export const RegisterForm = () => {
       } else {
         setRegisterError(result.error || 'Registration failed. Please try again.');
       }
-    } catch (error) {
+    } catch {
       setRegisterError('An error occurred. Please try again.');
     } finally {
       setIsSubmitting(false);

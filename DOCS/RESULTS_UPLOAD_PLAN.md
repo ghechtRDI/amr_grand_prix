@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-**Last Updated**: December 20, 2024
+**Last Updated**: April 28, 2026
 
 ### Progress Overview
 - ✅ **Phase 1**: Database & Core Models (COMPLETED)
@@ -11,7 +11,7 @@
 - ✅ **Phase 4**: Grand Prix Calculation Backend (COMPLETED + TESTED)
 - ✅ **Phase 5**: API Controllers (COMPLETED)
 - ✅ **Phase 6**: Frontend - Upload Wizard (COMPLETED)
-- 🔄 **Phase 7**: Frontend - Results & Standings (NEXT UP)
+- 🔄 **Phase 7**: Frontend - Results & Standings (IN PROGRESS)
 - ⏳ **Phase 8**: Testing & Refinement (NOT STARTED)
 - ⏳ **Phase 9**: Documentation & Deployment (NOT STARTED)
 
@@ -25,25 +25,23 @@
 
 ### Current Sprint Focus
 **Phase 7: Frontend - Results & Standings**
-- Results management page (view uploaded batches)
-- Race results display page
-- Standings dashboard with tabs for divisions
-- Runner profile page with GP history
-- Export functionality
+- Standings dashboard (`/standings/:year`)
+- Race results display page (`/races/:raceId/results`)
+- Results management page for admins (`/admin/results`)
+- Navigation links from Home page
 
 ### Next Steps
 1. **Immediate** (Phase 7): Implement results & standings display UI
-   - Results management page (/admin/results)
-   - Race results page (/races/{id}/results)
-   - Standings dashboard (/standings/{year})
-   - Runner profile page (/runners/{id})
+   - Standings dashboard (/standings/:year)
+   - Race results page (/races/:raceId/results)
+   - Admin results management (/admin/results)
 2. **Short-term** (Phase 8): Testing & refinement
 3. **Medium-term** (Phase 9): Documentation & deployment
 
 ---
 
 ## Overview
-A comprehensive results upload and management system for Alaska Mountain Runners Grand Prix races. The tool allows Managers and Admins to upload race results in various formats (CSV, Excel, PDF), review and validate the data, and automatically calculate Grand Prix standings.
+A comprehensive results upload and management system for Alaska Mountain Runners Grand Prix races. The tool allows Managers and Admins to upload race results in CSV/Excel format or by pasting text, review and validate the data, and automatically calculate Grand Prix standings.
 
 ## Table of Contents
 - [Core Requirements](#core-requirements)
@@ -60,15 +58,16 @@ A comprehensive results upload and management system for Alaska Mountain Runners
 ## Core Requirements
 
 ### Functional Requirements
-1. **File Upload**
-   - Accept CSV, Excel (.xlsx, .xls), and PDF files
-   - Parse various column header formats
+1. **File Upload / Text Paste**
+   - Accept CSV and Excel (.xlsx, .xls) file uploads
+   - Accept pasted text (tab- or comma-separated) — replaces PDF support
+   - Paste modes: single mixed-gender block, or separate male/female blocks
    - Required fields: Name, Age, Place, Time, Gender
    - Optional fields: Bib, Category, Notes
 
 2. **Data Parsing**
    - Intelligent header detection (case-insensitive, flexible naming)
-   - Handle gender from row data OR section headers (e.g., "MALE RESULTS")
+   - Handle gender from row data OR from pasted-gender-block mode
    - Parse times in various formats (HH:MM:SS, MM:SS, H:MM:SS.mmm)
    - Handle DNF (Did Not Finish), DNS (Did Not Start), DQ (Disqualified)
 
@@ -89,7 +88,7 @@ A comprehensive results upload and management system for Alaska Mountain Runners
    - Automatically calculate GP points for GP races
    - Update overall standings after results save
    - Handle Open Division (Top 20, FIS scoring)
-   - Handle Age Division (Top 5, simplified scoring)
+   - Handle Age Division (Top 5, simplified scoring) — supports specific ages and age group categories
    - Count best 4 races per runner
    - Track "Run the Gamut" qualification (7 of 9 races)
 
@@ -257,7 +256,7 @@ A comprehensive results upload and management system for Alaska Mountain Runners
 - UploadBatchId (PK, GUID)
 - RaceId (FK, required)
 - FileName (string, required)
-- FileType (enum: CSV, Excel, PDF)
+- FileType (enum: CSV, Excel, Text)
 - RecordsUploaded (int)
 - UploadedBy (userId, FK)
 - UploadedAt (datetime)
@@ -272,858 +271,215 @@ A comprehensive results upload and management system for Alaska Mountain Runners
 
 #### 1. **File Parsing Service**
 - `IFileParserService`
-  - `ParseCsv(Stream file)`
-  - `ParseExcel(Stream file)`
-  - `ParsePdf(Stream file)`
+  - `ParseAsync(Stream file, string filename)`
 - Returns: `List<RawResultRow>`
 
+> **Note**: PDF parsing was evaluated and dropped due to the complexity of extracting structured data from varied PDF layouts. Instead, a text-paste workflow was implemented (see below).
+
 **Libraries:**
-- CSV: CsvHelper
-- Excel: ClosedXML or EPPlus
-- PDF: iTextSharp or PDFPig (for text extraction)
+- CSV/Text: CsvHelper (handles comma and tab delimiters via auto-detection)
+- Excel: ClosedXML
 
-#### 2. **Results Processing Service**
+#### 2. **Text Paste Endpoint** (`/api/results/parse-text`)
+- Accepts raw text content (tab- or comma-separated) with an optional gender override
+- Routes through `CsvParserService` (auto-delimiter detection)
+- Caller can submit male and female blocks separately; results are merged by the frontend
+- Cached results keyed by `UploadBatchId` via `IMemoryCache` (30-min TTL)
+
+#### 3. **Results Processing Service**
 - `IResultsProcessingService`
-  - `NormalizeHeaders(RawResultRow[])`
-  - `DetectGenderFromSections(RawResultRow[])`
-  - `ParseTime(string timeString)`
-  - `ValidateResults(ResultRow[])`
-  - `MatchRunners(ResultRow[])` -- match to existing runners
-  - `CreateNewRunners(ResultRow[])` -- for new runners
+  - `ProcessResultsAsync(RawResultRow[])` — normalize, validate, detect gender
+  - `ValidateRow(ResultRow)` — re-validate a single row
 
-#### 3. **Grand Prix Calculation Service**
+#### 4. **Grand Prix Calculation Service**
 - `IGrandPrixCalculationService`
-  - `CalculateRacePoints(RaceId raceId)` -- after results saved
-  - `CalculateOpenDivisionPoints(RaceResults[])`
-  - `CalculateAgeDivisionPoints(RaceResults[])`
-  - `UpdateStandings(int year)`
-  - `ApplyRecordBonus(RunnerId, RaceId)`
-  - `DetermineAgeCategory(int age)`
+  - `CalculateRacePointsAsync(RaceId)` — after results saved
+  - `UpdateStandingsAsync(int year)` — recalculate season standings
+- Supports both specific ages and age group categories (e.g., runners categorized into "30-39")
 
-#### 4. **Results Upload Controller**
-- `POST /api/results/upload` -- upload file, return parsed data
-- `POST /api/results/validate` -- validate parsed data
-- `POST /api/results/save` -- save to database
-- `GET /api/results/race/{raceId}` -- get results for race
-- `DELETE /api/results/batch/{batchId}` -- delete upload batch
+#### 5. **Results Upload Controller**
+- `POST /api/results/upload` — upload CSV/Excel file, return parsed data
+- `POST /api/results/parse-text` — parse pasted text, return parsed data
+- `POST /api/results/validate` — validate parsed data
+- `POST /api/results/save` — save to database
+- `GET /api/results/race/{raceId}` — get results for race
+- `GET /api/results/batches` — list upload batches (admin)
+- `DELETE /api/results/batch/{batchId}` — delete upload batch
 
-#### 5. **Races Controller**
-- `GET /api/races` -- list all races
-- `GET /api/races/grandprix/{year}` -- GP races for year
-- `POST /api/races` -- create new race
-- `PUT /api/races/{id}` -- update race
+#### 6. **Races Controller**
+- `GET /api/races` — list all races
+- `GET /api/races/{year}` — races for year
+- `GET /api/races/detail/{id}` — get single race
+- `POST /api/races` — create race
+- `PUT /api/races/{id}` — update race
+- `DELETE /api/races/{id}` — delete race (no results only)
 
-#### 6. **Standings Controller**
-- `GET /api/standings/{year}` -- all standings for year
-- `GET /api/standings/{year}/open/male` -- open male standings
-- `GET /api/standings/{year}/age/{category}` -- age category standings
-- `GET /api/standings/runner/{runnerId}` -- runner's GP history
+#### 7. **Standings Controller**
+- `GET /api/standings/{year}` — all standings for year
+- `GET /api/standings/{year}/open/{gender}` — open male/female standings
+- `GET /api/standings/{year}/age/{category}/{gender}` — age category standings
+- `GET /api/standings/runner/{runnerId}` — runner's GP history
+- `GET /api/standings/years` — years with data
+- `GET /api/standings/{year}/categories` — age categories for year
+- `POST /api/standings/{year}/recalculate` — manual recalc
 
 ### Frontend Components
 
-#### 1. **Upload Wizard** (Multi-step Component)
+#### 1. **Upload Wizard** (`pages/admin/ResultsUpload.jsx`) ✅
+Multi-step wizard: Race Selection → Input Method → Column Mapping → Data Review → Confirmation
 
-**Step 1: Race Selection**
-- Dropdown: Select existing race OR create new race
-- Race details form:
-  - Race name (autocomplete from GP race list)
-  - Date
-  - Is Grand Prix race? (checkbox)
-  - Course variant (if applicable)
+**Step 2: Input Method** (replaces old "File Upload" step)
+- Method toggle: "Upload File" or "Paste Text"
+- File upload: drag-and-drop for CSV/Excel (PDF no longer supported)
+- Paste text: supports "All genders in one block" or "Separate by gender"
+  - Separate-by-gender allows submitting male and female result blocks independently, each with their own header row
 
-**Step 2: File Upload**
-- File picker (CSV, Excel, PDF)
-- Drag-and-drop support
-- File type detection
-- Upload progress indicator
-- Initial parsing
+#### 2. **Standings Dashboard** (`pages/Standings.jsx`) 🔄
+- `/standings/:year` (defaults to current year)
+- Year selector
+- Division navigation: Open (Male/Female) and Age Divisions (category + gender selector)
+- Standings table: rank, name, total points, races completed, run the gamut badge
+- Points breakdown per runner expandable
 
-**Step 3: Data Mapping**
-- Display detected columns
-- Map columns to required fields:
-  - Name → dropdown (select column)
-  - Age → dropdown
-  - Place → dropdown
-  - Time → dropdown
-  - Gender → dropdown OR "Detect from sections"
-  - Bib (optional) → dropdown
-- Preview first 5 rows with mappings
+#### 3. **Race Results Page** (`pages/RaceResults.jsx`) 🔄
+- `/races/:raceId/results`
+- Race header: name, date, location, GP badge
+- Results table: place, name, age, gender, time, status
+- GP points column if race is a Grand Prix race
 
-**Step 4: Data Review & Validation**
-- Editable data table (React Table or AG Grid)
-- Validation indicators:
-  - ⚠️ Missing required data (red highlight)
-  - ⚠️ Invalid time format
-  - ⚠️ Possible duplicate
-  - ℹ️ New runner (not in database)
-- Inline editing
-- Bulk actions:
-  - Fix gender for all rows
-  - Apply DNF/DNS status
-- Runner matching:
-  - Auto-match by name (fuzzy matching)
-  - Manual match to existing runners
-  - Create new runner profiles
-
-**Step 5: Confirmation & Save**
-- Summary:
-  - Race: [Name] on [Date]
-  - Total results: X
-  - New runners: Y
-  - Issues resolved: Z
-- Save button (with loading state)
-- Success message with link to results page
-
-#### 2. **Results Management Page**
+#### 4. **Admin Results Management** (`pages/admin/ResultsManagement.jsx`) 🔄
 - `/admin/results`
-- Table of uploaded batches
-- Filters: Year, Race, Uploaded By
-- Actions: View, Edit, Delete
-- Grand Prix recalculation trigger
-
-#### 3. **Standings Dashboard**
-- `/standings/{year}`
-- Tabs: Open Male, Open Female, Age Divisions
-- Sortable table
-- Highlight: Current leader, Run the Gamut qualifiers
-- Export to PDF/Excel
+- Table of races with result counts
+- Navigate to race results
+- Delete upload batches
+- Trigger GP recalculation
 
 ---
 
 ## Implementation Phases
 
 ### Phase 1: Database & Core Models ✅ COMPLETED
-**Goal**: Set up database schema and entity models
-
-**Status**: ✅ All tasks completed
-
-1. ✅ Create entity models:
-   - ✅ Race, Runner, RaceResult, GrandPrixPoints, GrandPrixStanding, UploadBatch
-2. ✅ Create DbContext and migrations
-3. ✅ Seed data:
-   - ✅ 9 Grand Prix races (template for each year) - RaceSeedingService implemented
-   - ✅ Age categories configuration (in models)
-   - ⏳ Scoring tables (Open & Age division) - will be in calculation service
-4. ✅ Create DTOs for API contracts
-5. ✅ Add validation attributes
-
-**Deliverables**:
-- ✅ `Models/Race.cs`, `Runner.cs`, `RaceResult.cs`, etc.
-- ✅ `Data/ApplicationDbContext.cs` (includes GP models)
-- ✅ Migration: `20251127153755_AddRaceResultsTables`
-- ✅ Seed data script: `Services/RaceSeedingService.cs`
-- ✅ DTOs: `Models/DTOs/RaceDto.cs`, `RunnerDto.cs`, `RaceResultDto.cs`, `StandingsDto.cs`
-
----
 
 ### Phase 2: File Parsing Backend ✅ COMPLETED
-**Goal**: Parse CSV, Excel, PDF files
 
-**Status**: ✅ Implementation complete, ⏳ tests pending
+**Actual deliverables** (differs from original plan):
+- ✅ `CsvParserService.cs` — handles CSV and pasted text (auto-delimiter detection)
+- ✅ `ExcelParserService.cs` — .xlsx and .xls
+- ✅ `FileParserFactory.cs` — routes by file extension
+- ❌ `PdfParserService.cs` — **REMOVED**: PDF parsing dropped in favor of text-paste workflow
+- ✅ `ResultsController` — added `POST /api/results/parse-text` endpoint for pasted text
 
-1. ✅ Install NuGet packages:
-   - ✅ CsvHelper
-   - ✅ ClosedXML
-   - ✅ UglyToad.PdfPig
-2. ✅ Create `IFileParserService` interface
-3. ✅ Implement `CsvParserService`
-   - ✅ Handle various delimiters (comma, tab, semicolon) - auto-detection enabled
-   - ✅ Detect headers
-   - ✅ Parse to `RawResultRow` list
-   - ✅ Section header detection for gender
-4. ✅ Implement `ExcelParserService`
-   - ✅ Support .xlsx and .xls
-   - ✅ Detect active sheet
-   - ✅ Parse to `RawResultRow` list
-   - ✅ Section header detection
-5. ✅ Implement `PdfParserService`
-   - ✅ Extract text from PDF
-   - ✅ Detect table structure
-   - ✅ Handle section headers (for gender detection)
-   - ✅ Parse to `RawResultRow` list
-6. ✅ Implement `FileParserFactory` for selecting correct parser
-7. ✅ Register services in Program.cs
-8. ⏳ Create unit tests for each parser (TODO)
-
-**Deliverables**:
-- ✅ `Services/FileParser/IFileParserService.cs`
-- ✅ `Services/FileParser/CsvParserService.cs`
-- ✅ `Services/FileParser/ExcelParserService.cs`
-- ✅ `Services/FileParser/PdfParserService.cs`
-- ✅ `Services/FileParser/FileParserFactory.cs`
-- ✅ `Models/DTOs/RaceResults/RawResultRow.cs`
-- ⏳ `Tests/FileParserTests.cs` (pending)
-
-**Sample Data Models**:
-```csharp
-public class RawResultRow
-{
-    public Dictionary<string, string> Columns { get; set; }
-    public int RowNumber { get; set; }
-    public string? SectionHeader { get; set; } // e.g., "MALE RESULTS"
-}
-
-public class ResultRow
-{
-    public string Name { get; set; }
-    public int? Age { get; set; }
-    public int? Place { get; set; }
-    public string? TimeString { get; set; }
-    public TimeSpan? Time { get; set; }
-    public Gender? Gender { get; set; }
-    public int? Bib { get; set; }
-    public ResultStatus Status { get; set; } // Finished, DNF, DNS, DQ
-    public List<ValidationIssue> Issues { get; set; }
-}
-
-public enum ResultStatus
-{
-    Finished,
-    DNF,
-    DNS,
-    DQ
-}
-```
+**Why PDF was dropped**: PDF layouts vary too much between race organizers (scanned images, columnar PDFs, HTML-to-PDF exports). A copy-paste workflow is simpler, handles all source formats, and lets the user correct any parsing issues before they enter the review step.
 
 ---
 
 ### Phase 3: Results Processing Backend ✅ COMPLETED
-**Goal**: Normalize, validate, and process parsed data
-
-**Status**: ✅ All tasks completed
-
-1. ✅ Create `IResultsProcessingService` interface
-2. ✅ Implement header normalization:
-   - ✅ Map "First Name" / "Firstname" / "F Name" → "Name"
-   - ✅ Map "Age" / "Ag" / "AGE" → "Age"
-   - ✅ Map "Finish Time" / "Time" / "Clock Time" → "Time"
-   - ✅ Flexible pattern matching for various header formats
-3. ✅ Implement time parsing:
-   - ✅ Handle formats: "1:23:45", "23:45", "1:23:45.123"
-   - ✅ Handle "DNF", "DNS", "DQ"
-   - ✅ Support multiple time format patterns
-4. ✅ Implement gender detection:
-   - ✅ From column (if present)
-   - ✅ From section headers ("MALE RESULTS", "Female", etc.)
-5. ✅ Implement validation:
-   - ✅ Required fields present
-   - ✅ Valid time format
-   - ✅ Age in reasonable range (5-100)
-   - ✅ DNF/DNS/DQ status handling
-6. ✅ Implement runner matching:
-   - ✅ Fuzzy name matching (Levenshtein distance algorithm)
-   - ✅ Match by name + age (within 2 year tolerance)
-   - ✅ Match by name + gender + approximate age
-   - ✅ Confidence scoring system
-   - ✅ Auto-match for high confidence (>95%)
-7. ✅ Register services in Program.cs
-8. ⏳ Create unit tests (pending)
-
-**Deliverables**:
-- ✅ `Services/ResultsProcessing/IResultsProcessingService.cs`
-- ✅ `Services/ResultsProcessing/ResultsProcessingService.cs`
-- ✅ `Services/ResultsProcessing/IRunnerMatchingService.cs`
-- ✅ `Services/ResultsProcessing/RunnerMatchingService.cs`
-- ✅ `Models/DTOs/RaceResults/RunnerMatchDto.cs`
-- ⏳ `Tests/ResultsProcessingTests.cs` (pending)
-
-**Dependencies**:
-- ✅ Phase 1 complete (models exist)
-- ✅ Phase 2 complete (parsers ready)
-- ✅ ResultRow DTO created
 
 ---
 
-### Phase 4: Grand Prix Calculation Backend ⏳ NOT STARTED
-**Goal**: Calculate GP points and standings
+### Phase 4: Grand Prix Calculation Backend ✅ COMPLETED
 
-**Status**: ⏳ Awaiting Phase 3 completion
-
-1. Create `IGrandPrixCalculationService`
-2. Implement scoring tables:
-   - Open Division: FIS Continental Cup (1st=100, 2nd=90, 3rd=85, etc.)
-   - Age Division: Simple (1st=5, 2nd=4, 3rd=3, 2nd=2, 5th=1)
-3. Implement point calculation:
-   - `CalculateOpenDivisionPoints()`
-     - Sort by place within gender
-     - Assign points to Top 20
-     - Check for record bonus
-   - `CalculateAgeDivisionPoints()`
-     - Determine age category
-     - Sort by place within age category + gender
-     - Assign points to Top 5
-4. Implement standings calculation:
-   - Sum all race points per runner
-   - Take best 4 races
-   - Apply tiebreaker rules (best race, then 2nd best, etc.)
-   - Calculate rank
-   - Determine "Run the Gamut" qualification
-5. Implement recalculation on data change:
-   - When results added/edited/deleted
-   - Recalculate affected year's standings
-6. Create unit tests with sample race data
-
-**Deliverables**:
-- `Services/GrandPrixCalculationService.cs`
-- `Tests/GrandPrixCalculationTests.cs`
-
-**Key Algorithms**:
-```csharp
-// Open Division Points
-public int CalculateOpenPoints(int place)
-{
-    return place switch
-    {
-        1 => 100,
-        2 => 90,
-        3 => 85,
-        4 => 80,
-        5 => 75,
-        6 => 70, // Need to verify full table
-        7 => 65,
-        // ... continue to 20
-        _ => 0
-    };
-}
-
-// Age Division Points
-public int CalculateAgePoints(int place)
-{
-    return place switch
-    {
-        1 => 5,
-        2 => 4,
-        3 => 3,
-        4 => 2,
-        5 => 1,
-        _ => 0
-    };
-}
-
-// Determine Age Category
-public string DetermineAgeCategory(int age)
-{
-    if (age <= 17) return "17 and Under";
-    if (age <= 29) return "19-29";
-    if (age <= 39) return "30-39";
-    if (age <= 49) return "40-49";
-    if (age <= 59) return "50-59";
-    if (age <= 69) return "60-69";
-    if (age <= 79) return "70-79";
-    return "80-89";
-}
-```
+**Age division support**: Results include both a specific `Age` field and a computed age category (e.g., "30-39"). The `GrandPrixCalculationService` determines the appropriate age bracket from the runner's age at race time and assigns age division points accordingly.
 
 ---
 
 ### Phase 5: API Controllers ✅ COMPLETED
-**Goal**: Create REST API endpoints
-
-**Status**: ✅ All controllers implemented and tested
-
-1. **ResultsController**:
-   - `POST /api/results/upload`
-     - Accept file upload
-     - Parse file
-     - Return parsed data + validation issues
-   - `POST /api/results/validate`
-     - Accept corrected data
-     - Re-validate
-     - Return validation status
-   - `POST /api/results/save`
-     - Save results to database
-     - Trigger GP calculation if GP race
-     - Return success + result IDs
-   - `GET /api/results/race/{raceId}`
-     - Get all results for race
-   - `DELETE /api/results/batch/{batchId}`
-     - Delete entire upload batch
-
-2. **RacesController**:
-   - `GET /api/races` -- list all races
-   - `GET /api/races/{year}` -- races for year
-   - `POST /api/races` -- create race
-   - `PUT /api/races/{id}` -- update race
-   - `DELETE /api/races/{id}` -- delete race
-
-3. **StandingsController**:
-   - `GET /api/standings/{year}`
-   - `GET /api/standings/{year}/open/{gender}`
-   - `GET /api/standings/{year}/age/{category}/{gender}`
-   - `GET /api/standings/runner/{runnerId}`
-   - `POST /api/standings/{year}/recalculate` -- manual recalc
-
-4. **RunnersController**:
-   - `GET /api/runners` -- search/list runners
-   - `GET /api/runners/{id}` -- get runner details
-   - `POST /api/runners` -- create runner
-   - `PUT /api/runners/{id}` -- update runner
-
-5. ✅ Add authorization attributes:
-   - ✅ `[Authorize(Roles = "Admin,Manager")]` for uploads and modifications
-   - ✅ `[AllowAnonymous]` for public standings and race information
-   - ✅ `[Authorize(Roles = "Admin")]` for deletions
-
-**Deliverables**:
-- ✅ `Controllers/ResultsController.cs` - Results upload, validation, and saving
-- ✅ `Controllers/RacesController.cs` - Race CRUD operations
-- ✅ `Controllers/StandingsController.cs` - Grand Prix standings and leaderboards
-- ✅ `Controllers/RunnersController.cs` - Runner management with fuzzy matching
 
 ---
 
 ### Phase 6: Frontend - Upload Wizard ✅ COMPLETED
-**Goal**: Build multi-step upload wizard UI
 
-**Status**: ✅ All components implemented and integrated
-
-1. ✅ Install frontend packages:
-   - `react-hook-form` (form management)
-   - `@tanstack/react-table` (data tables)
-   - `papaparse` (CSV preview on client)
-   - `react-dropzone` (file upload)
-
-2. ✅ **Step 1: Race Selection**
-   - ✅ `RaceSelectionStep.jsx`
-   - ✅ Race dropdown (with autocomplete)
-   - ✅ "Create New Race" form
-   - ✅ Date picker
-   - ✅ GP race checkbox
-   - ✅ Course variant input
-
-3. ✅ **Step 2: File Upload**
-   - ✅ `FileUploadStep.jsx`
-   - ✅ Drag-and-drop zone (react-dropzone)
-   - ✅ File type validation (CSV, Excel, PDF)
-   - ✅ Upload to API
-   - ✅ Progress indicator
-   - ✅ Display parsed row count
-
-4. ✅ **Step 3: Column Mapping**
-   - ✅ `ColumnMappingStep.jsx`
-   - ✅ Display detected columns
-   - ✅ Dropdowns to map columns to fields
-   - ✅ "Detect gender from sections" option
-   - ✅ Preview table (first 5 rows)
-
-5. ✅ **Step 4: Data Review**
-   - ✅ `DataReviewStep.jsx`
-   - ✅ Editable data table (@tanstack/react-table)
-   - ✅ Validation highlighting
-   - ✅ Inline editing (click to edit cells)
-   - ✅ Issue indicators for warnings and new runners
-   - ✅ Summary statistics display
-
-6. ✅ **Step 5: Confirmation**
-   - ✅ `ConfirmationStep.jsx`
-   - ✅ Summary stats (total, DNF/DNS/DQ counts)
-   - ✅ Save button with loading state
-   - ✅ Success/error messages
-   - ✅ Navigation to results/standings pages
-
-7. ✅ **Main Upload Wizard Container**
-   - ✅ `ResultsUploadWizard.jsx`
-   - ✅ Step progress indicator with visual states
-   - ✅ Navigation (Next, Back, Cancel)
-   - ✅ State management (wizard context)
-
-**Deliverables**:
-- ✅ `src/pages/admin/ResultsUpload.jsx`
-- ✅ `src/components/upload/RaceSelectionStep.jsx`
-- ✅ `src/components/upload/FileUploadStep.jsx`
-- ✅ `src/components/upload/ColumnMappingStep.jsx`
-- ✅ `src/components/upload/DataReviewStep.jsx`
-- ✅ `src/components/upload/ConfirmationStep.jsx`
-- ✅ `src/components/upload/upload.css` (dark theme styling)
-- ✅ Protected route added to App.jsx (requires Admin/Manager roles)
+**Actual deliverables** (differs from original plan):
+- ✅ `ResultsUpload.jsx` — wizard container, 5-step progress indicator
+- ✅ `RaceSelectionStep.jsx` — race dropdown + new race form
+- ✅ `InputMethodStep.jsx` — **replaces** `FileUploadStep.jsx`; supports file upload (CSV/Excel) AND text paste (mixed/by-gender modes)
+- ❌ `FileUploadStep.jsx` — **REMOVED**: merged into InputMethodStep
+- ✅ `ColumnMappingStep.jsx` — column detection and mapping
+- ✅ `DataReviewStep.jsx` — editable table with validation highlighting
+- ✅ `ConfirmationStep.jsx` — summary and save
+- ✅ `upload.css` — dark theme styling
 
 ---
 
-### Phase 7: Frontend - Results & Standings ⏳ NOT STARTED
-**Goal**: Display results and standings
+### Phase 7: Frontend - Results & Standings 🔄 IN PROGRESS
 
-**Status**: ⏳ Awaiting Phase 5 completion (API endpoints needed)
+**Goal**: Display results and standings so uploads can be verified and the public can view GP data.
 
-1. **Results Management Page**
-   - `ResultsManagementPage.jsx`
-   - Table of upload batches
-   - Filters (year, race, user)
-   - View/Edit/Delete actions
-   - Recalculate GP button
+1. **Standings Dashboard** (`src/pages/Standings.jsx`)
+   - Year selector (fetched from `/api/standings/years`)
+   - Open division: male and female tabs
+   - Age division: category dropdown + gender toggle
+   - Standings table with rank, name, points, races, run-the-gamut badge
 
-2. **Race Results Page**
-   - `RaceResultsPage.jsx`
-   - Display all results for a race
-   - Sortable table
-   - Highlight record times
-   - Export to CSV
+2. **Race Results Page** (`src/pages/RaceResults.jsx`)
+   - Race metadata header
+   - Results table sorted by place
+   - GP points column if applicable
 
-3. **Standings Dashboard**
-   - `StandingsDashboard.jsx`
-   - Year selector
-   - Division tabs (Open Male, Open Female, Age Divisions)
-   - Standings table (sortable)
-   - Highlight leaders
-   - "Run the Gamut" badge
-   - Export to PDF/Excel
+3. **Admin Results Management** (`src/pages/admin/ResultsManagement.jsx`)
+   - List of races with uploaded results
+   - Delete batch
+   - Recalculate standings trigger
 
-4. **Runner Profile Page**
-   - `RunnerProfilePage.jsx`
-   - Runner details
-   - Race history
-   - GP points history
-   - Charts (performance over time)
+4. **Home Page** — add navigation links to standings, upload, and results
 
-**Deliverables**:
-- `src/pages/admin/ResultsManagement.jsx`
-- `src/pages/RaceResults.jsx`
-- `src/pages/Standings.jsx`
-- `src/pages/RunnerProfile.jsx`
-- `src/components/standings/StandingsTable.jsx`
+**New backend endpoint needed**:
+- `GET /api/results/batches?year={year}` — list upload batches for admin management
 
 ---
 
 ### Phase 8: Testing & Refinement ⏳ NOT STARTED
-**Goal**: Comprehensive testing and bug fixes
-
-**Status**: ⏳ Ongoing as features are completed
-
-1. **Backend Testing**
-   - Unit tests for all services (80%+ coverage)
-   - Integration tests for API endpoints
-   - Test with real race result files
-   - Edge cases:
-     - Duplicate names
-     - DNF/DNS handling
-     - Record bonus calculation
-     - Tiebreakers
-
-2. **Frontend Testing**
-   - Component tests (React Testing Library)
-   - E2E tests (Playwright)
-     - Complete upload flow
-     - Column mapping
-     - Data editing
-     - Save and verify results
-   - Cross-browser testing
-
-3. **User Acceptance Testing**
-   - Test with actual race results
-   - Verify GP calculations match manual calculations
-   - Performance testing (large files)
-
-4. **Bug Fixes & Polish**
-   - Fix identified issues
-   - Improve error messages
-   - Add loading states
-   - Responsive design fixes
-
-**Deliverables**:
-- Comprehensive test suite
-- Bug fixes
-- Performance optimizations
-
----
 
 ### Phase 9: Documentation & Deployment ⏳ NOT STARTED
-**Goal**: Document and deploy
-
-**Status**: ⏳ Awaiting Phase 6-7 completion
-
-1. **Documentation**
-   - API documentation (Swagger/OpenAPI)
-   - User guide for results upload
-   - Admin guide for GP management
-   - Update README.md
-
-2. **Deployment**
-   - Database migrations in production
-   - Deploy API updates
-   - Deploy frontend updates
-   - Smoke tests
-
-**Deliverables**:
-- `DOCS/RESULTS_UPLOAD_USER_GUIDE.md`
-- `DOCS/GRAND_PRIX_ADMIN_GUIDE.md`
-- Updated README.md
 
 ---
 
 ## Technical Details
 
-### File Parsing Strategies
-
-#### CSV Parsing
-```csharp
-public class CsvParserService : IFileParserService
-{
-    public async Task<List<RawResultRow>> ParseAsync(Stream file)
-    {
-        using var reader = new StreamReader(file);
-        using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
-
-        var records = csv.GetRecords<dynamic>();
-        var rows = new List<RawResultRow>();
-
-        foreach (var record in records)
-        {
-            var row = new RawResultRow
-            {
-                Columns = ((IDictionary<string, object>)record)
-                    .ToDictionary(k => k.Key, v => v.Value?.ToString() ?? "")
-            };
-            rows.Add(row);
-        }
-
-        return rows;
-    }
-}
-```
-
-#### PDF Parsing (Complex)
-```csharp
-public class PdfParserService : IFileParserService
-{
-    public async Task<List<RawResultRow>> ParseAsync(Stream file)
-    {
-        using var document = PdfDocument.Open(file);
-        var rows = new List<RawResultRow>();
-        string? currentSection = null;
-
-        foreach (var page in document.GetPages())
-        {
-            var text = ContentOrderTextExtractor.GetText(page);
-            var lines = text.Split('\n');
-
-            foreach (var line in lines)
-            {
-                // Detect section headers (e.g., "MALE RESULTS")
-                if (IsSectionHeader(line))
-                {
-                    currentSection = line.Trim();
-                    continue;
-                }
-
-                // Parse table row
-                var columns = ExtractColumnsFromLine(line);
-                if (columns != null)
-                {
-                    var row = new RawResultRow
-                    {
-                        Columns = columns,
-                        SectionHeader = currentSection
-                    };
-                    rows.Add(row);
-                }
-            }
-        }
-
-        return rows;
-    }
-
-    private bool IsSectionHeader(string line)
-    {
-        var patterns = new[] { "MALE", "FEMALE", "MEN", "WOMEN", "RESULTS" };
-        return patterns.Any(p => line.Contains(p, StringComparison.OrdinalIgnoreCase));
-    }
-}
-```
-
 ### Column Header Normalization
-```csharp
-public class HeaderNormalizer
-{
-    private static readonly Dictionary<string, string[]> HeaderMappings = new()
-    {
-        { "Name", new[] { "name", "runner", "participant", "first name", "firstname", "last name", "full name" } },
-        { "Age", new[] { "age", "ag", "years" } },
-        { "Place", new[] { "place", "position", "rank", "overall", "pl" } },
-        { "Time", new[] { "time", "finish time", "clock time", "chip time", "gun time" } },
-        { "Gender", new[] { "gender", "sex", "m/f", "male/female" } },
-        { "Bib", new[] { "bib", "bib #", "number", "bib number" } }
-    };
-
-    public string NormalizeHeader(string header)
-    {
-        var normalized = header.Trim().ToLower();
-
-        foreach (var mapping in HeaderMappings)
-        {
-            if (mapping.Value.Contains(normalized))
-                return mapping.Key;
-        }
-
-        return header; // Return original if no match
-    }
-}
-```
+Flexible pattern matching maps variations like "First Name", "F Name", "Finish Time", "Clock Time", "M/F" to canonical field names (Name, Age, Place, Time, Gender, Bib).
 
 ### Time Parsing
-```csharp
-public TimeSpan? ParseTime(string timeString)
-{
-    if (string.IsNullOrWhiteSpace(timeString))
-        return null;
-
-    // Handle DNF/DNS/DQ
-    if (timeString.ToUpper() is "DNF" or "DNS" or "DQ")
-        return null;
-
-    // Try parsing various formats
-    var patterns = new[]
-    {
-        @"^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$",  // H:MM:SS or H:MM:SS.mmm
-        @"^(\d{2}):(\d{2})(?:\.(\d+))?$"          // MM:SS or MM:SS.mmm
-    };
-
-    foreach (var pattern in patterns)
-    {
-        var match = Regex.Match(timeString, pattern);
-        if (match.Success)
-        {
-            var hours = match.Groups.Count > 3 && int.TryParse(match.Groups[1].Value, out var h) ? h : 0;
-            var minutes = int.Parse(match.Groups[match.Groups.Count > 3 ? 2 : 1].Value);
-            var seconds = int.Parse(match.Groups[match.Groups.Count > 3 ? 3 : 2].Value);
-            var milliseconds = match.Groups[match.Groups.Count].Success
-                ? int.Parse(match.Groups[match.Groups.Count].Value.PadRight(3, '0'))
-                : 0;
-
-            return new TimeSpan(0, hours, minutes, seconds, milliseconds);
-        }
-    }
-
-    return null;
-}
-```
+Supports: `H:MM:SS`, `H:MM:SS.mmm`, `MM:SS`, `MM:SS.mmm`, plus plain seconds. DNF/DNS/DQ strings are recognized and set `Status` accordingly.
 
 ### Runner Matching (Fuzzy)
-```csharp
-public class RunnerMatchingService
-{
-    public async Task<List<RunnerMatch>> FindMatches(string name, int? age, Gender? gender)
-    {
-        var runners = await _dbContext.Runners.ToListAsync();
-        var matches = new List<RunnerMatch>();
+Levenshtein distance with age (±2 years) and gender confirmation. High-confidence matches (>95%) are auto-applied; lower matches surface in the Data Review step for manual resolution.
 
-        foreach (var runner in runners)
-        {
-            var fullName = $"{runner.FirstName} {runner.LastName}";
-            var distance = LevenshteinDistance(name.ToLower(), fullName.ToLower());
-            var similarity = 1.0 - (distance / (double)Math.Max(name.Length, fullName.Length));
-
-            // Consider it a match if:
-            // - Similarity > 80% AND
-            // - Gender matches (if provided) AND
-            // - Age within 2 years (if provided)
-            if (similarity > 0.8)
-            {
-                var ageMatch = !age.HasValue || !runner.DateOfBirth.HasValue ||
-                    Math.Abs(age.Value - CalculateAge(runner.DateOfBirth.Value)) <= 2;
-
-                var genderMatch = !gender.HasValue || runner.Gender == gender;
-
-                if (ageMatch && genderMatch)
-                {
-                    matches.Add(new RunnerMatch
-                    {
-                        Runner = runner,
-                        Confidence = similarity,
-                        ReasonAge = ageMatch,
-                        ReasonGender = genderMatch
-                    });
-                }
-            }
-        }
-
-        return matches.OrderByDescending(m => m.Confidence).ToList();
-    }
-
-    private int LevenshteinDistance(string s1, string s2)
-    {
-        // Standard Levenshtein distance algorithm
-        // ... implementation
-    }
-}
-```
+### Text Paste Workflow
+1. User pastes text into `InputMethodStep` (mixed or separate-by-gender)
+2. Frontend sends `POST /api/results/parse-text` with `{ raceId, textContent, gender? }`
+3. Backend parses with `CsvParserService` (auto-detects comma/tab delimiter)
+4. Gender override applied to all rows if provided
+5. For separate-by-gender: frontend calls endpoint twice (male + female) and merges results; the older batch is deleted so only one batch ID is carried forward
+6. Remainder of wizard (column mapping, data review, confirmation) proceeds identically to file upload path
 
 ---
 
 ## User Interface
 
-### Upload Wizard Wireframes
-
-#### Step 1: Race Selection
-```
-┌─────────────────────────────────────────────────┐
-│ Results Upload Wizard                  [Step 1/5]│
-├─────────────────────────────────────────────────┤
-│                                                   │
-│  Select Race:                                     │
-│  ┌─────────────────────────────────────────┐    │
-│  │ Mount Marathon 2024              [▼]    │    │
-│  └─────────────────────────────────────────┘    │
-│                                                   │
-│  ☐ This is a Grand Prix race                     │
-│                                                   │
-│  Race Date:  [2024-07-04]                        │
-│                                                   │
-│  Course Variant: [Men's Race          ]          │
-│                                                   │
-│  OR                                               │
-│                                                   │
-│  [+ Create New Race]                              │
-│                                                   │
-│                             [Cancel] [Next →]     │
-└─────────────────────────────────────────────────┘
-```
-
-#### Step 4: Data Review
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Results Upload Wizard                                     [Step 4/5] │
-├──────────────────────────────────────────────────────────────────────┤
-│  Review and edit results before saving                               │
-│  145 results | 3 warnings | 12 new runners                           │
-│                                                                       │
-│  [Fix All Warnings] [Match All Runners]                              │
-│                                                                       │
-│  ┌────────────────────────────────────────────────────────────────┐ │
-│  │ Place │ Bib │ Name          │ Age │ Gender │ Time      │ ⚠️ │    │
-│  ├────────────────────────────────────────────────────────────────┤ │
-│  │   1   │ 42  │ John Doe      │  35 │ Male   │ 1:23:45   │    │    │
-│  │   2   │ 17  │ Jane Smith    │  28 │ Female │ 1:25:12   │    │    │
-│  │   3   │ 99  │ Mike Johnson  │  42 │ Male   │ 1:27:03   │    │    │
-│  │   4   │ 12  │ Sarah Lee     │  31 │ [?]    │ 1:28:45   │ ⚠️ │◄ Missing gender
-│  │   5   │ 88  │ Tom Brown     │     │ Male   │ 1:29:12   │ ⚠️ │◄ Missing age
-│  │   6   │     │ Lisa White    │  25 │ Female │ 1:30:04   │ ⓘ │◄ New runner
-│  │  ...  │     │               │     │        │           │    │    │
-│  └────────────────────────────────────────────────────────────────┘ │
-│                                                                       │
-│                                      [← Back] [Cancel] [Next →]      │
-└──────────────────────────────────────────────────────────────────────┘
-```
+### Upload Wizard Steps
+1. **Race Selection** — pick existing race or create new
+2. **Input Method** — file upload (CSV/Excel) or paste text
+3. **Column Mapping** — map detected columns to required fields
+4. **Data Review** — edit table, resolve warnings, match runners
+5. **Confirmation** — summary + save button
 
 ### Standings Dashboard
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Grand Prix Standings - 2024                                          │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  [Open Male] [Open Female] [Age: 30-39 Male] [Age: 30-39 Female] ... │
-│                                                                       │
-│  Open Male Division                           [Export PDF] [Export CSV]
-│                                                                       │
-│  ┌────────────────────────────────────────────────────────────────┐ │
-│  │ Rank │ Runner Name      │ Total │ Races │ Best │ 2nd │ 3rd │ 4th │ Gamut│
-│  ├────────────────────────────────────────────────────────────────┤ │
-│  │  1   │ John Doe         │  355  │  7    │ 100 │ 90  │ 85  │ 80  │  ✓  │
-│  │  2   │ Mike Johnson     │  340  │  5    │ 100 │ 85  │ 80  │ 75  │     │
-│  │  3   │ Tom Brown        │  335  │  8    │  90 │ 85  │ 80  │ 80  │  ✓  │
-│  │  4   │ Steve Wilson     │  320  │  6    │  90 │ 85  │ 75  │ 70  │     │
-│  │  ...  │                 │       │       │     │     │     │     │     │
-│  └────────────────────────────────────────────────────────────────┘ │
-│                                                                       │
-└──────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│ Grand Prix Standings                [Year: 2025 ▼]       │
+├──────────────────────────────────────────────────────────┤
+│  [Open Division]  [Age Divisions]                        │
+│                                                          │
+│    [Male]  [Female]                                      │
+│                                                          │
+│  Open Male Division                                      │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │ Rank │ Runner         │ Total │ Races │ Gamut        │ │
+│  │   1  │ John Doe       │  355  │  7/9  │  ✓          │ │
+│  │   2  │ Mike Johnson   │  340  │  5/9  │             │ │
+│  └─────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -1131,78 +487,28 @@ public class RunnerMatchingService
 ## Testing Strategy
 
 ### Backend Testing
-
-#### Unit Tests
-- **File Parsers**: Test each format (CSV, Excel, PDF)
-  - Valid files
-  - Malformed files
-  - Various column layouts
-  - Section-based gender detection
-
-- **Results Processing**:
-  - Header normalization
-  - Time parsing (various formats)
-  - Validation rules
-  - Runner matching
-
-- **GP Calculations**:
-  - Open division points
-  - Age division points
-  - Standings calculation
-  - Tiebreakers
-  - "Run the Gamut" qualification
-
-#### Integration Tests
-- **API Endpoints**:
-  - Upload flow (end-to-end)
-  - Results CRUD operations
-  - Standings retrieval
-  - Authorization checks
-
-#### Test Data
-- Create sample race result files:
-  - `test-results-small.csv` (20 rows)
-  - `test-results-large.csv` (1000 rows)
-  - `test-results-malformed.csv` (missing columns, invalid data)
-  - `test-results-with-sections.pdf` (gender from sections)
-  - `test-results.xlsx` (Excel format)
+- Unit tests for CSV parser, results processing, GP calculation
+- Integration tests for API endpoints
+- Edge cases: duplicate names, DNF/DNS, record bonus, tiebreakers
 
 ### Frontend Testing
-
-#### Component Tests
-- Upload wizard steps
-- Data table editing
-- Validation highlighting
-- Runner matching UI
-
-#### E2E Tests (Playwright)
-1. **Upload Flow**:
-   - Navigate to upload page
-   - Select race
-   - Upload file
-   - Map columns
-   - Review and edit data
-   - Save results
-   - Verify results saved
-
-2. **Standings Flow**:
-   - Navigate to standings
-   - Select year
-   - Select division
-   - Verify correct data
-   - Export to PDF
+- Manual testing of upload flow with real race result files
+- Verify GP calculations match expected values
 
 ### Manual Testing Checklist
 - [ ] Upload small CSV (< 50 results)
 - [ ] Upload large CSV (1000+ results)
 - [ ] Upload Excel file
-- [ ] Upload PDF with section headers
-- [ ] Handle duplicate results
+- [ ] Paste mixed-gender results
+- [ ] Paste separate male/female results
 - [ ] Edit results in review step
 - [ ] Match existing runners
-- [ ] Create new runners
 - [ ] Verify GP points calculation
 - [ ] Verify standings update
+- [ ] View standings dashboard
+- [ ] View race results page
+- [ ] Delete upload batch
+- [ ] Recalculate standings
 - [ ] Test as Manager role
 - [ ] Test as Admin role
 - [ ] Verify ReadOnly users cannot upload
@@ -1213,179 +519,41 @@ public class RunnerMatchingService
 
 1. **File Upload Security**:
    - Validate file size (max 10MB)
-   - Validate file type (whitelist: .csv, .xlsx, .xls, .pdf)
-   - Scan for malicious content
-   - Use antivirus if available
+   - Validate file type (whitelist: .csv, .xlsx, .xls only — PDF removed)
+   - Sanitize all user input
 
 2. **Input Validation**:
-   - Sanitize all user input
-   - Validate data types
-   - Prevent SQL injection (use parameterized queries)
-   - Prevent XSS (escape HTML in names)
+   - Parameterized queries via EF Core
+   - HTML-escape runner names in frontend output
 
 3. **Authorization**:
-   - Verify user roles on all endpoints
-   - Only Managers/Admins can upload
-   - ReadOnly users can view only
+   - `[Authorize(Roles = "Admin,Manager")]` on all write endpoints
+   - `[AllowAnonymous]` on standings/results read endpoints
 
 4. **Audit Trail**:
-   - Log all uploads (user, timestamp, file)
-   - Track who edits/deletes results
-   - Maintain upload batch history
+   - `UploadBatch` records track file name, type, user, timestamp
+   - `UploadedBy` on each `RaceResult`
 
 ---
 
 ## Performance Considerations
 
-1. **Large File Handling**:
-   - Stream parsing (don't load entire file into memory)
-   - Batch database inserts (use `BulkInsert`)
-   - Progress reporting for long operations
-
-2. **GP Calculations**:
-   - Calculate only affected year/division
-   - Use database indexes on Year, Division
-   - Cache standings (invalidate on results change)
-
-3. **Frontend Performance**:
-   - Virtual scrolling for large tables
-   - Pagination for results lists
-   - Debounce search/filter inputs
-
----
-
-## Future Enhancements
-
-### Phase 10+ (Future Scope)
-1. **Runner Portal**:
-   - Runners can claim their profiles
-   - View personal race history
-   - Update profile info
-
-2. **Advanced Analytics**:
-   - Performance trends over time
-   - Comparative analysis (runner vs division average)
-   - Age-graded results
-
-3. **Race Registration Integration**:
-   - Import from RunSignUp, UltraSignUp
-   - Pre-populate runner data
-
-4. **Mobile App**:
-   - Upload photos from race
-   - Live result updates
-
-5. **Automated Result Parsing**:
-   - OCR for scanned results
-   - ML model to detect table structure
-
-6. **Social Features**:
-   - Runner profiles with photos
-   - Comments on races
-   - Social sharing
-
----
-
-## Success Criteria
-
-The results upload tool is considered successful when:
-
-- [x] Managers can upload CSV, Excel, and PDF results
-- [x] System correctly parses various file formats
-- [x] Gender detection works from columns or sections
-- [x] Data review allows editing and validation
-- [x] Runner matching works with high accuracy (>90%)
-- [x] Grand Prix points are calculated correctly
-- [x] Standings update automatically after results save
-- [x] Open Division scoring matches FIS system
-- [x] Age Division scoring works correctly
-- [x] Best 4 races are counted
-- [x] Tiebreakers work as specified
-- [x] "Run the Gamut" tracking works
-- [x] UI is intuitive and easy to use
-- [x] Performance is acceptable (upload 1000 results in < 10 seconds)
-- [x] Authorization works correctly
-- [x] Audit trail is maintained
+1. **Large File Handling**: Stream parsing, batch database inserts
+2. **GP Calculations**: Only recalculate affected year; indexed on Year + Division
+3. **Frontend**: TanStack Table with client-side sorting for results tables
 
 ---
 
 ## Timeline Summary
 
-| Phase | Task | Status | Original Estimate | Actual |
-|-------|------|--------|-------------------|--------|
-| 1 | Database & Core Models | ✅ COMPLETE | 2-3 days | ~3 days |
-| 2 | File Parsing Backend | ✅ COMPLETE | 3-4 days | ~3 days |
-| 3 | Results Processing Backend | ✅ COMPLETE | 3-4 days | ~2 days |
-| 4 | Grand Prix Calculation Backend | ✅ COMPLETE | 4-5 days | ~2 days |
-| 5 | API Controllers | ✅ COMPLETE | 2-3 days | ~1 day |
-| 6 | Frontend Upload Wizard | ⏳ NOT STARTED | 5-6 days | - |
-| 7 | Frontend Results & Standings | ⏳ NOT STARTED | 4-5 days | - |
-| 8 | Testing & Refinement | ⏳ NOT STARTED | 3-4 days | - |
-| 9 | Documentation & Deployment | ⏳ NOT STARTED | 1-2 days | - |
-| **Total** | | **~55% Complete** | **27-36 days** | **11 days / ~13-20 remaining** |
-
-**Progress**: 5 of 9 phases complete (backend fully implemented!)
-**Estimated Completion**: 2-3 weeks remaining (frontend + testing)
-
----
-
-## Appendix
-
-### Sample API Request/Response
-
-**Upload Request**:
-```http
-POST /api/results/upload
-Content-Type: multipart/form-data
-
-{
-  "raceId": "guid",
-  "file": [binary data]
-}
-```
-
-**Upload Response**:
-```json
-{
-  "uploadBatchId": "guid",
-  "parsedResults": [
-    {
-      "rowNumber": 1,
-      "name": "John Doe",
-      "age": 35,
-      "place": 1,
-      "time": "01:23:45",
-      "gender": "Male",
-      "bib": 42,
-      "validationIssues": []
-    },
-    {
-      "rowNumber": 4,
-      "name": "Sarah Lee",
-      "age": 31,
-      "place": 4,
-      "time": "01:28:45",
-      "gender": null,
-      "bib": 12,
-      "validationIssues": [
-        {
-          "field": "gender",
-          "severity": "warning",
-          "message": "Gender is missing"
-        }
-      ]
-    }
-  ],
-  "detectedColumns": ["Place", "Bib", "Name", "Age", "Time"],
-  "totalRows": 145,
-  "validRows": 142,
-  "rowsWithIssues": 3
-}
-```
-
----
-
-**Last Updated**: [Current Date]
-**Author**: Claude Code
-**Status**: Ready for Implementation
-**Priority**: High
+| Phase | Task | Status |
+|-------|------|--------|
+| 1 | Database & Core Models | ✅ COMPLETE |
+| 2 | File Parsing Backend | ✅ COMPLETE (PDF dropped, text-paste added) |
+| 3 | Results Processing Backend | ✅ COMPLETE |
+| 4 | Grand Prix Calculation Backend | ✅ COMPLETE |
+| 5 | API Controllers | ✅ COMPLETE |
+| 6 | Frontend Upload Wizard | ✅ COMPLETE (InputMethodStep replaces FileUploadStep) |
+| 7 | Frontend Results & Standings | 🔄 IN PROGRESS |
+| 8 | Testing & Refinement | ⏳ NOT STARTED |
+| 9 | Documentation & Deployment | ⏳ NOT STARTED |

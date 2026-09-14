@@ -41,7 +41,6 @@ public class RacesController : ControllerBase
                 RaceId = r.RaceId,
                 Name = r.Name,
                 IsGrandPrixRace = r.IsGrandPrixRace,
-                GrandPrixRaceOrder = r.GrandPrixRaceOrder,
                 Date = r.Date,
                 Year = r.Year,
                 CourseVariant = r.CourseVariant,
@@ -74,7 +73,6 @@ public class RacesController : ControllerBase
                 RaceId = r.RaceId,
                 Name = r.Name,
                 IsGrandPrixRace = r.IsGrandPrixRace,
-                GrandPrixRaceOrder = r.GrandPrixRaceOrder,
                 Date = r.Date,
                 Year = r.Year,
                 CourseVariant = r.CourseVariant,
@@ -101,13 +99,12 @@ public class RacesController : ControllerBase
         var races = await _context.Races
             .Include(r => r.Results)
             .Where(r => r.Year == year && r.IsGrandPrixRace)
-            .OrderBy(r => r.GrandPrixRaceOrder)
+            .OrderBy(r => r.Date)
             .Select(r => new RaceDto
             {
                 RaceId = r.RaceId,
                 Name = r.Name,
                 IsGrandPrixRace = r.IsGrandPrixRace,
-                GrandPrixRaceOrder = r.GrandPrixRaceOrder,
                 Date = r.Date,
                 Year = r.Year,
                 CourseVariant = r.CourseVariant,
@@ -140,7 +137,6 @@ public class RacesController : ControllerBase
                 RaceId = r.RaceId,
                 Name = r.Name,
                 IsGrandPrixRace = r.IsGrandPrixRace,
-                GrandPrixRaceOrder = r.GrandPrixRaceOrder,
                 Date = r.Date,
                 Year = r.Year,
                 CourseVariant = r.CourseVariant,
@@ -172,35 +168,11 @@ public class RacesController : ControllerBase
     {
         try
         {
-            // Validate Grand Prix race order if applicable
-            if (request.IsGrandPrixRace)
-            {
-                if (!request.GrandPrixRaceOrder.HasValue ||
-                    request.GrandPrixRaceOrder < 1 ||
-                    request.GrandPrixRaceOrder > 9)
-                {
-                    return BadRequest("Grand Prix races must have an order between 1 and 9");
-                }
-
-                // Check for duplicate GP order in same year
-                var year = request.Date.Year;
-                var existingGpRace = await _context.Races
-                    .AnyAsync(r => r.Year == year &&
-                                  r.IsGrandPrixRace &&
-                                  r.GrandPrixRaceOrder == request.GrandPrixRaceOrder);
-
-                if (existingGpRace)
-                {
-                    return BadRequest($"A Grand Prix race with order {request.GrandPrixRaceOrder} already exists for year {year}");
-                }
-            }
-
             var race = new Race
             {
                 RaceId = Guid.NewGuid(),
                 Name = request.Name,
                 IsGrandPrixRace = request.IsGrandPrixRace,
-                GrandPrixRaceOrder = request.GrandPrixRaceOrder,
                 Date = request.Date,
                 Year = request.Date.Year,
                 CourseVariant = request.CourseVariant,
@@ -216,7 +188,6 @@ public class RacesController : ControllerBase
                 RaceId = race.RaceId,
                 Name = race.Name,
                 IsGrandPrixRace = race.IsGrandPrixRace,
-                GrandPrixRaceOrder = race.GrandPrixRaceOrder,
                 Date = race.Date,
                 Year = race.Year,
                 CourseVariant = race.CourseVariant,
@@ -275,7 +246,6 @@ public class RacesController : ControllerBase
                 RaceId = race.RaceId,
                 Name = race.Name,
                 IsGrandPrixRace = race.IsGrandPrixRace,
-                GrandPrixRaceOrder = race.GrandPrixRaceOrder,
                 Date = race.Date,
                 Year = race.Year,
                 CourseVariant = race.CourseVariant,

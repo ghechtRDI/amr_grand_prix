@@ -35,6 +35,12 @@ public class UploadBatch
     [Required]
     public UploadStatus Status { get; set; } = UploadStatus.Pending;
 
+    // LLM audit fields
+    public string? RawLlmJson     { get; set; }
+    public string? LlmModel       { get; set; }
+    public int     LlmInputTokens  { get; set; }
+    public int     LlmOutputTokens { get; set; }
+
     // Navigation properties
     [ForeignKey("RaceId")]
     public virtual Race Race { get; set; } = null!;

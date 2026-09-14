@@ -8,8 +8,7 @@ public class RaceDto
     public Guid RaceId { get; set; }
     public string Name { get; set; } = string.Empty;
     public bool IsGrandPrixRace { get; set; }
-    public int? GrandPrixRaceOrder { get; set; }
-    public DateTime Date { get; set; }
+    public DateOnly Date { get; set; }
     public int Year { get; set; }
     public string? CourseVariant { get; set; }
     public string? Location { get; set; }
@@ -27,8 +26,7 @@ public class CreateRaceRequest
 {
     public string Name { get; set; } = string.Empty;
     public bool IsGrandPrixRace { get; set; }
-    public int? GrandPrixRaceOrder { get; set; }
-    public DateTime Date { get; set; }
+    public DateOnly Date { get; set; }
     public string? CourseVariant { get; set; }
     public string? Location { get; set; }
 }
@@ -39,7 +37,7 @@ public class CreateRaceRequest
 public class UpdateRaceRequest
 {
     public string Name { get; set; } = string.Empty;
-    public DateTime Date { get; set; }
+    public DateOnly Date { get; set; }
     public string? CourseVariant { get; set; }
     public string? Location { get; set; }
     public TimeSpan? RecordTimeMale { get; set; }

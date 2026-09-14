@@ -8,7 +8,7 @@ public class RaceResultDto
     public Guid ResultId { get; set; }
     public Guid RaceId { get; set; }
     public string RaceName { get; set; } = string.Empty;
-    public DateTime RaceDate { get; set; }
+    public DateOnly RaceDate { get; set; }
     public Guid RunnerId { get; set; }
     public string RunnerName { get; set; } = string.Empty;
     public int? Bib { get; set; }
@@ -32,4 +32,22 @@ public class RaceResultDetailDto : RaceResultDto
     public RunnerDto Runner { get; set; } = null!;
     public RaceDto Race { get; set; } = null!;
     public List<GrandPrixPointsDto>? GrandPrixPoints { get; set; }
+}
+
+/// <summary>
+/// DTO for upload batch summary (admin management)
+/// </summary>
+public class UploadBatchDto
+{
+    public Guid UploadBatchId { get; set; }
+    public Guid RaceId { get; set; }
+    public string RaceName { get; set; } = string.Empty;
+    public DateOnly RaceDate { get; set; }
+    public bool IsGrandPrixRace { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public FileType FileType { get; set; }
+    public int RecordsUploaded { get; set; }
+    public string UploadedBy { get; set; } = string.Empty;
+    public DateTime UploadedAt { get; set; }
+    public UploadStatus Status { get; set; }
 }

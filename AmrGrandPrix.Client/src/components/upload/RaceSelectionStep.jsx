@@ -5,6 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
+import * as tokenService from '../../services/tokenService';
 
 export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
   const [isCreatingNew, setIsCreatingNew] = useState(false);
@@ -39,7 +40,7 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
   const fetchRaces = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
+      const token = tokenService.getAccessToken();
       const currentYear = new Date().getFullYear();
 
       const response = await fetch(`/api/races/${currentYear}`, {
@@ -68,7 +69,7 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
     setValue('raceId', raceId);
 
     if (raceId && raceId !== 'new') {
-      const selectedRace = races.find(r => r.id === raceId);
+      const selectedRace = races.find(r => r.raceId === raceId);
       if (selectedRace) {
         setValue('raceName', selectedRace.name);
         setValue('raceDate', selectedRace.date.split('T')[0]);
@@ -85,8 +86,66 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
     }
   };
 
-  const onSubmit = (data) => {
-    onNext({ raceSelection: data });
+  const onSubmit = async (data) => {
+    // If creating a new race, create it in the database first
+    if (data.raceId === 'new') {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const token = tokenService.getAccessToken();
+        const response = await fetch('/api/races', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: data.raceName,
+            date: data.raceDate,
+            isGrandPrixRace: data.isGrandPrixRace,
+            courseVariant: data.courseVariant || null,
+            location: null,
+          }),
+        });
+
+        if (!response.ok) {
+          let errorMessage = 'Failed to create race';
+          try {
+            // Read as text first, then try to parse as JSON
+            const responseText = await response.text();
+            if (responseText) {
+              try {
+                const errorData = JSON.parse(responseText);
+                errorMessage = errorData.message || errorData.title || responseText;
+              } catch {
+                errorMessage = responseText;
+              }
+            } else {
+              errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+          } catch {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          }
+          throw new Error(errorMessage);
+        }
+
+        const createdRace = await response.json();
+
+        // Update the data with the newly created race ID
+        data.raceId = createdRace.raceId;
+
+        onNext({ raceSelection: data });
+      } catch (err) {
+        setError(err.message);
+        console.error('Error creating race:', err);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Existing race selected, proceed normally
+      onNext({ raceSelection: data });
+    }
   };
 
   if (loading) {
@@ -125,7 +184,7 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
           >
             <option value="">-- Select a race --</option>
             {races.map(race => (
-              <option key={race.id} value={race.id}>
+              <option key={race.raceId} value={race.raceId}>
                 {race.name} - {new Date(race.date).toLocaleDateString()}
                 {race.courseVariant ? ` (${race.courseVariant})` : ''}
               </option>

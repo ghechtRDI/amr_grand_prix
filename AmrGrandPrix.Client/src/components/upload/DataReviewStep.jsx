@@ -3,7 +3,7 @@
  * Editable table to review and fix data before saving
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -13,217 +13,172 @@ import {
 
 const columnHelper = createColumnHelper();
 
+// Defined at module scope so it never changes reference between renders.
+// Reads editingCell / setEditingCell / updateData from table.options.meta.
+function EditableCell({ getValue, row, column, table }) {
+  const { editingCell, setEditingCell, updateData } = table.options.meta;
+  const initialValue = getValue();
+  const [value, setValue] = useState(initialValue);
+
+  const onBlur = () => {
+    updateData(row.index, column.id, value);
+    setEditingCell(null);
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      onBlur();
+    } else if (e.key === 'Escape') {
+      setValue(initialValue);
+      setEditingCell(null);
+    }
+  };
+
+  if (editingCell === `${row.index}-${column.id}`) {
+    if (column.id === 'gender') {
+      return (
+        <select
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={onBlur}
+          autoFocus
+          className="cell-input"
+        >
+          <option value="">-- Select --</option>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+          <option value="Nonbinary">Nonbinary</option>
+        </select>
+      );
+    }
+
+    if (column.id === 'status') {
+      return (
+        <select
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={onBlur}
+          autoFocus
+          className="cell-input"
+        >
+          <option value="Finished">Finished</option>
+          <option value="DNF">DNF</option>
+          <option value="DNS">DNS</option>
+          <option value="DQ">DQ</option>
+        </select>
+      );
+    }
+
+    return (
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={onBlur}
+        onKeyDown={onKeyDown}
+        autoFocus
+        className="cell-input"
+      />
+    );
+  }
+
+  return (
+    <div
+      onClick={() => setEditingCell(`${row.index}-${column.id}`)}
+      className="cell-value"
+    >
+      {value || '-'}
+    </div>
+  );
+}
+
+const COLUMNS = [
+  columnHelper.accessor('place',  { header: 'Place',  cell: EditableCell, size: 80 }),
+  columnHelper.accessor('bib',    { header: 'Bib',    cell: EditableCell, size: 80 }),
+  columnHelper.accessor('name',   { header: 'Name',   cell: EditableCell, size: 200 }),
+  columnHelper.accessor('age',    { header: 'Age',    cell: EditableCell, size: 80 }),
+  columnHelper.accessor('gender', { header: 'Gender', cell: EditableCell, size: 100 }),
+  columnHelper.accessor('time',   { header: 'Time',   cell: EditableCell, size: 120 }),
+  columnHelper.accessor('status', { header: 'Status', cell: EditableCell, size: 100 }),
+  columnHelper.display({
+    id: 'issues',
+    header: 'Issues',
+    cell: ({ row }) => {
+      const issues = row.original.validationIssues || [];
+      const isNewRunner = row.original.isNewRunner;
+
+      if (issues.length === 0 && !isNewRunner) {
+        return <span className="status-ok">✓</span>;
+      }
+
+      return (
+        <div className="issue-indicators">
+          {issues.map((issue, idx) => (
+            <span
+              key={idx}
+              className={`issue-badge ${issue.severity}`}
+              title={issue.message}
+            >
+              ⚠
+            </span>
+          ))}
+          {isNewRunner && (
+            <span className="issue-badge info" title="New runner">
+              ℹ
+            </span>
+          )}
+        </div>
+      );
+    },
+    size: 80,
+  }),
+];
+
 export default function DataReviewStep({ wizardData, onNext, onBack, onCancel }) {
   const [data, setData] = useState(() => {
-    // Transform parsed results based on column mapping
     const parsedResults = wizardData.parsedResults || [];
-    const mapping = wizardData.columnMapping || {};
 
     return parsedResults.map((row, idx) => ({
       id: idx,
-      name: row.columns?.[mapping.name] || row.name || '',
-      age: row.columns?.[mapping.age] || row.age || '',
-      place: row.columns?.[mapping.place] || row.place || '',
-      time: row.columns?.[mapping.time] || row.time || '',
-      gender: mapping.detectGenderFromSections
-        ? row.sectionHeader?.includes('MALE') || row.sectionHeader?.includes('MEN')
-          ? 'Male'
-          : row.sectionHeader?.includes('FEMALE') || row.sectionHeader?.includes('WOMEN')
-            ? 'Female'
-            : ''
-        : row.columns?.[mapping.gender] || row.gender || '',
-      bib: row.columns?.[mapping.bib] || row.bib || '',
+      name:   row.name   || '',
+      age:    row.age    ?? '',
+      place:  row.place  ?? '',
+      // Use timeString (original LLM-extracted string) for display/editing
+      time:   row.timeString || '',
+      gender: row.gender || '',
+      bib:    row.bib    ?? '',
       status: row.status || 'Finished',
       validationIssues: row.validationIssues || [],
-      isNewRunner: row.isNewRunner || false,
+      // No matched runner → will be created as new
+      isNewRunner: (row.runnerMatches || []).length === 0 && !row.matchedRunnerId,
+      matchedRunnerId: row.matchedRunnerId || null,
     }));
   });
 
   const [editingCell, setEditingCell] = useState(null);
 
-  // Update cell value
-  const updateData = (rowIndex, columnId, value) => {
+  const updateData = useCallback((rowIndex, columnId, value) => {
     setData(old =>
-      old.map((row, index) => {
-        if (index === rowIndex) {
-          return {
-            ...row,
-            [columnId]: value,
-          };
-        }
-        return row;
-      })
+      old.map((row, index) =>
+        index === rowIndex ? { ...row, [columnId]: value } : row
+      )
     );
-  };
-
-  // Editable cell component
-  const EditableCell = ({ getValue, row, column, table }) => {
-    const initialValue = getValue();
-    const [value, setValue] = useState(initialValue);
-
-    const onBlur = () => {
-      updateData(row.index, column.id, value);
-      setEditingCell(null);
-    };
-
-    const onKeyDown = (e) => {
-      if (e.key === 'Enter') {
-        onBlur();
-      } else if (e.key === 'Escape') {
-        setValue(initialValue);
-        setEditingCell(null);
-      }
-    };
-
-    if (editingCell === `${row.index}-${column.id}`) {
-      if (column.id === 'gender') {
-        return (
-          <select
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onBlur={onBlur}
-            autoFocus
-            className="cell-input"
-          >
-            <option value="">-- Select --</option>
-            <option value="Male">Male</option>
-            <option value="Female">Female</option>
-            <option value="Nonbinary">Nonbinary</option>
-          </select>
-        );
-      }
-
-      if (column.id === 'status') {
-        return (
-          <select
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onBlur={onBlur}
-            autoFocus
-            className="cell-input"
-          >
-            <option value="Finished">Finished</option>
-            <option value="DNF">DNF</option>
-            <option value="DNS">DNS</option>
-            <option value="DQ">DQ</option>
-          </select>
-        );
-      }
-
-      return (
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onBlur={onBlur}
-          onKeyDown={onKeyDown}
-          autoFocus
-          className="cell-input"
-        />
-      );
-    }
-
-    return (
-      <div
-        onClick={() => setEditingCell(`${row.index}-${column.id}`)}
-        className="cell-value"
-      >
-        {value || '-'}
-      </div>
-    );
-  };
-
-  // Define columns
-  const columns = useMemo(
-    () => [
-      columnHelper.accessor('place', {
-        header: 'Place',
-        cell: EditableCell,
-        size: 80,
-      }),
-      columnHelper.accessor('bib', {
-        header: 'Bib',
-        cell: EditableCell,
-        size: 80,
-      }),
-      columnHelper.accessor('name', {
-        header: 'Name',
-        cell: EditableCell,
-        size: 200,
-      }),
-      columnHelper.accessor('age', {
-        header: 'Age',
-        cell: EditableCell,
-        size: 80,
-      }),
-      columnHelper.accessor('gender', {
-        header: 'Gender',
-        cell: EditableCell,
-        size: 100,
-      }),
-      columnHelper.accessor('time', {
-        header: 'Time',
-        cell: EditableCell,
-        size: 120,
-      }),
-      columnHelper.accessor('status', {
-        header: 'Status',
-        cell: EditableCell,
-        size: 100,
-      }),
-      columnHelper.display({
-        id: 'issues',
-        header: 'Issues',
-        cell: ({ row }) => {
-          const issues = row.original.validationIssues || [];
-          const isNewRunner = row.original.isNewRunner;
-
-          if (issues.length === 0 && !isNewRunner) {
-            return <span className="status-ok">✓</span>;
-          }
-
-          return (
-            <div className="issue-indicators">
-              {issues.map((issue, idx) => (
-                <span
-                  key={idx}
-                  className={`issue-badge ${issue.severity}`}
-                  title={issue.message}
-                >
-                  ⚠
-                </span>
-              ))}
-              {isNewRunner && (
-                <span className="issue-badge info" title="New runner">
-                  ℹ
-                </span>
-              )}
-            </div>
-          );
-        },
-        size: 80,
-      }),
-    ],
-    [editingCell]
-  );
+  }, []);
 
   const table = useReactTable({
     data,
-    columns,
+    columns: COLUMNS,
     getCoreRowModel: getCoreRowModel(),
+    meta: { editingCell, setEditingCell, updateData },
   });
 
-  // Calculate summary stats
-  const stats = useMemo(() => {
-    const totalResults = data.length;
-    const warnings = data.filter(row => row.validationIssues?.length > 0).length;
-    const newRunners = data.filter(row => row.isNewRunner).length;
-
-    return { totalResults, warnings, newRunners };
-  }, [data]);
+  const stats = useMemo(() => ({
+    totalResults: data.length,
+    warnings: data.filter(row => row.validationIssues?.length > 0).length,
+    newRunners: data.filter(row => row.isNewRunner).length,
+  }), [data]);
 
   const handleSubmit = () => {
-    // Validate all required fields are present
     const invalidRows = data.filter(
       row => !row.name || !row.age || !row.place || !row.time
     );
@@ -241,8 +196,8 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
   return (
     <div className="wizard-step">
       <div className="step-header">
-        <h2>Step 4: Data Review</h2>
-        <span className="step-indicator">Step 4 of 5</span>
+        <h2>Step 3: Data Review</h2>
+        <span className="step-indicator">Step 3 of {wizardData.totalSteps || 4}</span>
       </div>
 
       <div className="review-summary">
@@ -275,14 +230,8 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
             {table.getHeaderGroups().map(headerGroup => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map(header => (
-                  <th
-                    key={header.id}
-                    style={{ width: header.getSize() }}
-                  >
-                    {flexRender(
-                      header.column.columnDef.header,
-                      header.getContext()
-                    )}
+                  <th key={header.id} style={{ width: header.getSize() }}>
+                    {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
                 ))}
               </tr>
@@ -312,15 +261,9 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
       </div>
 
       <div className="form-actions">
-        <button type="button" onClick={onBack} className="btn-secondary">
-          ← Back
-        </button>
-        <button type="button" onClick={onCancel} className="btn-secondary">
-          Cancel
-        </button>
-        <button type="button" onClick={handleSubmit} className="btn-primary">
-          Next →
-        </button>
+        <button type="button" onClick={onBack} className="btn-secondary">← Back</button>
+        <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>
+        <button type="button" onClick={handleSubmit} className="btn-primary">Next →</button>
       </div>
     </div>
   );

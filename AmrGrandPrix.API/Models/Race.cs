@@ -13,13 +13,8 @@ public class Race
 
     public bool IsGrandPrixRace { get; set; }
 
-    /// <summary>
-    /// Order in the Grand Prix series (1-9 for GP races, null for non-GP races)
-    /// </summary>
-    public int? GrandPrixRaceOrder { get; set; }
-
     [Required]
-    public DateTime Date { get; set; }
+    public DateOnly Date { get; set; }
 
     [Required]
     public int Year { get; set; }

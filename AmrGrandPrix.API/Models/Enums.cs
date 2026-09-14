@@ -27,6 +27,7 @@ public enum FileType
 {
     CSV,
     Excel,
+    Text,
     PDF
 }
 

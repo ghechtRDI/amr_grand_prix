@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as tokenService from '../../services/tokenService';
 
 export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
   const [saving, setSaving] = useState(false);
@@ -32,7 +33,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
       setSaving(true);
       setError(null);
 
-      const token = localStorage.getItem('token');
+      const token = tokenService.getAccessToken();
 
       // Prepare payload
       const payload = {
@@ -98,7 +99,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
       <div className="wizard-step">
         <div className="step-header">
           <h2>Success!</h2>
-          <span className="step-indicator">Step 5 of 5</span>
+          <span className="step-indicator">Step 4 of 4</span>
         </div>
 
         <div className="success-message">
@@ -147,7 +148,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
     <div className="wizard-step">
       <div className="step-header">
         <h2>Step 5: Confirmation</h2>
-        <span className="step-indicator">Step 5 of 5</span>
+        <span className="step-indicator">Step 4 of 4</span>
       </div>
 
       <div className="confirmation-summary">

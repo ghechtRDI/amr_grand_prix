@@ -211,7 +211,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
         {
             RaceId = Guid.NewGuid(),
             Name = "Regular Race",
-            Date = new DateTime(2024, 6, 1),
+            Date = new DateOnly(2024, 6, 1),
             Year = 2024,
             IsGrandPrixRace = false
         };
@@ -578,7 +578,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
             {
                 RaceId = Guid.NewGuid(),
                 Name = $"Race {i + 1}",
-                Date = new DateTime(year, i + 1, 1),
+                Date = new DateOnly(year, i + 1, 1),
                 Year = year,
                 IsGrandPrixRace = true
             };
@@ -631,7 +631,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
             {
                 RaceId = Guid.NewGuid(),
                 Name = $"Race {i + 1}",
-                Date = new DateTime(year, i + 1, 1),
+                Date = new DateOnly(year, i + 1, 1),
                 Year = year,
                 IsGrandPrixRace = true
             };
@@ -684,7 +684,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
             {
                 RaceId = Guid.NewGuid(),
                 Name = $"Race {i + 1}",
-                Date = new DateTime(year, i + 1, 1),
+                Date = new DateOnly(year, i + 1, 1),
                 Year = year,
                 IsGrandPrixRace = true
             };
@@ -709,7 +709,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
             {
                 RaceId = Guid.NewGuid(),
                 Name = $"Race B{i + 1}",
-                Date = new DateTime(year, i + 1, 15),
+                Date = new DateOnly(year, i + 1, 15),
                 Year = year,
                 IsGrandPrixRace = true
             };
@@ -756,7 +756,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
         {
             RaceId = Guid.NewGuid(),
             Name = "Test Race",
-            Date = new DateTime(year, 1, 1),
+            Date = new DateOnly(year, 1, 1),
             Year = year,
             IsGrandPrixRace = true
         };
@@ -986,8 +986,8 @@ public class GrandPrixCalculationServiceTests : IDisposable
         await _context.Runners.AddAsync(runner);
         await _context.SaveChangesAsync();
 
-        var race1 = new Race { RaceId = Guid.NewGuid(), Name = "Race 1", Date = new DateTime(year, 1, 1), Year = year, IsGrandPrixRace = true };
-        var race2 = new Race { RaceId = Guid.NewGuid(), Name = "Race 2", Date = new DateTime(year, 2, 1), Year = year, IsGrandPrixRace = true };
+        var race1 = new Race { RaceId = Guid.NewGuid(), Name = "Race 1", Date = new DateOnly(year, 1, 1), Year = year, IsGrandPrixRace = true };
+        var race2 = new Race { RaceId = Guid.NewGuid(), Name = "Race 2", Date = new DateOnly(year, 2, 1), Year = year, IsGrandPrixRace = true };
         await _context.Races.AddRangeAsync(race1, race2);
 
         await _context.GrandPrixPoints.AddRangeAsync(
@@ -1093,7 +1093,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
         {
             RaceId = Guid.NewGuid(),
             Name = "Test Race",
-            Date = new DateTime(year, 6, 1),
+            Date = new DateOnly(year, 6, 1),
             Year = year,
             IsGrandPrixRace = isGrandPrix,
             Results = new List<RaceResult>()
@@ -1135,7 +1135,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
         {
             RaceId = Guid.NewGuid(),
             Name = $"Race {month}",
-            Date = new DateTime(year, month, 1),
+            Date = new DateOnly(year, month, 1),
             Year = year,
             IsGrandPrixRace = true
         };
