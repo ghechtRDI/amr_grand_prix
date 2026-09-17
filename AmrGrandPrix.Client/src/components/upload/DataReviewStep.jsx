@@ -92,6 +92,33 @@ function EditableCell({ getValue, row, column, table }) {
   );
 }
 
+// Dropdown for confirming/selecting which existing runner a row matches.
+// Always shows "+ New Runner" plus any suggested matches, sorted by confidence.
+function RunnerMatchCell({ row, table }) {
+  const { updateRunnerMatch } = table.options.meta;
+  const matches = row.original.runnerMatches || [];
+  const selected = row.original.matchedRunnerId || '';
+
+  if (matches.length === 0) {
+    return <span className="cell-value muted-text">New runner</span>;
+  }
+
+  return (
+    <select
+      value={selected}
+      onChange={(e) => updateRunnerMatch(row.index, e.target.value || null)}
+      className="cell-input runner-match-select"
+    >
+      <option value="">+ New Runner</option>
+      {matches.map(m => (
+        <option key={m.runnerId} value={m.runnerId}>
+          {m.firstName} {m.lastName} · age {m.age ?? '?'} · {Math.round(m.confidence * 100)}%
+        </option>
+      ))}
+    </select>
+  );
+}
+
 const COLUMNS = [
   columnHelper.accessor('place',  { header: 'Place',  cell: EditableCell, size: 80 }),
   columnHelper.accessor('bib',    { header: 'Bib',    cell: EditableCell, size: 80 }),
@@ -101,11 +128,18 @@ const COLUMNS = [
   columnHelper.accessor('time',   { header: 'Time',   cell: EditableCell, size: 120 }),
   columnHelper.accessor('status', { header: 'Status', cell: EditableCell, size: 100 }),
   columnHelper.display({
+    id: 'runnerMatch',
+    header: 'Runner Match',
+    cell: RunnerMatchCell,
+    size: 220,
+  }),
+  columnHelper.display({
     id: 'issues',
     header: 'Issues',
     cell: ({ row }) => {
       const issues = row.original.validationIssues || [];
       const isNewRunner = row.original.isNewRunner;
+      const needsReview = isNewRunner && (row.original.runnerMatches || []).length > 0;
 
       if (issues.length === 0 && !isNewRunner) {
         return <span className="status-ok">✓</span>;
@@ -122,7 +156,12 @@ const COLUMNS = [
               ⚠
             </span>
           ))}
-          {isNewRunner && (
+          {needsReview && (
+            <span className="issue-badge review" title="Possible match found — confirm in Runner Match column">
+              ❓
+            </span>
+          )}
+          {isNewRunner && !needsReview && (
             <span className="issue-badge info" title="New runner">
               ℹ
             </span>
@@ -149,6 +188,7 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
       bib:    row.bib    ?? '',
       status: row.status || 'Finished',
       validationIssues: row.validationIssues || [],
+      runnerMatches: row.runnerMatches || [],
       // No matched runner → will be created as new
       isNewRunner: (row.runnerMatches || []).length === 0 && !row.matchedRunnerId,
       matchedRunnerId: row.matchedRunnerId || null,
@@ -165,17 +205,29 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     );
   }, []);
 
+  // Called when the user picks a suggested runner (or "+ New Runner") from the dropdown.
+  const updateRunnerMatch = useCallback((rowIndex, runnerId) => {
+    setData(old =>
+      old.map((row, index) =>
+        index === rowIndex
+          ? { ...row, matchedRunnerId: runnerId, isNewRunner: !runnerId }
+          : row
+      )
+    );
+  }, []);
+
   const table = useReactTable({
     data,
     columns: COLUMNS,
     getCoreRowModel: getCoreRowModel(),
-    meta: { editingCell, setEditingCell, updateData },
+    meta: { editingCell, setEditingCell, updateData, updateRunnerMatch },
   });
 
   const stats = useMemo(() => ({
     totalResults: data.length,
     warnings: data.filter(row => row.validationIssues?.length > 0).length,
     newRunners: data.filter(row => row.isNewRunner).length,
+    needsReview: data.filter(row => row.isNewRunner && (row.runnerMatches || []).length > 0).length,
   }), [data]);
 
   const handleSubmit = () => {
@@ -218,9 +270,16 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
               <span className="stat-value info">{stats.newRunners}</span>
             </div>
           )}
+          {stats.needsReview > 0 && (
+            <div className="stat">
+              <span className="stat-label">Possible Matches to Confirm:</span>
+              <span className="stat-value review">{stats.needsReview}</span>
+            </div>
+          )}
         </div>
         <p className="review-hint">
           Click any cell to edit. Press Enter to save, Escape to cancel.
+          {stats.needsReview > 0 && ' Use the Runner Match column to confirm or reject suggested matches.'}
         </p>
       </div>
 

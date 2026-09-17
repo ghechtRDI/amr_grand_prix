@@ -31,6 +31,9 @@ public class AnthropicLlmProvider : ILlmProvider
         - If a field is absent from the source data set it to null.
         - Annotations on times (*, #, CR, WR, etc.) belong in the notes field, not time_string.
         - Do not invent data. If something is unclear, use null.
+        - Many PDFs print results twice: once in a "Gender Results" view and again in an "Age Group
+          Results" view. Extract each runner only once — prefer the Gender Results section and skip
+          any Age Group sub-sections that repeat the same runners.
         """;
 
     private static readonly object ToolSchema = new
@@ -93,7 +96,7 @@ public class AnthropicLlmProvider : ILlmProvider
         var body = new
         {
             model = _settings.Model,
-            max_tokens = 8192,
+            max_tokens = 16000,
             temperature = 0,
             system = SystemPrompt,
             tools = new[]
@@ -135,6 +138,10 @@ public class AnthropicLlmProvider : ILlmProvider
         var inputTokens  = doc["usage"]?["input_tokens"]?.GetValue<int>()  ?? 0;
         var outputTokens = doc["usage"]?["output_tokens"]?.GetValue<int>() ?? 0;
         var model        = doc["model"]?.GetValue<string>() ?? _settings.Model;
+        var stopReason   = doc["stop_reason"]?.GetValue<string>();
+
+        if (stopReason == "max_tokens")
+            _logger.LogWarning("Anthropic hit max_tokens limit for {FileName} — output may be truncated", fileName);
 
         // Locate tool_use block
         var content = doc["content"]?.AsArray();

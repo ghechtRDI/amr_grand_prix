@@ -57,6 +57,7 @@ public class OllamaLlmProvider : ILlmProvider
         ILogger<OllamaLlmProvider> logger)
     {
         _http = http;
+        _http.Timeout = TimeSpan.FromMinutes(10);
         _settings = options.Value.Ollama;
         _logger = logger;
     }
@@ -75,7 +76,7 @@ public class OllamaLlmProvider : ILlmProvider
             },
             format = "json",
             stream = false,
-            options = new { temperature = 0 }
+            options = new { temperature = 0, num_predict = 4096, num_ctx = 8192 }
         };
 
         var json = JsonSerializer.Serialize(body, _jsonOpts);

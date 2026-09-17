@@ -84,7 +84,8 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 
 // LLM extraction services
 builder.Services.AddHttpClient<AnthropicLlmProvider>();
-builder.Services.AddHttpClient<OllamaLlmProvider>();
+builder.Services.AddHttpClient<OllamaLlmProvider>(client =>
+    client.Timeout = TimeSpan.FromMinutes(10));
 
 var llmProvider = builder.Configuration.GetValue<string>("Llm:Provider") ?? "Anthropic";
 if (llmProvider.Equals("Ollama", StringComparison.OrdinalIgnoreCase))

@@ -360,6 +360,10 @@
   color: #2196f3;
 }
 
+.stat-value.review {
+  color: #9c27b0;
+}
+
 .detected-columns {
   color: rgba(255, 255, 255, 0.7);
 }
@@ -530,6 +534,21 @@
 .issue-badge.info {
   background: rgba(33, 150, 243, 0.2);
   color: #2196f3;
+}
+
+.issue-badge.review {
+  background: rgba(156, 39, 176, 0.2);
+  color: #9c27b0;
+}
+
+.muted-text {
+  color: rgba(255, 255, 255, 0.5);
+  cursor: default;
+}
+
+.runner-match-select {
+  width: 100%;
+  cursor: pointer;
 }
 
 /* Confirmation */

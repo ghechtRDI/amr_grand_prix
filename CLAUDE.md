@@ -41,7 +41,7 @@ dotnet user-secrets set "Llm:Anthropic:ApiKey" "sk-ant-..."
 **Ollama (local, no cost):**
 ```bash
 docker-compose up -d ollama
-docker compose exec ollama ollama pull qwen2.5:14b-instruct
+docker compose exec ollama ollama pull gwen2.5:14b-instruct
 # Then set in appsettings.Development.json:
 # "Llm": { "Provider": "Ollama" }
 ```

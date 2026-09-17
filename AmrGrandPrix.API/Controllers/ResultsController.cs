@@ -72,7 +72,7 @@ public class ResultsController : ControllerBase
                 extraction = await _llmExtractionService.ExtractAsync(stream, request.File.FileName, ct);
 
             var processedResults = await _resultsProcessingService.ProcessResultsAsync(extraction.Sections);
-            await MatchRunnersAsync(processedResults);
+            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults);
 
             var user = await _userManager.GetUserAsync(User);
             var uploadBatch = new UploadBatch
@@ -387,19 +387,6 @@ public class ResultsController : ControllerBase
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private async Task MatchRunnersAsync(List<ResultRow> results)
-    {
-        foreach (var result in results)
-        {
-            if (!string.IsNullOrEmpty(result.Name))
-            {
-                var matches = await _runnerMatchingService.FindMatchesAsync(
-                    result.Name, result.Age, result.Gender);
-                result.RunnerMatches = matches.Select(m => RunnerMatchDto.FromRunnerMatch(m)).ToList();
-            }
-        }
-    }
 
     private static UploadResultsResponse BuildResponse(Guid batchId, List<ResultRow> results) =>
         new()

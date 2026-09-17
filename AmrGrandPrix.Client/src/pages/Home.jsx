@@ -10,26 +10,14 @@ import './pages.css';
 const CURRENT_YEAR = new Date().getFullYear();
 
 export const Home = () => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const isAdminOrManager = user?.roles?.some((r) => r === 'Admin' || r === 'Manager');
-
-  const handleLogout = async () => {
-    await logout();
-  };
 
   return (
     <div className="page-container">
       <div className="page-header">
         <h1>Alaska Mountain Runners Grand Prix</h1>
-        {user && (
-          <div className="user-info">
-            <p>Welcome, {user.firstName || user.email}!</p>
-            <p className="user-roles">Roles: {user.roles?.join(', ') || 'ReadOnly'}</p>
-            <button onClick={handleLogout} className="btn-secondary">
-              Logout
-            </button>
-          </div>
-        )}
+        {user && <p className="page-subtitle">Welcome back, {user.firstName || user.email}.</p>}
       </div>
 
       <div className="page-content">

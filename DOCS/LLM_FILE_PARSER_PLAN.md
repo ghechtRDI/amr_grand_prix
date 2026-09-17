@@ -77,7 +77,7 @@ record ExtractedRow(
 `ILlmProvider` with two implementations:
 
 - **`OllamaLlmProvider`** — HTTP to `http://ollama:11434`, model
-  `qwen2.5:14b-instruct`, `format: "json"`.
+  `qwen2.5:14b`, `format: "json"`.
 - **`AnthropicLlmProvider`** — `Anthropic.SDK` NuGet, Claude Haiku 4.5 default,
   structured output via forced tool use
   (`tool_choice: {type: "tool", name: "extract_results"}`).
@@ -120,7 +120,7 @@ ollama:
   volumes: [ollama_data:/root/.ollama]
 ```
 
-One-time: `docker compose exec ollama ollama pull qwen2.5:14b-instruct`.
+One-time: `docker compose exec ollama ollama pull gwen2.5:14b-instruct`.
 
 ## Wizard changes (`ResultsUpload.jsx`)
 
