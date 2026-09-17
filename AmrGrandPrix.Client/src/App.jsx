@@ -6,6 +6,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import NavBar from './components/layout/NavBar';
 import LoginForm from './components/auth/LoginForm';
 import RegisterForm from './components/auth/RegisterForm';
 import EmailConfirmation from './components/auth/EmailConfirmation';
@@ -21,6 +22,7 @@ function App() {
   return (
     <Router>
       <AuthProvider>
+        <NavBar />
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={<LoginForm />} />
