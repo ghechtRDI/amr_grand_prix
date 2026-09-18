@@ -16,7 +16,8 @@ public class RaceResultDto
     public int? PlaceGender { get; set; }
     public int? PlaceAgeCategory { get; set; }
     public TimeSpan? Time { get; set; }
-    public int Age { get; set; }
+    public int? Age { get; set; }
+    public string? AgeCategory { get; set; }
     public Gender Gender { get; set; }
     public ResultStatus Status { get; set; }
     public string? Notes { get; set; }

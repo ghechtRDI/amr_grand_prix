@@ -19,6 +19,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<GrandPrixPoints> GrandPrixPoints { get; set; } = null!;
     public DbSet<GrandPrixStanding> GrandPrixStandings { get; set; } = null!;
     public DbSet<UploadBatch> UploadBatches { get; set; } = null!;
+    public DbSet<RunnerClaim> RunnerClaims { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -28,6 +29,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         builder.Entity<ApplicationUser>(entity =>
         {
             entity.ToTable("Users");
+
+            entity.HasOne(u => u.Runner)
+                .WithMany()
+                .HasForeignKey(u => u.RunnerId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<IdentityRole>(entity =>
@@ -94,7 +100,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasIndex(r => r.UploadBatchId);
             entity.HasIndex(r => new { r.RaceId, r.RunnerId });
 
-            entity.Property(r => r.Age).IsRequired();
             entity.Property(r => r.Gender).IsRequired();
             entity.Property(r => r.Status).IsRequired();
 
@@ -175,6 +180,26 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(b => b.Race)
                 .WithMany(race => race.UploadBatches)
                 .HasForeignKey(b => b.RaceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Configure RunnerClaim entity
+        builder.Entity<RunnerClaim>(entity =>
+        {
+            entity.HasKey(c => c.ClaimId);
+            entity.HasIndex(c => c.RunnerId);
+            entity.HasIndex(c => c.ApplicationUserId);
+
+            entity.Property(c => c.Status).IsRequired();
+
+            entity.HasOne(c => c.ApplicationUser)
+                .WithMany()
+                .HasForeignKey(c => c.ApplicationUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(c => c.Runner)
+                .WithMany()
+                .HasForeignKey(c => c.RunnerId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

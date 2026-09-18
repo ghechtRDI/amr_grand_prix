@@ -82,7 +82,7 @@ public static class GrandPrixConstants
     public static readonly List<AgeCategory> AgeCategories = new()
     {
         new AgeCategory { Name = "17 and Under", MinAge = 0, MaxAge = 17 },
-        new AgeCategory { Name = "19-29", MinAge = 19, MaxAge = 29 },
+        new AgeCategory { Name = "18-29", MinAge = 18, MaxAge = 29 },
         new AgeCategory { Name = "30-39", MinAge = 30, MaxAge = 39 },
         new AgeCategory { Name = "40-49", MinAge = 40, MaxAge = 49 },
         new AgeCategory { Name = "50-59", MinAge = 50, MaxAge = 59 },
@@ -92,12 +92,17 @@ public static class GrandPrixConstants
     };
 
     /// <summary>
-    /// Gets the age category name for a given age
+    /// Gets the age category name for a given age. The oldest category has no real upper bound
+    /// (people do race past 89), so any age above the highest-defined MaxAge still falls into it.
     /// </summary>
     public static string GetAgeCategory(int age)
     {
         var category = AgeCategories.FirstOrDefault(c => age >= c.MinAge && age <= c.MaxAge);
-        return category?.Name ?? "Unknown";
+        if (category != null)
+            return category.Name;
+
+        var oldest = AgeCategories.OrderByDescending(c => c.MinAge).First();
+        return age > oldest.MaxAge ? oldest.Name : "Unknown";
     }
 
     /// <summary>

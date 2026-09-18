@@ -38,3 +38,10 @@ public enum UploadStatus
     Saved,
     Cancelled
 }
+
+public enum ClaimStatus
+{
+    Pending,
+    Approved,
+    Rejected
+}

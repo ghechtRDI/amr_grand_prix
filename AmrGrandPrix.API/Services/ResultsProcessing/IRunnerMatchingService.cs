@@ -12,17 +12,20 @@ public interface IRunnerMatchingService
     /// Find potential matches for a runner in the database
     /// </summary>
     /// <param name="name">Runner's full name</param>
-    /// <param name="age">Runner's age (optional)</param>
+    /// <param name="age">Runner's exact age (optional)</param>
     /// <param name="gender">Runner's gender (optional)</param>
+    /// <param name="ageCategory">Runner's age category, used when an exact age isn't known (optional)</param>
+    /// <param name="asOfDate">Date to compute each candidate runner's age as of (defaults to today when not a race-upload context)</param>
     /// <returns>List of potential matches with confidence scores</returns>
-    Task<List<RunnerMatch>> FindMatchesAsync(string name, int? age = null, Gender? gender = null);
+    Task<List<RunnerMatch>> FindMatchesAsync(string name, int? age = null, Gender? gender = null, string? ageCategory = null, DateOnly? asOfDate = null);
 
     /// <summary>
     /// Find matches for multiple result rows
     /// </summary>
     /// <param name="resultRows">Result rows to match</param>
+    /// <param name="raceDate">Date of the race these rows belong to, used to compute each candidate runner's age at that race rather than today</param>
     /// <returns>Result rows with RunnerMatches populated</returns>
-    Task<List<ResultRow>> FindMatchesForResultsAsync(List<ResultRow> resultRows);
+    Task<List<ResultRow>> FindMatchesForResultsAsync(List<ResultRow> resultRows, DateOnly raceDate);
 
     /// <summary>
     /// Calculate similarity between two names using Levenshtein distance
@@ -43,6 +46,8 @@ public class RunnerMatch
     public string LastName { get; set; } = string.Empty;
     public string FullName => $"{FirstName} {LastName}";
     public int? Age { get; set; }
+    public bool HasVerifiedDateOfBirth { get; set; }
+    public string? AgeCategory { get; set; }
     public Gender? Gender { get; set; }
     public double Confidence { get; set; }
     public bool NameMatch { get; set; }

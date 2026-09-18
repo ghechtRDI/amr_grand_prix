@@ -1,3 +1,4 @@
+using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs.RaceResults;
@@ -25,14 +26,17 @@ public class RunnerMatchingService : IRunnerMatchingService
         _logger = logger;
     }
 
-    public async Task<List<RunnerMatch>> FindMatchesAsync(string name, int? age = null, Gender? gender = null)
+    public async Task<List<RunnerMatch>> FindMatchesAsync(string name, int? age = null, Gender? gender = null, string? ageCategory = null, DateOnly? asOfDate = null)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             return new List<RunnerMatch>();
         }
 
-        _logger.LogDebug("Finding matches for: {Name}, Age: {Age}, Gender: {Gender}", name, age, gender);
+        var effectiveAsOfDate = asOfDate ?? DateOnly.FromDateTime(DateTime.Today);
+
+        _logger.LogDebug("Finding matches for: {Name}, Age: {Age}, AgeCategory: {AgeCategory}, Gender: {Gender}, AsOf: {AsOf}",
+            name, age, ageCategory, gender, effectiveAsOfDate);
 
         // Get all runners from database
         var allRunners = await _context.Runners.ToListAsync();
@@ -50,21 +54,28 @@ public class RunnerMatchingService : IRunnerMatchingService
 
             // Check age match
             var ageMatch = true;
-            int? runnerAge = null;
+            var runnerAge = AgeCalculator.GetRunnerAge(runner, effectiveAsOfDate);
+            string? runnerAgeCategory = null;
 
-            if (runner.DateOfBirth.HasValue)
+            if (runnerAge.HasValue)
             {
-                runnerAge = CalculateAge(runner.DateOfBirth.Value);
+                runnerAgeCategory = GrandPrixConstants.GetAgeCategory(runnerAge.Value);
 
                 if (age.HasValue)
                 {
                     var ageDifference = Math.Abs(age.Value - runnerAge.Value);
                     ageMatch = ageDifference <= MaxAgeDiscrepancy;
                 }
+                else if (!string.IsNullOrEmpty(ageCategory))
+                {
+                    // Only a category is known for the incoming row — compare at the category
+                    // level instead of demanding an exact-age match.
+                    ageMatch = string.Equals(runnerAgeCategory, ageCategory, StringComparison.OrdinalIgnoreCase);
+                }
             }
-            else if (age.HasValue)
+            else if (age.HasValue || !string.IsNullOrEmpty(ageCategory))
             {
-                // No DOB in database, can't verify age
+                // No DOB or estimated birth year in database, can't verify age
                 ageMatch = false;
             }
 
@@ -80,6 +91,8 @@ public class RunnerMatchingService : IRunnerMatchingService
                 FirstName = runner.FirstName,
                 LastName = runner.LastName,
                 Age = runnerAge,
+                HasVerifiedDateOfBirth = runner.DateOfBirth.HasValue,
+                AgeCategory = runnerAgeCategory,
                 Gender = runner.Gender,
                 Confidence = confidence,
                 NameMatch = similarity >= 0.90,
@@ -100,7 +113,7 @@ public class RunnerMatchingService : IRunnerMatchingService
         return sortedMatches;
     }
 
-    public async Task<List<ResultRow>> FindMatchesForResultsAsync(List<ResultRow> resultRows)
+    public async Task<List<ResultRow>> FindMatchesForResultsAsync(List<ResultRow> resultRows, DateOnly raceDate)
     {
         _logger.LogInformation("Finding runner matches for {Count} result rows", resultRows.Count);
 
@@ -109,7 +122,7 @@ public class RunnerMatchingService : IRunnerMatchingService
             if (string.IsNullOrWhiteSpace(row.Name))
                 continue;
 
-            var matches = await FindMatchesAsync(row.Name, row.Age, row.Gender);
+            var matches = await FindMatchesAsync(row.Name, row.Age, row.Gender, row.AgeCategory, raceDate);
 
             // Only include matches with reasonable confidence (>= 0.70)
             row.RunnerMatches = matches
@@ -220,15 +233,4 @@ public class RunnerMatchingService : IRunnerMatchingService
         return Math.Min(confidence, 1.0);
     }
 
-    private int CalculateAge(DateTime dateOfBirth)
-    {
-        var today = DateTime.Today;
-        var age = today.Year - dateOfBirth.Year;
-
-        // Subtract a year if birthday hasn't occurred yet this year
-        if (dateOfBirth.Date > today.AddYears(-age))
-            age--;
-
-        return age;
-    }
 }

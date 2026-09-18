@@ -8,6 +8,11 @@ public class ResultRow
     public int RowNumber { get; set; }
     public string Name { get; set; } = string.Empty;
     public int? Age { get; set; }
+
+    /// <summary>
+    /// Age category (e.g. "40-49"), set when only a category was reported instead of an exact age
+    /// </summary>
+    public string? AgeCategory { get; set; }
     public int? Place { get; set; }
     public string? TimeString { get; set; }
     public TimeSpan? Time { get; set; }
@@ -30,6 +35,12 @@ public class ResultRow
     /// Selected runner ID (if matched to existing runner)
     /// </summary>
     public Guid? MatchedRunnerId { get; set; }
+
+    /// <summary>
+    /// When matched to an existing runner whose stored age differs from this row's reported age,
+    /// whether to overwrite the runner's stored date of birth with this row's exact age.
+    /// </summary>
+    public bool UpdateRunnerAge { get; set; }
 }
 
 /// <summary>

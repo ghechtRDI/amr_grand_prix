@@ -28,9 +28,7 @@ public class LlmExtractionService : ILlmExtractionService
         _logger.LogInformation("Extracted {Chars} characters from {FileName}", text.Length, fileName);
 
         var providerResult = await _provider.ExtractAsync(text, fileName, ct);
-
-        var extraction = DeserializeExtraction(providerResult.Json, fileName);
-        var sections   = extraction.Sections.Select(s => s.ToExtractedSection()).ToList();
+        var sections       = RehydrateSections(providerResult.Json, fileName);
 
         return new ExtractionResult(
             sections,
@@ -38,6 +36,12 @@ public class LlmExtractionService : ILlmExtractionService
             providerResult.Model,
             providerResult.InputTokens,
             providerResult.OutputTokens);
+    }
+
+    public List<ExtractedSection> RehydrateSections(string rawJson, string fileName)
+    {
+        var extraction = DeserializeExtraction(rawJson, fileName);
+        return extraction.Sections.Select(s => s.ToExtractedSection()).ToList();
     }
 
     private static async Task<string> ExtractTextAsync(Stream stream, string fileName)
@@ -89,6 +93,8 @@ public class LlmExtractionService : ILlmExtractionService
         public int?    Place       { get; set; }
         public string  Name        { get; set; } = string.Empty;
         public int?    Age         { get; set; }
+        [JsonPropertyName("age_category")]
+        public string? AgeCategory { get; set; }
         public string? Gender      { get; set; }
         [JsonPropertyName("time_string")]
         public string? TimeString  { get; set; }
@@ -96,6 +102,6 @@ public class LlmExtractionService : ILlmExtractionService
         public string? Notes       { get; set; }
 
         public ExtractedRow ToExtractedRow() =>
-            new(Place, Name, Age, Gender, TimeString, Status ?? "Finished", Notes);
+            new(Place, Name, Age, AgeCategory, Gender, TimeString, Status ?? "Finished", Notes);
     }
 }

@@ -13,6 +13,7 @@ public record ExtractedRow(
     int? Place,
     string Name,
     int? Age,
+    string? AgeCategory,
     string? Gender,
     string? TimeString,
     string? Status,

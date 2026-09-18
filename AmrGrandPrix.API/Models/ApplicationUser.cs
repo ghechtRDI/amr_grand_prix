@@ -11,4 +11,10 @@ public class ApplicationUser : IdentityUser
     public DateTime? RefreshTokenExpiryTime { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
+
+    /// <summary>
+    /// The Runner this account is linked to, once a claim on it has been approved.
+    /// </summary>
+    public Guid? RunnerId { get; set; }
+    public virtual Runner? Runner { get; set; }
 }

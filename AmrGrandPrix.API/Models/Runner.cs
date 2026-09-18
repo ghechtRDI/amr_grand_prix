@@ -16,9 +16,17 @@ public class Runner
     public string LastName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Date of birth (optional, used for age verification)
+    /// Self-reported date of birth. Set only when the runner has created and verified their own
+    /// profile — the app never estimates or auto-populates this field.
     /// </summary>
-    public DateTime? DateOfBirth { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
+
+    /// <summary>
+    /// Estimated birth year, derived from an age reported in a race result assuming that age was
+    /// accurate as of the race date. Used only when <see cref="DateOfBirth"/> is not set, and
+    /// overwritten whenever an admin corrects a runner's age during results review.
+    /// </summary>
+    public int? EstimatedBirthYear { get; set; }
 
     [Required]
     public Gender Gender { get; set; }

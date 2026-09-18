@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import RaceSelectionStep from '../../components/upload/RaceSelectionStep';
 import FileUploadStep    from '../../components/upload/FileUploadStep';
 import DataReviewStep    from '../../components/upload/DataReviewStep';
@@ -19,8 +19,11 @@ const STEPS = [
 ];
 
 export default function ResultsUpload() {
-  const [currentStepId, setCurrentStepId] = useState('race-selection');
-  const [wizardData, setWizardData]       = useState({});
+  const location = useLocation();
+  const resumeData = location.state?.resume || null;
+
+  const [currentStepId, setCurrentStepId] = useState(resumeData ? 'data-review' : 'race-selection');
+  const [wizardData, setWizardData]       = useState(resumeData || {});
   const navigate = useNavigate();
 
   const currentIndex        = STEPS.findIndex(s => s.id === currentStepId);
@@ -33,12 +36,18 @@ export default function ResultsUpload() {
   };
 
   const handleBack = () => {
+    // Resumed batches skip race selection / file upload (already done in a prior session),
+    // so there's no earlier step to go back to.
+    if (resumeData && currentStepId === 'data-review') {
+      navigate('/admin/results');
+      return;
+    }
     if (currentIndex > 0) setCurrentStepId(STEPS[currentIndex - 1].id);
   };
 
   const handleCancel = () => {
     if (window.confirm('Are you sure you want to cancel? All progress will be lost.'))
-      navigate('/');
+      navigate(resumeData ? '/admin/results' : '/');
   };
 
   if (!CurrentStepComponent) return null;

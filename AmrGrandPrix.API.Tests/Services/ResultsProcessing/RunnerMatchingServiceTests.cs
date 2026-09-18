@@ -39,7 +39,7 @@ public class RunnerMatchingServiceTests : IDisposable
                 RunnerId = Guid.NewGuid(),
                 FirstName = "John",
                 LastName = "Doe",
-                DateOfBirth = new DateTime(1989, 5, 15), // Age ~35
+                DateOfBirth = new DateOnly(1989, 5, 15), // Age ~35
                 Gender = Gender.Male
             },
             new Runner
@@ -47,7 +47,7 @@ public class RunnerMatchingServiceTests : IDisposable
                 RunnerId = Guid.NewGuid(),
                 FirstName = "Jane",
                 LastName = "Smith",
-                DateOfBirth = new DateTime(1996, 8, 20), // Age ~28
+                DateOfBirth = new DateOnly(1996, 8, 20), // Age ~28
                 Gender = Gender.Female
             },
             new Runner
@@ -55,7 +55,7 @@ public class RunnerMatchingServiceTests : IDisposable
                 RunnerId = Guid.NewGuid(),
                 FirstName = "Michael",
                 LastName = "Johnson",
-                DateOfBirth = new DateTime(1982, 3, 10), // Age ~42
+                DateOfBirth = new DateOnly(1982, 3, 10), // Age ~42
                 Gender = Gender.Male
             },
             new Runner
@@ -266,7 +266,7 @@ public class RunnerMatchingServiceTests : IDisposable
             RunnerId = Guid.NewGuid(),
             FirstName = "John",
             LastName = "Doe",
-            DateOfBirth = new DateTime(1984, 5, 15), // Age ~40 (5 years off)
+            DateOfBirth = new DateOnly(1984, 5, 15), // Age ~40 (5 years off)
             Gender = Gender.Male
         });
         await _context.SaveChangesAsync();
@@ -301,7 +301,7 @@ public class RunnerMatchingServiceTests : IDisposable
         };
 
         // Act
-        var results = await _service.FindMatchesForResultsAsync(resultRows);
+        var results = await _service.FindMatchesForResultsAsync(resultRows, DateOnly.FromDateTime(DateTime.Today));
 
         // Assert
         results.First().RunnerMatches.Should().NotBeNull();
@@ -323,7 +323,7 @@ public class RunnerMatchingServiceTests : IDisposable
         };
 
         // Act
-        var results = await _service.FindMatchesForResultsAsync(resultRows);
+        var results = await _service.FindMatchesForResultsAsync(resultRows, DateOnly.FromDateTime(DateTime.Today));
 
         // Assert
         results.First().MatchedRunnerId.Should().NotBeNull();
@@ -344,7 +344,7 @@ public class RunnerMatchingServiceTests : IDisposable
         };
 
         // Act
-        var results = await _service.FindMatchesForResultsAsync(resultRows);
+        var results = await _service.FindMatchesForResultsAsync(resultRows, DateOnly.FromDateTime(DateTime.Today));
 
         // Assert
         // Should have matches but not auto-matched due to lower confidence
@@ -371,7 +371,7 @@ public class RunnerMatchingServiceTests : IDisposable
         };
 
         // Act
-        var results = await _service.FindMatchesForResultsAsync(resultRows);
+        var results = await _service.FindMatchesForResultsAsync(resultRows, DateOnly.FromDateTime(DateTime.Today));
 
         // Assert
         results.First().ValidationIssues.Should().Contain(i =>
@@ -395,7 +395,7 @@ public class RunnerMatchingServiceTests : IDisposable
         };
 
         // Act
-        var results = await _service.FindMatchesForResultsAsync(resultRows);
+        var results = await _service.FindMatchesForResultsAsync(resultRows, DateOnly.FromDateTime(DateTime.Today));
 
         // Assert
         var matches = results.First().RunnerMatches;
@@ -419,7 +419,7 @@ public class RunnerMatchingServiceTests : IDisposable
         };
 
         // Act
-        var results = await _service.FindMatchesForResultsAsync(resultRows);
+        var results = await _service.FindMatchesForResultsAsync(resultRows, DateOnly.FromDateTime(DateTime.Today));
 
         // Assert
         results.First().RunnerMatches.Should().BeNullOrEmpty();

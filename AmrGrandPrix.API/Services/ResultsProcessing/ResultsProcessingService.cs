@@ -81,6 +81,7 @@ public class ResultsProcessingService : IResultsProcessingService
             RowNumber   = rowNumber,
             Name        = name,
             Age         = row.Age,
+            AgeCategory = row.Age.HasValue ? null : NormalizeAgeCategory(row.AgeCategory),
             Place       = row.Place,
             TimeString  = row.TimeString,
             Time        = ParseTime(row.TimeString),
@@ -172,9 +173,9 @@ public class ResultsProcessingService : IResultsProcessingService
         if (string.IsNullOrWhiteSpace(row.Name))
             issues.Add(new() { Field = "Name", Severity = ValidationSeverity.Error, Message = "Name is required" });
 
-        if (!row.Age.HasValue)
+        if (!row.Age.HasValue && string.IsNullOrEmpty(row.AgeCategory))
             issues.Add(new() { Field = "Age", Severity = ValidationSeverity.Warning, Message = "Age is missing" });
-        else if (row.Age < 5 || row.Age > 100)
+        else if (row.Age is < 5 or > 100)
             issues.Add(new() { Field = "Age", Severity = ValidationSeverity.Warning,
                                Message = $"Age {row.Age} is outside typical range (5-100)" });
 
@@ -208,6 +209,18 @@ public class ResultsProcessingService : IResultsProcessingService
             "NB" or "NONBINARY" or "NON-BINARY" or "X" => Gender.Nonbinary,
             _ => null
         };
+    }
+
+    private static string? NormalizeAgeCategory(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var trimmed = value.Trim();
+        var match = GrandPrixConstants.AgeCategories
+            .FirstOrDefault(c => string.Equals(c.Name, trimmed, StringComparison.OrdinalIgnoreCase));
+
+        return match?.Name; // null if the LLM produced a category name we don't recognize
     }
 
     private static ResultStatus ParseStatus(string? value) =>

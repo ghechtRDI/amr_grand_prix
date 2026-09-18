@@ -40,10 +40,16 @@ public class RaceResult
     public TimeSpan? Time { get; set; }
 
     /// <summary>
-    /// Runner's age at time of race
+    /// Runner's exact age at time of race (null when only an age category was reported)
     /// </summary>
-    [Required]
-    public int Age { get; set; }
+    public int? Age { get; set; }
+
+    /// <summary>
+    /// Age category at time of race (e.g. "40-49"). Set directly when the source only reported
+    /// a category, or derived from <see cref="Age"/> when an exact age is known.
+    /// </summary>
+    [MaxLength(50)]
+    public string? AgeCategory { get; set; }
 
     [Required]
     public Gender Gender { get; set; }

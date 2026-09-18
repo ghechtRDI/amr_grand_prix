@@ -612,6 +612,12 @@
   font-size: 0.85rem;
 }
 
+.batch-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 .filename-cell {
   max-width: 200px;
   overflow: hidden;

@@ -12,31 +12,6 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
     private readonly ApplicationDbContext _context;
     private readonly ILogger<GrandPrixCalculationService> _logger;
 
-    // Open Division scoring table
-    private static readonly Dictionary<int, int> OpenDivisionPoints = new()
-    {
-        { 1, 100 },
-        { 2, 90 },
-        { 3, 85 },
-        { 4, 80 },
-        { 5, 75 },
-        { 6, 70 },
-        { 7, 65 },
-        { 8, 60 },
-        { 9, 55 },
-        { 10, 50 },
-        { 11, 45 },
-        { 12, 40 },
-        { 13, 35 },
-        { 14, 30 },
-        { 15, 25 },
-        { 16, 20 },
-        { 17, 15 },
-        { 18, 10 },
-        { 19, 5 },
-        { 20, 1 }
-    };
-
     private const int RecordBonusPoints = 10;
     private const int MinRacesForEligibility = 1; // Must finish top 20/5 in at least 1 race
     private const int BestRacesCount = 4; // Count best 4 races
@@ -52,35 +27,27 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
 
     public int CalculateOpenDivisionPoints(int placeInGender, bool isNewRecord = false)
     {
-        var basePoints = OpenDivisionPoints.GetValueOrDefault(placeInGender, 0);
+        var basePoints = GrandPrixConstants.GetOpenDivisionPoints(placeInGender);
         var bonus = isNewRecord ? RecordBonusPoints : 0;
         return basePoints + bonus;
     }
 
     public int CalculateAgeDivisionPoints(int placeInAgeCategory)
     {
-        return placeInAgeCategory switch
-        {
-            1 => 5,
-            2 => 4,
-            3 => 3,
-            4 => 2,
-            5 => 1,
-            _ => 0
-        };
+        return GrandPrixConstants.GetAgeDivisionPoints(placeInAgeCategory);
     }
 
     public string DetermineAgeCategory(int age)
     {
-        if (age <= 17) return "17 and Under";
-        if (age <= 29) return "19-29";
-        if (age <= 39) return "30-39";
-        if (age <= 49) return "40-49";
-        if (age <= 59) return "50-59";
-        if (age <= 69) return "60-69";
-        if (age <= 79) return "70-79";
-        return "80-89";
+        return GrandPrixConstants.GetAgeCategory(age);
     }
+
+    /// <summary>
+    /// Age category for a result: uses the stored category directly (set when only a category
+    /// was reported), falling back to deriving one from the exact age. Null when neither is known.
+    /// </summary>
+    private string? GetResultAgeCategory(RaceResult result) =>
+        result.AgeCategory ?? (result.Age.HasValue ? DetermineAgeCategory(result.Age.Value) : null);
 
     public async Task<int> CalculateRacePointsAsync(Guid raceId)
     {
@@ -168,38 +135,42 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
                 pointsCreated++;
             }
 
-            // Calculate Age Division points (top 5 per age category)
-            var ageCategory = DetermineAgeCategory(result.Age);
-            var ageDivision = gender == Gender.Male ? Division.AgeMale : Division.AgeFemale;
-
-            // Find place within age category
-            var resultsInCategory = results
-                .Where(r => DetermineAgeCategory(r.Age) == ageCategory)
-                .OrderBy(r => r.Time)
-                .ToList();
-
-            var placeInCategory = resultsInCategory.IndexOf(result) + 1;
-            result.PlaceAgeCategory = placeInCategory;
-
-            if (placeInCategory <= 5)
+            // Calculate Age Division points (top 5 per age category) — skip results with no
+            // age info at all (neither an exact age nor a category was ever recorded)
+            var ageCategory = GetResultAgeCategory(result);
+            if (ageCategory != null)
             {
-                var agePoints = CalculateAgeDivisionPoints(placeInCategory);
+                var ageDivision = gender == Gender.Male ? Division.AgeMale : Division.AgeFemale;
 
-                _context.GrandPrixPoints.Add(new GrandPrixPoints
+                // Find place within age category
+                var resultsInCategory = results
+                    .Where(r => GetResultAgeCategory(r) == ageCategory)
+                    .OrderBy(r => r.Time)
+                    .ToList();
+
+                var placeInCategory = resultsInCategory.IndexOf(result) + 1;
+                result.PlaceAgeCategory = placeInCategory;
+
+                if (placeInCategory <= 5)
                 {
-                    PointsId = Guid.NewGuid(),
-                    RunnerId = result.RunnerId,
-                    RaceId = race.RaceId,
-                    ResultId = result.ResultId,
-                    Year = race.Year,
-                    Division = ageDivision,
-                    AgeCategory = ageCategory,
-                    Points = agePoints,
-                    IsRecordBonus = false,
-                    CreatedAt = DateTime.UtcNow
-                });
+                    var agePoints = CalculateAgeDivisionPoints(placeInCategory);
 
-                pointsCreated++;
+                    _context.GrandPrixPoints.Add(new GrandPrixPoints
+                    {
+                        PointsId = Guid.NewGuid(),
+                        RunnerId = result.RunnerId,
+                        RaceId = race.RaceId,
+                        ResultId = result.ResultId,
+                        Year = race.Year,
+                        Division = ageDivision,
+                        AgeCategory = ageCategory,
+                        Points = agePoints,
+                        IsRecordBonus = false,
+                        CreatedAt = DateTime.UtcNow
+                    });
+
+                    pointsCreated++;
+                }
             }
         }
 
@@ -224,7 +195,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         standingsCreated += await CalculateDivisionStandings(year, Division.OpenFemale, null);
 
         // Calculate standings for each age category
-        var ageCategories = new[] { "17 and Under", "19-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80-89" };
+        var ageCategories = GrandPrixConstants.AgeCategories.Select(c => c.Name);
 
         foreach (var category in ageCategories)
         {

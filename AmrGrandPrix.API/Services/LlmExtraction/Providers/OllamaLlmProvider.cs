@@ -28,6 +28,7 @@ public class OllamaLlmProvider : ILlmProvider
                   "place": <integer or null>,
                   "name": <string>,
                   "age": <integer or null>,
+                  "age_category": <string or null>,
                   "gender": <"Male" | "Female" | "Nonbinary" | null>,
                   "time_string": <string or null>,
                   "status": <"Finished" | "DNF" | "DNS" | "DQ">,
@@ -43,8 +44,12 @@ public class OllamaLlmProvider : ILlmProvider
           section object for each. Set section.gender to "Male" or "Female" as appropriate.
         - If there are no section dividers, create a single section with name=null and gender=null.
         - For names in "Last, First" format (e.g. "Smith, John"), output "John Smith".
-        - For age groups, use the lower bound as the integer age:
-            "30-39" → 30, "80+" → 80, "U17" → 17, "17 and Under" → 17.
+        - If an exact age is given, put it in "age" and leave "age_category" null.
+        - If only an age group/range is given (e.g. "30-39", "40-49", "U17", "80+"), do NOT
+          guess a specific age — leave "age" null and put the group in "age_category", normalized
+          to one of: "17 and Under", "18-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80-89"
+          (e.g. "U17" and "17 and Under" → "17 and Under"; "80+" → "80-89").
+        - If neither an age nor an age group is present, leave both "age" and "age_category" null.
         - status must be one of: Finished, DNF, DNS, DQ. Default to "Finished".
         - Preserve time strings exactly (e.g. "1:23:45", "23:45"). Use null for DNF/DNS/DQ rows.
         - Annotations on times (*, #, CR, WR, etc.) belong in notes, not time_string.

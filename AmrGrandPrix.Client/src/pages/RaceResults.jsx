@@ -191,7 +191,7 @@ export default function RaceResults() {
                     <td className="name-cell">
                       <Link to={`/runners/${r.runnerId}`}>{r.runnerName}</Link>
                     </td>
-                    <td>{r.age}</td>
+                    <td>{r.age ?? r.ageCategory ?? '—'}</td>
                     <td>{genderLabel(r.gender)}</td>
                     <td className="time-cell">{formatTime(r.time)}</td>
                     <td>{statusBadge(r.status)}</td>

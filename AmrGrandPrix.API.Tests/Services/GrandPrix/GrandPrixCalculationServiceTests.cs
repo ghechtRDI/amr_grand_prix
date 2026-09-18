@@ -141,10 +141,10 @@ public class GrandPrixCalculationServiceTests : IDisposable
     [Theory]
     [InlineData(10, "17 and Under")]
     [InlineData(17, "17 and Under")]
-    [InlineData(18, "19-29")]
-    [InlineData(19, "19-29")]
-    [InlineData(25, "19-29")]
-    [InlineData(29, "19-29")]
+    [InlineData(18, "18-29")]
+    [InlineData(19, "18-29")]
+    [InlineData(25, "18-29")]
+    [InlineData(29, "18-29")]
     [InlineData(30, "30-39")]
     [InlineData(35, "30-39")]
     [InlineData(39, "30-39")]
@@ -179,8 +179,8 @@ public class GrandPrixCalculationServiceTests : IDisposable
     {
         // Test exact boundary values
         _service.DetermineAgeCategory(17).Should().Be("17 and Under");
-        _service.DetermineAgeCategory(18).Should().Be("19-29");
-        _service.DetermineAgeCategory(29).Should().Be("19-29");
+        _service.DetermineAgeCategory(18).Should().Be("18-29");
+        _service.DetermineAgeCategory(29).Should().Be("18-29");
         _service.DetermineAgeCategory(30).Should().Be("30-39");
         _service.DetermineAgeCategory(39).Should().Be("30-39");
         _service.DetermineAgeCategory(40).Should().Be("40-49");
@@ -276,7 +276,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
             p.RunnerId == runner2.RunnerId && p.Division == Division.AgeFemale);
         femaleAgePoints.Should().NotBeNull();
         femaleAgePoints!.Points.Should().Be(5);
-        femaleAgePoints.AgeCategory.Should().Be("19-29");
+        femaleAgePoints.AgeCategory.Should().Be("18-29");
     }
 
     [Fact]
@@ -392,7 +392,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
         agePoints.Should().HaveCount(3);
 
         // Each runner should be 1st in their age category
-        agePoints.Where(p => p.AgeCategory == "19-29").Should().ContainSingle()
+        agePoints.Where(p => p.AgeCategory == "18-29").Should().ContainSingle()
             .Which.Points.Should().Be(5);
         agePoints.Where(p => p.AgeCategory == "40-49").Should().ContainSingle()
             .Which.Points.Should().Be(5);

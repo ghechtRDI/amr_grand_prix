@@ -13,7 +13,7 @@ const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
 
 function fileTypeLabel(fileType) {
   if (typeof fileType === 'number') {
-    return ['CSV', 'Excel', 'PDF', 'Text'][fileType] ?? fileType;
+    return ['CSV', 'Excel', 'Text', 'PDF'][fileType] ?? fileType;
   }
   return fileType;
 }
@@ -32,6 +32,7 @@ export default function ResultsManagement() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [resuming, setResuming] = useState(null);
   const [recalculating, setRecalculating] = useState(false);
   const [message, setMessage] = useState(null);
 
@@ -75,6 +76,43 @@ export default function ResultsManagement() {
       setMessage({ type: 'error', text: `Delete failed: ${e.message}` });
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleResume = async (batch) => {
+    setResuming(batch.uploadBatchId);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/results/batch/${batch.uploadBatchId}/resume`, {
+        headers: { Authorization: `Bearer ${tokenService.getAccessToken()}` },
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      navigate('/admin/results/upload', {
+        state: {
+          resume: {
+            raceSelection: {
+              raceId: data.raceId,
+              raceName: data.raceName,
+              raceDate: data.raceDate,
+              isGrandPrixRace: data.isGrandPrixRace,
+              courseVariant: data.courseVariant || '',
+            },
+            uploadBatchId: data.uploadBatchId,
+            parsedResults: data.parsedResults,
+            totalRows: data.totalRows,
+            validRows: data.validRows,
+            rowsWithIssues: data.rowsWithIssues,
+          },
+        },
+      });
+    } catch (e) {
+      setMessage({ type: 'error', text: `Resume failed: ${e.message}` });
+    } finally {
+      setResuming(null);
     }
   };
 
@@ -213,7 +251,16 @@ export default function ResultsManagement() {
                         {statusLabel(b.status)}
                       </span>
                     </td>
-                    <td>
+                    <td className="batch-actions">
+                      {statusLabel(b.status) === 'Pending' && (
+                        <button
+                          className="btn-secondary btn-sm"
+                          onClick={() => handleResume(b)}
+                          disabled={resuming === b.uploadBatchId}
+                        >
+                          {resuming === b.uploadBatchId ? 'Opening...' : 'Resume'}
+                        </button>
+                      )}
                       <button
                         className="btn-danger btn-sm"
                         onClick={() => handleDelete(b)}

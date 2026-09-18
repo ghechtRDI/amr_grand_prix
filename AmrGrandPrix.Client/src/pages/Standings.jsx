@@ -9,7 +9,7 @@ import './pages.css';
 
 const AGE_CATEGORIES = [
   '17 and Under',
-  '19-29',
+  '18-29',
   '30-39',
   '40-49',
   '50-59',

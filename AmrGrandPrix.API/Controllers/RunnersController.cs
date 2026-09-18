@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
@@ -148,16 +149,9 @@ public class RunnersController : ControllerBase
         var fullName = $"{request.FirstName} {request.LastName}";
 
         // Calculate age if date of birth provided
-        int? age = null;
-        if (request.DateOfBirth.HasValue)
-        {
-            var today = DateTime.Today;
-            age = today.Year - request.DateOfBirth.Value.Year;
-            if (request.DateOfBirth.Value.Date > today.AddYears(-age.Value))
-            {
-                age--;
-            }
-        }
+        int? age = request.DateOfBirth.HasValue
+            ? AgeCalculator.CalculateAge(request.DateOfBirth.Value, DateOnly.FromDateTime(DateTime.Today))
+            : null;
 
         // Find potential matches using fuzzy matching
         var matches = await _runnerMatchingService.FindMatchesAsync(
@@ -194,16 +188,9 @@ public class RunnersController : ControllerBase
             {
                 var fullName = $"{request.FirstName} {request.LastName}";
 
-                int? age = null;
-                if (request.DateOfBirth.HasValue)
-                {
-                    var today = DateTime.Today;
-                    age = today.Year - request.DateOfBirth.Value.Year;
-                    if (request.DateOfBirth.Value.Date > today.AddYears(-age.Value))
-                    {
-                        age--;
-                    }
-                }
+                int? age = request.DateOfBirth.HasValue
+                    ? AgeCalculator.CalculateAge(request.DateOfBirth.Value, DateOnly.FromDateTime(DateTime.Today))
+                    : null;
 
                 var matches = await _runnerMatchingService.FindMatchesAsync(
                     fullName,
@@ -408,7 +395,7 @@ public class CheckDuplicatesRequest
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public Gender Gender { get; set; }
-    public DateTime? DateOfBirth { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
 }
 
 /// <summary>
@@ -439,7 +426,7 @@ public class CreateRunnerRequest
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public Gender Gender { get; set; }
-    public DateTime? DateOfBirth { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
     public string? Email { get; set; }
     public bool SkipDuplicateCheck { get; set; } = false;
 }
@@ -452,7 +439,7 @@ public class UpdateRunnerRequest
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public Gender Gender { get; set; }
-    public DateTime? DateOfBirth { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
     public string? Email { get; set; }
 }
 

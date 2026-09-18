@@ -13,6 +13,11 @@ import {
 
 const columnHelper = createColumnHelper();
 
+// Must match AmrGrandPrix.API.Models.GrandPrixConstants.AgeCategories
+const AGE_CATEGORIES = [
+  '17 and Under', '18-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89',
+];
+
 // Defined at module scope so it never changes reference between renders.
 // Reads editingCell / setEditingCell / updateData from table.options.meta.
 function EditableCell({ getValue, row, column, table }) {
@@ -69,6 +74,23 @@ function EditableCell({ getValue, row, column, table }) {
       );
     }
 
+    if (column.id === 'ageCategory') {
+      return (
+        <select
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={onBlur}
+          autoFocus
+          className="cell-input"
+        >
+          <option value="">-- Unknown --</option>
+          {AGE_CATEGORIES.map(cat => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
+      );
+    }
+
     return (
       <input
         type="text"
@@ -95,7 +117,7 @@ function EditableCell({ getValue, row, column, table }) {
 // Dropdown for confirming/selecting which existing runner a row matches.
 // Always shows "+ New Runner" plus any suggested matches, sorted by confidence.
 function RunnerMatchCell({ row, table }) {
-  const { updateRunnerMatch } = table.options.meta;
+  const { updateRunnerMatch, updateData } = table.options.meta;
   const matches = row.original.runnerMatches || [];
   const selected = row.original.matchedRunnerId || '';
 
@@ -103,19 +125,48 @@ function RunnerMatchCell({ row, table }) {
     return <span className="cell-value muted-text">New runner</span>;
   }
 
+  const selectedMatch = matches.find(m => m.runnerId === selected);
+  const uploadedAge = row.original.age === '' ? null : Number(row.original.age);
+  const hasAgeDiscrepancy =
+    !!selectedMatch && uploadedAge != null && selectedMatch.age != null && uploadedAge !== selectedMatch.age;
+
   return (
-    <select
-      value={selected}
-      onChange={(e) => updateRunnerMatch(row.index, e.target.value || null)}
-      className="cell-input runner-match-select"
-    >
-      <option value="">+ New Runner</option>
-      {matches.map(m => (
-        <option key={m.runnerId} value={m.runnerId}>
-          {m.firstName} {m.lastName} · age {m.age ?? '?'} · {Math.round(m.confidence * 100)}%
-        </option>
-      ))}
-    </select>
+    <div className="runner-match-cell">
+      <select
+        value={selected}
+        onChange={(e) => updateRunnerMatch(row.index, e.target.value || null)}
+        className="cell-input runner-match-select"
+      >
+        <option value="">+ New Runner</option>
+        {matches.map(m => (
+          <option key={m.runnerId} value={m.runnerId}>
+            {m.firstName} {m.lastName} · age {m.age ?? '?'}{m.age != null && !m.hasVerifiedDateOfBirth ? ' (est.)' : ''} · {Math.round(m.confidence * 100)}%
+          </option>
+        ))}
+      </select>
+      {hasAgeDiscrepancy && (
+        selectedMatch.hasVerifiedDateOfBirth ? (
+          <span
+            className="age-discrepancy-toggle age-discrepancy-locked"
+            title="This runner has a verified date of birth and can't be overwritten here"
+          >
+            Verified age on file ({selectedMatch.age}) — uploaded age {uploadedAge} won't change it
+          </span>
+        ) : (
+          <label
+            className="age-discrepancy-toggle"
+            title="The uploaded age differs from this runner's estimated age"
+          >
+            <input
+              type="checkbox"
+              checked={!!row.original.updateRunnerAge}
+              onChange={(e) => updateData(row.index, 'updateRunnerAge', e.target.checked)}
+            />
+            Update estimated age ({selectedMatch.age} → {uploadedAge})
+          </label>
+        )
+      )}
+    </div>
   );
 }
 
@@ -124,6 +175,7 @@ const COLUMNS = [
   columnHelper.accessor('bib',    { header: 'Bib',    cell: EditableCell, size: 80 }),
   columnHelper.accessor('name',   { header: 'Name',   cell: EditableCell, size: 200 }),
   columnHelper.accessor('age',    { header: 'Age',    cell: EditableCell, size: 80 }),
+  columnHelper.accessor('ageCategory', { header: 'Age Category', cell: EditableCell, size: 120 }),
   columnHelper.accessor('gender', { header: 'Gender', cell: EditableCell, size: 100 }),
   columnHelper.accessor('time',   { header: 'Time',   cell: EditableCell, size: 120 }),
   columnHelper.accessor('status', { header: 'Status', cell: EditableCell, size: 100 }),
@@ -181,6 +233,7 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
       id: idx,
       name:   row.name   || '',
       age:    row.age    ?? '',
+      ageCategory: row.ageCategory ?? '',
       place:  row.place  ?? '',
       // Use timeString (original LLM-extracted string) for display/editing
       time:   row.timeString || '',
@@ -192,6 +245,7 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
       // No matched runner → will be created as new
       isNewRunner: (row.runnerMatches || []).length === 0 && !row.matchedRunnerId,
       matchedRunnerId: row.matchedRunnerId || null,
+      updateRunnerAge: false,
     }));
   });
 
@@ -210,7 +264,7 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     setData(old =>
       old.map((row, index) =>
         index === rowIndex
-          ? { ...row, matchedRunnerId: runnerId, isNewRunner: !runnerId }
+          ? { ...row, matchedRunnerId: runnerId, isNewRunner: !runnerId, updateRunnerAge: false }
           : row
       )
     );
@@ -232,12 +286,12 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
 
   const handleSubmit = () => {
     const invalidRows = data.filter(
-      row => !row.name || !row.age || !row.place || !row.time
+      row => !row.name || (!row.age && !row.ageCategory) || !row.place || !row.time
     );
 
     if (invalidRows.length > 0) {
       alert(
-        `${invalidRows.length} row(s) are missing required fields (Name, Age, Place, Time). Please fix these issues before continuing.`
+        `${invalidRows.length} row(s) are missing required fields (Name, Age or Age Category, Place, Time). Please fix these issues before continuing.`
       );
       return;
     }

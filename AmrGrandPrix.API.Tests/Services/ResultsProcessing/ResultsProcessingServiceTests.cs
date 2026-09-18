@@ -202,7 +202,7 @@ public class ResultsProcessingServiceTests
         {
             new(null, null, new List<ExtractedRow>
             {
-                new(Place: 1, Name: "John Doe", Age: 35, Gender: "Male",
+                new(Place: 1, Name: "John Doe", Age: 35, AgeCategory: null, Gender: "Male",
                     TimeString: "1:23:45", Status: "Finished", Notes: null)
             })
         };
@@ -224,7 +224,7 @@ public class ResultsProcessingServiceTests
         {
             new("MALE RESULTS", "Male", new List<ExtractedRow>
             {
-                new(Place: 1, Name: "John Doe", Age: 35, Gender: null,
+                new(Place: 1, Name: "John Doe", Age: 35, AgeCategory: null, Gender: null,
                     TimeString: "1:23:45", Status: "Finished", Notes: null)
             })
         };
@@ -241,7 +241,7 @@ public class ResultsProcessingServiceTests
         {
             new(null, null, new List<ExtractedRow>
             {
-                new(Place: null, Name: "John Doe", Age: 35, Gender: "Male",
+                new(Place: null, Name: "John Doe", Age: 35, AgeCategory: null, Gender: "Male",
                     TimeString: null, Status: "DNF", Notes: null)
             })
         };
@@ -257,7 +257,7 @@ public class ResultsProcessingServiceTests
     {
         // If > 50% of names have commas, treat as Last, First
         var rows = Enumerable.Range(1, 5).Select(i =>
-            new ExtractedRow(i, $"Doe{i}, John", 30, "Male", "1:00:00", "Finished", null)).ToList();
+            new ExtractedRow(i, $"Doe{i}, John", 30, null, "Male", "1:00:00", "Finished", null)).ToList();
 
         var sections = new List<ExtractedSection> { new(null, null, rows) };
         var result = await _service.ProcessResultsAsync(sections);
@@ -272,11 +272,11 @@ public class ResultsProcessingServiceTests
         {
             new("MALE RESULTS", "Male", new List<ExtractedRow>
             {
-                new(1, "John Doe", 35, null, "1:23:45", "Finished", null)
+                new(1, "John Doe", 35, null, null, "1:23:45", "Finished", null)
             }),
             new("FEMALE RESULTS", "Female", new List<ExtractedRow>
             {
-                new(1, "Jane Smith", 28, null, "1:30:00", "Finished", null)
+                new(1, "Jane Smith", 28, null, null, "1:30:00", "Finished", null)
             })
         };
 

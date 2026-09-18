@@ -12,6 +12,8 @@ public class RunnerMatchDto
     public string LastName { get; set; } = string.Empty;
     public string FullName => $"{FirstName} {LastName}";
     public int? Age { get; set; }
+    public bool HasVerifiedDateOfBirth { get; set; }
+    public string? AgeCategory { get; set; }
     public Gender? Gender { get; set; }
     public double Confidence { get; set; }
     public bool NameMatch { get; set; }
@@ -29,6 +31,8 @@ public class RunnerMatchDto
             FirstName = match.FirstName,
             LastName = match.LastName,
             Age = match.Age,
+            HasVerifiedDateOfBirth = match.HasVerifiedDateOfBirth,
+            AgeCategory = match.AgeCategory,
             Gender = match.Gender,
             Confidence = match.Confidence,
             NameMatch = match.NameMatch,

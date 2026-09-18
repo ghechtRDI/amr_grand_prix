@@ -72,7 +72,7 @@ public class ResultsController : ControllerBase
                 extraction = await _llmExtractionService.ExtractAsync(stream, request.File.FileName, ct);
 
             var processedResults = await _resultsProcessingService.ProcessResultsAsync(extraction.Sections);
-            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults);
+            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults, race.Date);
 
             var user = await _userManager.GetUserAsync(User);
             var uploadBatch = new UploadBatch
@@ -169,31 +169,51 @@ public class ResultsController : ControllerBase
             var user       = await _userManager.GetUserAsync(User);
             var resultIds  = new List<Guid>();
             var newRunners = 0;
+            var skipped    = new List<SkippedResultDto>();
 
             foreach (var resultRow in request.Results)
             {
+                if (!resultRow.Gender.HasValue)
+                {
+                    _logger.LogWarning("Skipping result with missing gender: {Name}", resultRow.Name);
+                    skipped.Add(new SkippedResultDto
+                    {
+                        RowNumber = resultRow.RowNumber,
+                        Name      = resultRow.Name,
+                        Reason    = "Missing gender"
+                    });
+                    continue;
+                }
+
                 Guid runnerId;
 
                 if (resultRow.MatchedRunnerId.HasValue)
                 {
                     runnerId = resultRow.MatchedRunnerId.Value;
+
+                    // Admin opted to correct the stored age (e.g. it was estimated from a
+                    // previous upload that only reported an age category). Never overwrite a
+                    // runner's verified, self-reported date of birth this way.
+                    if (resultRow.UpdateRunnerAge && resultRow.Age.HasValue)
+                    {
+                        var matchedRunner = await _context.Runners.FindAsync(runnerId);
+                        if (matchedRunner != null && !matchedRunner.DateOfBirth.HasValue)
+                        {
+                            matchedRunner.EstimatedBirthYear = race.Date.Year - resultRow.Age.Value;
+                            matchedRunner.UpdatedAt = DateTime.UtcNow;
+                        }
+                    }
                 }
                 else
                 {
-                    if (!resultRow.Gender.HasValue)
-                    {
-                        _logger.LogWarning("Skipping result with missing gender: {Name}", resultRow.Name);
-                        continue;
-                    }
-
                     var newRunner = new Runner
                     {
                         RunnerId    = Guid.NewGuid(),
                         FirstName   = resultRow.Name.Split(' ').FirstOrDefault() ?? resultRow.Name,
                         LastName    = string.Join(" ", resultRow.Name.Split(' ').Skip(1)),
                         Gender      = resultRow.Gender.Value,
-                        DateOfBirth = resultRow.Age.HasValue
-                            ? DateTime.UtcNow.AddYears(-resultRow.Age.Value)
+                        EstimatedBirthYear = resultRow.Age.HasValue
+                            ? race.Date.Year - resultRow.Age.Value
                             : null,
                         CreatedAt   = DateTime.UtcNow,
                         UpdatedAt   = DateTime.UtcNow
@@ -203,12 +223,6 @@ public class ResultsController : ControllerBase
                     newRunners++;
                 }
 
-                if (!resultRow.Gender.HasValue)
-                {
-                    _logger.LogWarning("Skipping result with missing gender: {Name}", resultRow.Name);
-                    continue;
-                }
-
                 var raceResult = new RaceResult
                 {
                     ResultId     = Guid.NewGuid(),
@@ -216,8 +230,10 @@ public class ResultsController : ControllerBase
                     RunnerId     = runnerId,
                     Bib          = resultRow.Bib,
                     Place        = resultRow.Place,
-                    Time         = resultRow.Time,
-                    Age          = resultRow.Age ?? 0,
+                    Time         = _resultsProcessingService.ParseTime(resultRow.TimeString),
+                    Age          = resultRow.Age,
+                    AgeCategory  = resultRow.AgeCategory
+                        ?? (resultRow.Age.HasValue ? GrandPrixConstants.GetAgeCategory(resultRow.Age.Value) : null),
                     Gender       = resultRow.Gender.Value,
                     Status       = resultRow.Status,
                     Notes        = resultRow.Notes,
@@ -245,17 +261,20 @@ public class ResultsController : ControllerBase
             await transaction.CommitAsync();
 
             _logger.LogInformation(
-                "Saved {ResultCount} results for race {RaceId}. Created {NewRunners} new runners",
-                resultIds.Count, request.RaceId, newRunners);
+                "Saved {ResultCount} results for race {RaceId}. Created {NewRunners} new runners. Skipped {SkippedCount}",
+                resultIds.Count, request.RaceId, newRunners, skipped.Count);
 
             return Ok(new SaveResultsResponse
             {
                 Success          = true,
+                RaceId           = request.RaceId,
                 ResultsSaved     = resultIds.Count,
                 NewRunnersCreated = newRunners,
                 ResultIds        = resultIds,
+                SkippedResults   = skipped,
                 Message          = $"Successfully saved {resultIds.Count} results" +
-                                   (race.IsGrandPrixRace ? " and calculated Grand Prix points" : "")
+                                   (race.IsGrandPrixRace ? " and calculated Grand Prix points" : "") +
+                                   (skipped.Count > 0 ? $"; skipped {skipped.Count} result(s) — see details" : "")
             });
         }
         catch (Exception ex)
@@ -297,6 +316,7 @@ public class ResultsController : ControllerBase
                 PlaceAgeCategory = r.PlaceAgeCategory,
                 Time             = r.Time,
                 Age              = r.Age,
+                AgeCategory      = r.AgeCategory,
                 Gender           = r.Gender,
                 Status           = r.Status,
                 Notes            = r.Notes,
@@ -306,6 +326,54 @@ public class ResultsController : ControllerBase
             .ToListAsync();
 
         return Ok(results);
+    }
+
+    /// <summary>Resume a pending upload batch, re-deriving its parsed results without re-running the LLM.</summary>
+    [HttpGet("batch/{batchId}/resume")]
+    [ProducesResponseType(typeof(ResumeBatchResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ResumeBatchResponse>> ResumeBatch(Guid batchId)
+    {
+        var uploadBatch = await _context.UploadBatches
+            .Include(b => b.Race)
+            .FirstOrDefaultAsync(b => b.UploadBatchId == batchId);
+
+        if (uploadBatch == null)
+            return NotFound($"Upload batch {batchId} not found");
+
+        if (uploadBatch.Status != UploadStatus.Pending)
+            return BadRequest($"Only pending uploads can be resumed (batch is {uploadBatch.Status})");
+
+        if (string.IsNullOrEmpty(uploadBatch.RawLlmJson))
+            return BadRequest("This upload batch has no stored extraction data to resume from");
+
+        try
+        {
+            var sections = _llmExtractionService.RehydrateSections(uploadBatch.RawLlmJson, uploadBatch.FileName);
+            var processedResults = await _resultsProcessingService.ProcessResultsAsync(sections);
+            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults, uploadBatch.Race.Date);
+
+            return Ok(new ResumeBatchResponse
+            {
+                UploadBatchId   = uploadBatch.UploadBatchId,
+                RaceId          = uploadBatch.RaceId,
+                RaceName        = uploadBatch.Race.Name,
+                RaceDate        = uploadBatch.Race.Date,
+                IsGrandPrixRace = uploadBatch.Race.IsGrandPrixRace,
+                CourseVariant   = uploadBatch.Race.CourseVariant,
+                FileName        = uploadBatch.FileName,
+                ParsedResults   = processedResults,
+                TotalRows       = processedResults.Count,
+                ValidRows       = processedResults.Count(r => r.ValidationIssues.Count == 0),
+                RowsWithIssues  = processedResults.Count(r => r.ValidationIssues.Count > 0)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resuming upload batch {BatchId}", batchId);
+            return BadRequest($"Error resuming upload batch: {ex.Message}");
+        }
     }
 
     /// <summary>List upload batches, optionally filtered by year.</summary>

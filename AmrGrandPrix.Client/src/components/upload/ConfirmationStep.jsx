@@ -12,6 +12,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [savedRaceId, setSavedRaceId] = useState(null);
+  const [saveResult, setSaveResult] = useState(null);
   const navigate = useNavigate();
 
   const raceSelection = wizardData.raceSelection || {};
@@ -41,12 +42,15 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
         uploadBatchId: uploadBatchId,
         results: reviewedData.map(row => ({
           name: row.name,
-          age: parseInt(row.age),
+          age: row.age ? parseInt(row.age) : null,
+          ageCategory: row.age ? null : (row.ageCategory || null),
           place: row.place ? parseInt(row.place) : null,
-          time: row.time,
+          timeString: row.time,
           gender: row.gender,
           bib: row.bib ? parseInt(row.bib) : null,
           status: row.status,
+          matchedRunnerId: row.matchedRunnerId || null,
+          updateRunnerAge: !!row.updateRunnerAge,
         })),
         // If creating new race
         newRace: raceSelection.raceId === 'new' ? {
@@ -73,6 +77,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
 
       const result = await response.json();
       setSavedRaceId(result.raceId);
+      setSaveResult(result);
       setSuccess(true);
 
     } catch (err) {
@@ -106,7 +111,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
           <div className="success-icon">✓</div>
           <h3>Results saved successfully!</h3>
           <p>
-            {stats.totalResults} results have been saved to the database.
+            {saveResult?.resultsSaved ?? stats.totalResults} results have been saved to the database.
           </p>
           {raceSelection.isGrandPrixRace && (
             <p className="gp-notice">
@@ -114,6 +119,19 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
             </p>
           )}
         </div>
+
+        {saveResult?.skippedResults?.length > 0 && (
+          <div className="summary-notice skipped-results-notice">
+            <strong>{saveResult.skippedResults.length} result(s) were not saved:</strong>
+            <ul className="skipped-results-list">
+              {saveResult.skippedResults.map((row) => (
+                <li key={row.rowNumber}>
+                  Row {row.rowNumber} — {row.name || '(no name)'}: {row.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="success-actions">
           <button
