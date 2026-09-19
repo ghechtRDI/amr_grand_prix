@@ -1,84 +1,91 @@
 # Alaska Mountain Runners Grand Prix
 
-A full-stack web application for managing and displaying Alaska Mountain Runners Grand Prix race results, overall standings, and statistics. Features secure user authentication, role-based access control, and email confirmation.
+A full-stack web application for managing and displaying Alaska Mountain Runners Grand Prix race results, overall standings, and statistics. Features secure user authentication, role-based access control, and AI-powered results extraction.
 
 ## 🏃‍♂️ Tech Stack
 
 - **Backend**: .NET 9 Web API with ASP.NET Identity & JWT Authentication
 - **Frontend**: React 19 with Vite & React Router
 - **Database**: PostgreSQL 16
+- **AI Extraction**: Anthropic Claude (production) / Ollama (local development)
 - **Email**: MailHog (development) / SMTP (production)
 - **Containerization**: Docker & Docker Compose
 
 ## ✨ Features
 
-### Implemented
 - ✅ User registration with email confirmation
 - ✅ JWT token-based authentication
 - ✅ Role-based authorization (ReadOnly, Manager, Admin)
 - ✅ Automatic token refresh
 - ✅ Protected routes
-- ✅ Responsive UI with modern design
-
-### Planned
-- [ ] Race result management
-- [ ] Overall Grand Prix standings
-- [ ] Race statistics and analytics
-- [ ] Runner profiles and history
-- [ ] Race registration integration
+- ✅ Responsive UI with dark theme
+- ✅ Race result upload (PDF, CSV, Excel) with AI-powered extraction
+- ✅ Grand Prix points calculation and standings
+- ✅ Runner profiles and history
+- ✅ 4-step upload wizard: Race Selection → File Upload → Data Review → Confirmation
 
 ## 🚀 Quick Start
 
 ### Recommended: Local Development with Localhost PostgreSQL
 
-This setup uses your localhost PostgreSQL database and runs MailHog in Docker for email testing, while running the API and frontend locally for the best development experience with hot reload.
-
 **Prerequisites:**
-- PostgreSQL 16 running locally with database `amr_grand_prix`
-- Connection string configured in .NET user secrets (see below)
+- PostgreSQL 16 running locally
+- .NET 9 SDK, Node.js 20+, Docker Desktop
 
 ```bash
 # 1. Configure database connection (first time only)
 cd AmrGrandPrix.API
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Database=amr_grand_prix;Username=YOUR_USERNAME;Password=YOUR_PASSWORD"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" \
+  "Host=localhost;Database=amr_grand_prix;Username=YOUR_USERNAME;Password=YOUR_PASSWORD"
 
-# 2. Start MailHog for email testing
+# 2. Configure Anthropic API key (for results upload)
+dotnet user-secrets set "Llm:Anthropic:ApiKey" "sk-ant-..."
+
+# 3. Start MailHog for email testing
 docker-compose up -d mailhog
 
-# 3. Apply database migrations (first time only)
+# 4. Apply database migrations (first time only)
 dotnet ef database update
 
-# 4. Start the API (Terminal 1)
-dotnet run                  # Runs on http://localhost:8080
+# 5. Start the API (Terminal 1)
+dotnet run                  # http://localhost:8080
 
-# 5. Start the Frontend (Terminal 2)
+# 6. Start the Frontend (Terminal 2)
 cd ../AmrGrandPrix.Client
-npm install                 # First time only
-npm run dev                 # Runs on http://localhost:5173
-
-# Access the application at http://localhost:5173
+npm install                 # first time only
+npm run dev                 # http://localhost:5173
 ```
 
-### Alternative: Full Docker
-
-Run everything in Docker (note: frontend hot reload works, but API requires rebuild for changes):
+### Alternative: Use Ollama for Local LLM (no API cost)
 
 ```bash
-# Start all services
+# Start Ollama container
+docker-compose up -d ollama
+
+# Pull the model (one time, ~9 GB download)
+docker compose exec ollama ollama pull gwen2.5:14b-instruct
+
+# Switch the API to Ollama by adding to AmrGrandPrix.API/appsettings.Development.json:
+# "Llm": { "Provider": "Ollama" }
+```
+
+### Full Docker
+
+```bash
 ./docker-dev.sh start
 
-# Access:
-# - Frontend: http://localhost:5173
-# - API: http://localhost:8080
-# - MailHog UI: http://localhost:8025
+# Frontend: http://localhost:5173
+# API:      http://localhost:8080
+# MailHog:  http://localhost:8025
+# Ollama:   http://localhost:11434
 ```
 
 ## 📁 Documentation
 
-- [CLAUDE.md](CLAUDE.md) - Development context & architecture
-- [TESTING_AUTH.md](TESTING_AUTH.md) - Authentication testing guide
-- [DOCS/AUTH_PLAN.md](DOCS/AUTH_PLAN.md) - Auth implementation details
-- [DOCKER.md](DOCKER.md) - Docker setup & deployment
+- [CLAUDE.md](CLAUDE.md) — Development context & architecture
+- [DOCS/LLM_FILE_PARSER_PLAN.md](DOCS/LLM_FILE_PARSER_PLAN.md) — LLM extraction design
+- [TESTING_AUTH.md](TESTING_AUTH.md) — Authentication testing guide
+- [DOCKER.md](DOCKER.md) — Docker setup & deployment
 
 ## 🛠️ Development
 
@@ -94,18 +101,22 @@ Run everything in Docker (note: frontend hot reload works, but API requires rebu
 | API | http://localhost:8080 | .NET Web API |
 | MailHog UI | http://localhost:8025 | Email testing interface |
 | MailHog SMTP | localhost:1025 | SMTP server |
-| PostgreSQL | localhost:5432 | Local PostgreSQL (not Docker) |
+| PostgreSQL | localhost:5432 | Local PostgreSQL |
+| Ollama | http://localhost:11434 | Local LLM (optional) |
 
-### Local Development Setup
-1. Clone the repository
-2. Run `./docker-dev.sh start` for containerized development
-3. Or follow manual setup in [DOCKER.md](DOCKER.md)
+### Results Upload
+
+Race results can be uploaded as **PDF, CSV, or Excel** files. The file is sent to an LLM (Anthropic Claude Haiku in production, Ollama locally) which extracts all runner data into a structured format regardless of layout variation. The admin then reviews and corrects any issues before saving.
+
+LLM audit data (raw JSON, model name, token counts) is stored on every `UploadBatch` record for traceability.
 
 ## 🔐 Authentication
+
 JWT token-based authentication with email confirmation. Three role levels:
-- **ReadOnly** (default) - View data
-- **Manager** - Manage races & results
-- **Admin** - Full system access
+- **ReadOnly** (default) — View data
+- **Manager** — Manage races & results
+- **Admin** — Full system access
+
 ## 📄 License
 
 [License information coming soon]

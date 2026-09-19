@@ -1,0 +1,13 @@
+Place,Bib,Name,Age,Gender,Time
+1,42,John Doe,35,M,1:23:45
+2,17,Jane Smith,28,F,1:25:12
+3,99,Mike Johnson,42,M,1:27:03
+4,12,Sarah Lee,31,F,1:28:45
+5,88,Tom Brown,39,M,1:29:12
+6,23,Lisa White,25,F,1:30:04
+7,55,David Garcia,44,M,1:31:22
+8,67,Emma Davis,33,F,1:32:15
+9,31,Chris Wilson,29,M,1:33:08
+10,89,Anna Martinez,37,F,1:34:50
+DNF,44,Bob Anderson,41,M,DNF
+DNS,72,Mary Taylor,26,F,DNS

@@ -1,0 +1,346 @@
+using AmrGrandPrix.API.Data;
+using AmrGrandPrix.API.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace AmrGrandPrix.API.Services.GrandPrix;
+
+/// <summary>
+/// Service for calculating Grand Prix points and standings
+/// </summary>
+public class GrandPrixCalculationService : IGrandPrixCalculationService
+{
+    private readonly ApplicationDbContext _context;
+    private readonly ILogger<GrandPrixCalculationService> _logger;
+
+    private const int RecordBonusPoints = 10;
+    private const int MinRacesForEligibility = 1; // Must finish top 20/5 in at least 1 race
+    private const int BestRacesCount = 4; // Count best 4 races
+    private const int RunTheGamutMinRaces = 7; // Need 7 of 9 races for "Run the Gamut"
+
+    public GrandPrixCalculationService(
+        ApplicationDbContext context,
+        ILogger<GrandPrixCalculationService> logger)
+    {
+        _context = context;
+        _logger = logger;
+    }
+
+    public int CalculateOpenDivisionPoints(int placeInGender, bool isNewRecord = false)
+    {
+        var basePoints = GrandPrixConstants.GetOpenDivisionPoints(placeInGender);
+        var bonus = isNewRecord ? RecordBonusPoints : 0;
+        return basePoints + bonus;
+    }
+
+    public int CalculateAgeDivisionPoints(int placeInAgeCategory)
+    {
+        return GrandPrixConstants.GetAgeDivisionPoints(placeInAgeCategory);
+    }
+
+    public string DetermineAgeCategory(int age)
+    {
+        return GrandPrixConstants.GetAgeCategory(age);
+    }
+
+    /// <summary>
+    /// Age category for a result: uses the stored category directly (set when only a category
+    /// was reported), falling back to deriving one from the exact age. Null when neither is known.
+    /// </summary>
+    private string? GetResultAgeCategory(RaceResult result) =>
+        result.AgeCategory ?? (result.Age.HasValue ? DetermineAgeCategory(result.Age.Value) : null);
+
+    public async Task<int> CalculateRacePointsAsync(Guid raceId)
+    {
+        _logger.LogInformation("Calculating points for race {RaceId}", raceId);
+
+        var race = await _context.Races
+            .Include(r => r.Results)
+            .ThenInclude(r => r.Runner)
+            .FirstOrDefaultAsync(r => r.RaceId == raceId);
+
+        if (race == null)
+        {
+            _logger.LogWarning("Race {RaceId} not found", raceId);
+            return 0;
+        }
+
+        if (!race.IsGrandPrixRace)
+        {
+            _logger.LogInformation("Race {RaceId} is not a Grand Prix race, skipping points calculation", raceId);
+            return 0;
+        }
+
+        // Delete existing points for this race
+        var existingPoints = await _context.GrandPrixPoints
+            .Where(p => p.RaceId == raceId)
+            .ToListAsync();
+
+        _context.GrandPrixPoints.RemoveRange(existingPoints);
+        await _context.SaveChangesAsync();
+
+        // Get finished results only
+        var results = race.Results
+            .Where(r => r.Status == ResultStatus.Finished && r.Time.HasValue)
+            .OrderBy(r => r.Time)
+            .ToList();
+
+        var pointsCreated = 0;
+
+        // Calculate place within gender
+        var maleResults = results.Where(r => r.Gender == Gender.Male).ToList();
+        var femaleResults = results.Where(r => r.Gender == Gender.Female).ToList();
+
+        pointsCreated += await CalculateGenderDivisionPoints(race, maleResults, Gender.Male);
+        pointsCreated += await CalculateGenderDivisionPoints(race, femaleResults, Gender.Female);
+
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Created {Count} point records for race {RaceId}", pointsCreated, raceId);
+
+        return pointsCreated;
+    }
+
+    private async Task<int> CalculateGenderDivisionPoints(Race race, List<RaceResult> results, Gender gender)
+    {
+        var pointsCreated = 0;
+
+        // Open Division points only count finishers outside the "17 and Under" age category,
+        // ranked among themselves — otherwise a fast junior finisher would take an Open slot
+        // (and bump adults out of top-20 points) despite not being Open-eligible. Results with
+        // unknown age are treated as Open-eligible, matching pre-existing behavior.
+        var openEligibleResults = results
+            .Where(r => GetResultAgeCategory(r) != GrandPrixConstants.AgeCategories[0].Name)
+            .ToList();
+
+        for (int i = 0; i < results.Count; i++)
+        {
+            var result = results[i];
+            var placeInGender = i + 1;
+
+            // Update PlaceGender on the result (true overall gender place, includes juniors)
+            result.PlaceGender = placeInGender;
+
+            // Calculate Open Division points (top 20 among Open-eligible finishers)
+            var placeInOpenDivision = openEligibleResults.IndexOf(result) + 1;
+            if (placeInOpenDivision >= 1 && placeInOpenDivision <= 20)
+            {
+                var openPoints = CalculateOpenDivisionPoints(placeInOpenDivision, result.IsNewRecord);
+                var openDivision = gender == Gender.Male ? Division.OpenMale : Division.OpenFemale;
+
+                _context.GrandPrixPoints.Add(new GrandPrixPoints
+                {
+                    PointsId = Guid.NewGuid(),
+                    RunnerId = result.RunnerId,
+                    RaceId = race.RaceId,
+                    ResultId = result.ResultId,
+                    Year = race.Year,
+                    Division = openDivision,
+                    AgeCategory = null,
+                    Points = openPoints,
+                    IsRecordBonus = result.IsNewRecord,
+                    CreatedAt = DateTime.UtcNow
+                });
+
+                pointsCreated++;
+            }
+
+            // Calculate Age Division points (top 5 per age category) — skip results with no
+            // age info at all (neither an exact age nor a category was ever recorded)
+            var ageCategory = GetResultAgeCategory(result);
+            if (ageCategory != null)
+            {
+                var ageDivision = gender == Gender.Male ? Division.AgeMale : Division.AgeFemale;
+
+                // Find place within age category
+                var resultsInCategory = results
+                    .Where(r => GetResultAgeCategory(r) == ageCategory)
+                    .OrderBy(r => r.Time)
+                    .ToList();
+
+                var placeInCategory = resultsInCategory.IndexOf(result) + 1;
+                result.PlaceAgeCategory = placeInCategory;
+
+                if (placeInCategory <= 5)
+                {
+                    var agePoints = CalculateAgeDivisionPoints(placeInCategory);
+
+                    _context.GrandPrixPoints.Add(new GrandPrixPoints
+                    {
+                        PointsId = Guid.NewGuid(),
+                        RunnerId = result.RunnerId,
+                        RaceId = race.RaceId,
+                        ResultId = result.ResultId,
+                        Year = race.Year,
+                        Division = ageDivision,
+                        AgeCategory = ageCategory,
+                        Points = agePoints,
+                        IsRecordBonus = false,
+                        CreatedAt = DateTime.UtcNow
+                    });
+
+                    pointsCreated++;
+                }
+            }
+        }
+
+        return pointsCreated;
+    }
+
+    public async Task<int> UpdateStandingsAsync(int year)
+    {
+        _logger.LogInformation("Updating standings for year {Year}", year);
+
+        // Delete existing standings for this year
+        var existingStandings = await _context.GrandPrixStandings
+            .Where(s => s.Year == year)
+            .ToListAsync();
+
+        _context.GrandPrixStandings.RemoveRange(existingStandings);
+
+        var standingsCreated = 0;
+
+        // Calculate standings for each division
+        standingsCreated += await CalculateDivisionStandings(year, Division.OpenMale, null);
+        standingsCreated += await CalculateDivisionStandings(year, Division.OpenFemale, null);
+
+        // Calculate standings for each age category
+        var ageCategories = GrandPrixConstants.AgeCategories.Select(c => c.Name);
+
+        foreach (var category in ageCategories)
+        {
+            standingsCreated += await CalculateDivisionStandings(year, Division.AgeMale, category);
+            standingsCreated += await CalculateDivisionStandings(year, Division.AgeFemale, category);
+        }
+
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Created {Count} standing records for year {Year}", standingsCreated, year);
+
+        return standingsCreated;
+    }
+
+    private async Task<int> CalculateDivisionStandings(int year, Division division, string? ageCategory)
+    {
+        // Get all points for this division
+        var query = _context.GrandPrixPoints
+            .Include(p => p.Runner)
+            .Where(p => p.Year == year && p.Division == division);
+
+        if (ageCategory != null)
+        {
+            query = query.Where(p => p.AgeCategory == ageCategory);
+        }
+
+        var allPoints = await query.ToListAsync();
+
+        // Group by runner
+        var runnerPoints = allPoints
+            .GroupBy(p => p.RunnerId)
+            .Select(g => new
+            {
+                RunnerId = g.Key,
+                Runner = g.First().Runner,
+                AllRacePoints = g.OrderByDescending(p => p.Points).ToList()
+            })
+            .ToList();
+
+        var standings = new List<GrandPrixStanding>();
+
+        foreach (var rp in runnerPoints)
+        {
+            var best4Points = rp.AllRacePoints.Take(BestRacesCount).ToList();
+            var totalPoints = best4Points.Sum(p => p.Points);
+
+            // Check eligibility: must have at least 1 race with points
+            if (best4Points.Count < MinRacesForEligibility)
+                continue;
+
+            var standing = new GrandPrixStanding
+            {
+                StandingId = Guid.NewGuid(),
+                RunnerId = rp.RunnerId,
+                Year = year,
+                Division = division,
+                AgeCategory = ageCategory,
+                TotalPoints = totalPoints,
+                RacesCompleted = rp.AllRacePoints.Count,
+                RacesCounted = best4Points.Count,
+                BestRacePoints = best4Points.ElementAtOrDefault(0)?.Points ?? 0,
+                SecondBestRacePoints = best4Points.ElementAtOrDefault(1)?.Points ?? 0,
+                ThirdBestRacePoints = best4Points.ElementAtOrDefault(2)?.Points ?? 0,
+                FourthBestRacePoints = best4Points.ElementAtOrDefault(3)?.Points ?? 0,
+                RunTheGamutQualified = rp.AllRacePoints.Count >= RunTheGamutMinRaces,
+                LastUpdated = DateTime.UtcNow
+            };
+
+            standings.Add(standing);
+        }
+
+        // Sort standings by total points (desc), then by tiebreakers
+        var sortedStandings = standings
+            .OrderByDescending(s => s.TotalPoints)
+            .ThenByDescending(s => s.BestRacePoints)
+            .ThenByDescending(s => s.SecondBestRacePoints)
+            .ThenByDescending(s => s.ThirdBestRacePoints)
+            .ThenByDescending(s => s.FourthBestRacePoints)
+            .ToList();
+
+        // Assign ranks
+        for (int i = 0; i < sortedStandings.Count; i++)
+        {
+            sortedStandings[i].Rank = i + 1;
+        }
+
+        _context.GrandPrixStandings.AddRange(sortedStandings);
+
+        return sortedStandings.Count;
+    }
+
+    public async Task<List<GrandPrixStanding>> GetStandingsAsync(int year, Division division, string? ageCategory = null)
+    {
+        var query = _context.GrandPrixStandings
+            .Include(s => s.Runner)
+            .Where(s => s.Year == year && s.Division == division);
+
+        if (ageCategory != null)
+        {
+            query = query.Where(s => s.AgeCategory == ageCategory);
+        }
+
+        return await query
+            .OrderBy(s => s.Rank)
+            .ToListAsync();
+    }
+
+    public async Task<List<GrandPrixPoints>> GetRunnerPointsAsync(Guid runnerId, int year)
+    {
+        return await _context.GrandPrixPoints
+            .Include(p => p.Race)
+            .Where(p => p.RunnerId == runnerId && p.Year == year)
+            .OrderBy(p => p.Race!.Date)
+            .ToListAsync();
+    }
+
+    public async Task<bool> RecalculateAfterResultsChangeAsync(Guid raceId)
+    {
+        try
+        {
+            var race = await _context.Races.FindAsync(raceId);
+            if (race == null)
+                return false;
+
+            // Recalculate points for this race
+            await CalculateRacePointsAsync(raceId);
+
+            // Recalculate standings for the year
+            await UpdateStandingsAsync(race.Year);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error recalculating after results change for race {RaceId}", raceId);
+            return false;
+        }
+    }
+}

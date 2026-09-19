@@ -389,6 +389,54 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// Update the authenticated user's own profile (first/last name, date of birth).
+    /// Setting a verified date of birth here is a prerequisite for claiming a Runner record.
+    /// </summary>
+    [HttpPut("profile")]
+    [Authorize]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateUserRequest request)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userId == null)
+            return Unauthorized();
+
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user == null)
+            return NotFound(new { message = "User not found" });
+
+        if (request.FirstName != null)
+            user.FirstName = request.FirstName;
+
+        if (request.LastName != null)
+            user.LastName = request.LastName;
+
+        if (request.DateOfBirth != null)
+            user.DateOfBirth = request.DateOfBirth;
+
+        user.UpdatedAt = DateTime.UtcNow;
+
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+            return BadRequest(new { message = "Failed to update profile", errors = result.Errors.Select(e => e.Description) });
+
+        _logger.LogInformation("User {UserId} updated their own profile", userId);
+
+        var roles = await _userManager.GetRolesAsync(user);
+
+        return Ok(new UserResponse
+        {
+            Id = user.Id,
+            Email = user.Email!,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            DateOfBirth = user.DateOfBirth,
+            EmailConfirmed = user.EmailConfirmed,
+            Roles = roles.ToList(),
+            CreatedAt = user.CreatedAt
+        });
+    }
+
+    /// <summary>
     /// Change password for authenticated user
     /// </summary>
     [HttpPost("change-password")]

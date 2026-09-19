@@ -7,6 +7,7 @@ import { createContext, useState, useEffect, useCallback } from 'react';
 import * as authService from '../services/authService';
 import * as tokenService from '../services/tokenService';
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
@@ -34,6 +35,20 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   /**
+   * Logout function
+   */
+  const handleLogout = useCallback(async () => {
+    try {
+      await authService.logout();
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      setUser(null);
+      setError(null);
+    }
+  }, []);
+
+  /**
    * Set up token refresh interval
    */
   useEffect(() => {
@@ -51,7 +66,7 @@ export const AuthProvider = ({ children }) => {
     }, 60000); // Check every minute
 
     return () => clearInterval(interval);
-  }, [user]);
+  }, [user, handleLogout]);
 
   /**
    * Login function
@@ -61,15 +76,11 @@ export const AuthProvider = ({ children }) => {
       setError(null);
       const data = await authService.login(credentials);
 
-      const userData = {
-        id: data.userId,
-        email: data.email,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        roles: data.roles,
-      };
+      // User data is nested in the response
+      if (data.user) {
+        setUser(data.user);
+      }
 
-      setUser(userData);
       return { success: true, data };
     } catch (err) {
       setError(err.message);
@@ -88,20 +99,6 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       setError(err.message);
       return { success: false, error: err.message };
-    }
-  }, []);
-
-  /**
-   * Logout function
-   */
-  const handleLogout = useCallback(async () => {
-    try {
-      await authService.logout();
-    } catch (err) {
-      console.error('Logout error:', err);
-    } finally {
-      setUser(null);
-      setError(null);
     }
   }, []);
 

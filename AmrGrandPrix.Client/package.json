@@ -10,8 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tanstack/react-table": "^8.21.3",
+    "papaparse": "^5.5.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-dropzone": "^14.3.8",
+    "react-hook-form": "^7.69.0",
     "react-router-dom": "^7.9.6"
   },
   "devDependencies": {

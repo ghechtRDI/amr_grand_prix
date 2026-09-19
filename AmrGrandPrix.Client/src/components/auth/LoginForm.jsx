@@ -69,7 +69,7 @@ export const LoginForm = () => {
       } else {
         setLoginError(result.error || 'Login failed. Please check your credentials.');
       }
-    } catch (error) {
+    } catch {
       setLoginError('An error occurred. Please try again.');
     } finally {
       setIsSubmitting(false);

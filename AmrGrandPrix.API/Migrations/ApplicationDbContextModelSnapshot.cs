@@ -82,6 +82,9 @@ namespace AmrGrandPrix.API.Migrations
                     b.Property<DateTime?>("RefreshTokenExpiryTime")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("RunnerId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("text");
 
@@ -104,7 +107,377 @@ namespace AmrGrandPrix.API.Migrations
                         .IsUnique()
                         .HasDatabaseName("UserNameIndex");
 
+                    b.HasIndex("RunnerId");
+
                     b.ToTable("Users", (string)null);
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.GrandPrixPoints", b =>
+                {
+                    b.Property<Guid>("PointsId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AgeCategory")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Division")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsRecordBonus")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Points")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RaceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ResultId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RunnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("PointsId");
+
+                    b.HasIndex("RaceId");
+
+                    b.HasIndex("ResultId");
+
+                    b.HasIndex("RunnerId");
+
+                    b.HasIndex("Year", "Division");
+
+                    b.HasIndex("RunnerId", "Year", "Division");
+
+                    b.ToTable("GrandPrixPoints");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.GrandPrixStanding", b =>
+                {
+                    b.Property<Guid>("StandingId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AgeCategory")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("BestRacePoints")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Division")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("FourthBestRacePoints")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("LastUpdated")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RacesCompleted")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RacesCounted")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Rank")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("RunTheGamutQualified")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("RunnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SecondBestRacePoints")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ThirdBestRacePoints")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TotalPoints")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("StandingId");
+
+                    b.HasIndex("RunnerId");
+
+                    b.HasIndex("RunnerId", "Year");
+
+                    b.HasIndex("Year", "Division", "Rank");
+
+                    b.ToTable("GrandPrixStandings");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.Race", b =>
+                {
+                    b.Property<Guid>("RaceId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CourseVariant")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsGrandPrixRace")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("RecordHolderFemale")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("RecordHolderMale")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<TimeSpan?>("RecordTimeFemale")
+                        .HasColumnType("interval");
+
+                    b.Property<TimeSpan?>("RecordTimeMale")
+                        .HasColumnType("interval");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("RaceId");
+
+                    b.HasIndex("Year");
+
+                    b.HasIndex("Year", "IsGrandPrixRace");
+
+                    b.ToTable("Races");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.RaceResult", b =>
+                {
+                    b.Property<Guid>("ResultId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("Age")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AgeCategory")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("Bib")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Gender")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsNewRecord")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int?>("Place")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PlaceAgeCategory")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PlaceGender")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RaceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RunnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<TimeSpan?>("Time")
+                        .HasColumnType("interval");
+
+                    b.Property<Guid>("UploadBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UploadedBy")
+                        .HasColumnType("text");
+
+                    b.HasKey("ResultId");
+
+                    b.HasIndex("RaceId");
+
+                    b.HasIndex("RunnerId");
+
+                    b.HasIndex("UploadBatchId");
+
+                    b.HasIndex("RaceId", "RunnerId");
+
+                    b.ToTable("RaceResults");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.Runner", b =>
+                {
+                    b.Property<Guid>("RunnerId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly?>("DateOfBirth")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int?>("EstimatedBirthYear")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Gender")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("RunnerId");
+
+                    b.HasIndex("Email");
+
+                    b.HasIndex("LastName", "FirstName");
+
+                    b.ToTable("Runners");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.RunnerClaim", b =>
+                {
+                    b.Property<Guid>("ClaimId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ApplicationUserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReviewedByUserId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RunnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ClaimId");
+
+                    b.HasIndex("ApplicationUserId");
+
+                    b.HasIndex("RunnerId");
+
+                    b.ToTable("RunnerClaims");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.UploadBatch", b =>
+                {
+                    b.Property<Guid>("UploadBatchId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("FileType")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LlmInputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LlmModel")
+                        .HasColumnType("text");
+
+                    b.Property<int>("LlmOutputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RaceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RawLlmJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("RecordsUploaded")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UploadedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("UploadBatchId");
+
+                    b.HasIndex("RaceId");
+
+                    b.HasIndex("UploadedAt");
+
+                    b.ToTable("UploadBatches");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
@@ -239,6 +612,111 @@ namespace AmrGrandPrix.API.Migrations
                     b.ToTable("UserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("AmrGrandPrix.API.Models.ApplicationUser", b =>
+                {
+                    b.HasOne("AmrGrandPrix.API.Models.Runner", "Runner")
+                        .WithMany()
+                        .HasForeignKey("RunnerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Runner");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.GrandPrixPoints", b =>
+                {
+                    b.HasOne("AmrGrandPrix.API.Models.Race", "Race")
+                        .WithMany()
+                        .HasForeignKey("RaceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("AmrGrandPrix.API.Models.RaceResult", "Result")
+                        .WithMany("GrandPrixPoints")
+                        .HasForeignKey("ResultId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("AmrGrandPrix.API.Models.Runner", "Runner")
+                        .WithMany("GrandPrixPoints")
+                        .HasForeignKey("RunnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Race");
+
+                    b.Navigation("Result");
+
+                    b.Navigation("Runner");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.GrandPrixStanding", b =>
+                {
+                    b.HasOne("AmrGrandPrix.API.Models.Runner", "Runner")
+                        .WithMany("GrandPrixStandings")
+                        .HasForeignKey("RunnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Runner");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.RaceResult", b =>
+                {
+                    b.HasOne("AmrGrandPrix.API.Models.Race", "Race")
+                        .WithMany("Results")
+                        .HasForeignKey("RaceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("AmrGrandPrix.API.Models.Runner", "Runner")
+                        .WithMany("Results")
+                        .HasForeignKey("RunnerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("AmrGrandPrix.API.Models.UploadBatch", "UploadBatch")
+                        .WithMany("Results")
+                        .HasForeignKey("UploadBatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Race");
+
+                    b.Navigation("Runner");
+
+                    b.Navigation("UploadBatch");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.RunnerClaim", b =>
+                {
+                    b.HasOne("AmrGrandPrix.API.Models.ApplicationUser", "ApplicationUser")
+                        .WithMany()
+                        .HasForeignKey("ApplicationUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("AmrGrandPrix.API.Models.Runner", "Runner")
+                        .WithMany()
+                        .HasForeignKey("RunnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ApplicationUser");
+
+                    b.Navigation("Runner");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.UploadBatch", b =>
+                {
+                    b.HasOne("AmrGrandPrix.API.Models.Race", "Race")
+                        .WithMany("UploadBatches")
+                        .HasForeignKey("RaceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Race");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -288,6 +766,32 @@ namespace AmrGrandPrix.API.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.Race", b =>
+                {
+                    b.Navigation("Results");
+
+                    b.Navigation("UploadBatches");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.RaceResult", b =>
+                {
+                    b.Navigation("GrandPrixPoints");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.Runner", b =>
+                {
+                    b.Navigation("GrandPrixPoints");
+
+                    b.Navigation("GrandPrixStandings");
+
+                    b.Navigation("Results");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.UploadBatch", b =>
+                {
+                    b.Navigation("Results");
                 });
 #pragma warning restore 612, 618
         }

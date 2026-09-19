@@ -1,0 +1,72 @@
+namespace AmrGrandPrix.API.Models.DTOs.RaceResults;
+
+/// <summary>
+/// Represents a processed result row with validation
+/// </summary>
+public class ResultRow
+{
+    public int RowNumber { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int? Age { get; set; }
+
+    /// <summary>
+    /// Age category (e.g. "40-49"), set when only a category was reported instead of an exact age
+    /// </summary>
+    public string? AgeCategory { get; set; }
+    public int? Place { get; set; }
+    public string? TimeString { get; set; }
+    public TimeSpan? Time { get; set; }
+    public Gender? Gender { get; set; }
+    public int? Bib { get; set; }
+    public ResultStatus Status { get; set; } = ResultStatus.Finished;
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// Course/event variant this row's source section was tagged with (e.g. "Full Monty",
+    /// "Junior 1-Mile"), as detected by the LLM. Null when the uploaded document describes
+    /// only one race. Used only during upload review to group rows and route them to the
+    /// correct Race — not persisted on the saved RaceResult.
+    /// </summary>
+    public string? CourseVariant { get; set; }
+
+    /// <summary>
+    /// Validation issues found for this row
+    /// </summary>
+    public List<ValidationIssue> ValidationIssues { get; set; } = new();
+
+    /// <summary>
+    /// Possible runner matches from existing database
+    /// </summary>
+    public List<RunnerMatchDto>? RunnerMatches { get; set; }
+
+    /// <summary>
+    /// Selected runner ID (if matched to existing runner)
+    /// </summary>
+    public Guid? MatchedRunnerId { get; set; }
+
+    /// <summary>
+    /// When matched to an existing runner whose stored age differs from this row's reported age,
+    /// whether to overwrite the runner's stored date of birth with this row's exact age.
+    /// </summary>
+    public bool UpdateRunnerAge { get; set; }
+}
+
+/// <summary>
+/// Represents a validation issue with a result row
+/// </summary>
+public class ValidationIssue
+{
+    public string Field { get; set; } = string.Empty;
+    public ValidationSeverity Severity { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Severity levels for validation issues
+/// </summary>
+public enum ValidationSeverity
+{
+    Info,
+    Warning,
+    Error
+}
