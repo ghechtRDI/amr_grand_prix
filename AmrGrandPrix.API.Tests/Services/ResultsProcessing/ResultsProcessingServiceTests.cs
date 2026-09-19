@@ -200,7 +200,7 @@ public class ResultsProcessingServiceTests
     {
         var sections = new List<ExtractedSection>
         {
-            new(null, null, new List<ExtractedRow>
+            new(null, null, null, new List<ExtractedRow>
             {
                 new(Place: 1, Name: "John Doe", Age: 35, AgeCategory: null, Gender: "Male",
                     TimeString: "1:23:45", Status: "Finished", Notes: null)
@@ -222,7 +222,7 @@ public class ResultsProcessingServiceTests
     {
         var sections = new List<ExtractedSection>
         {
-            new("MALE RESULTS", "Male", new List<ExtractedRow>
+            new("MALE RESULTS", "Male", null, new List<ExtractedRow>
             {
                 new(Place: 1, Name: "John Doe", Age: 35, AgeCategory: null, Gender: null,
                     TimeString: "1:23:45", Status: "Finished", Notes: null)
@@ -239,7 +239,7 @@ public class ResultsProcessingServiceTests
     {
         var sections = new List<ExtractedSection>
         {
-            new(null, null, new List<ExtractedRow>
+            new(null, null, null, new List<ExtractedRow>
             {
                 new(Place: null, Name: "John Doe", Age: 35, AgeCategory: null, Gender: "Male",
                     TimeString: null, Status: "DNF", Notes: null)
@@ -259,7 +259,7 @@ public class ResultsProcessingServiceTests
         var rows = Enumerable.Range(1, 5).Select(i =>
             new ExtractedRow(i, $"Doe{i}, John", 30, null, "Male", "1:00:00", "Finished", null)).ToList();
 
-        var sections = new List<ExtractedSection> { new(null, null, rows) };
+        var sections = new List<ExtractedSection> { new(null, null, null, rows) };
         var result = await _service.ProcessResultsAsync(sections);
 
         result[0].Name.Should().Be("John Doe1");
@@ -270,11 +270,11 @@ public class ResultsProcessingServiceTests
     {
         var sections = new List<ExtractedSection>
         {
-            new("MALE RESULTS", "Male", new List<ExtractedRow>
+            new("MALE RESULTS", "Male", null, new List<ExtractedRow>
             {
                 new(1, "John Doe", 35, null, null, "1:23:45", "Finished", null)
             }),
-            new("FEMALE RESULTS", "Female", new List<ExtractedRow>
+            new("FEMALE RESULTS", "Female", null, new List<ExtractedRow>
             {
                 new(1, "Jane Smith", 28, null, null, "1:30:00", "Finished", null)
             })
@@ -285,6 +285,63 @@ public class ResultsProcessingServiceTests
         result.Should().HaveCount(2);
         result[0].Gender.Should().Be(Gender.Male);
         result[1].Gender.Should().Be(Gender.Female);
+    }
+
+    // ── Course Variant Tagging ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ProcessResultsAsync_SectionWithCourse_TagsAllRowsInSection()
+    {
+        var sections = new List<ExtractedSection>
+        {
+            new("MALE RESULTS", "Male", "Full Monty", new List<ExtractedRow>
+            {
+                new(1, "John Doe", 35, null, null, "1:23:45", "Finished", null),
+                new(2, "Jim Roe", 40, null, null, "1:25:00", "Finished", null)
+            })
+        };
+
+        var result = await _service.ProcessResultsAsync(sections);
+
+        result.Should().HaveCount(2);
+        result.Should().OnlyContain(r => r.CourseVariant == "Full Monty");
+    }
+
+    [Fact]
+    public async Task ProcessResultsAsync_SectionWithNullCourse_LeavesRowsUntagged()
+    {
+        var sections = new List<ExtractedSection>
+        {
+            new(null, null, null, new List<ExtractedRow>
+            {
+                new(1, "John Doe", 35, null, null, "1:23:45", "Finished", null)
+            })
+        };
+
+        var result = await _service.ProcessResultsAsync(sections);
+
+        result[0].CourseVariant.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ProcessResultsAsync_MixedSections_OnlyTagsRowsFromTaggedSection()
+    {
+        var sections = new List<ExtractedSection>
+        {
+            new("MALE RESULTS", "Male", "Full Monty", new List<ExtractedRow>
+            {
+                new(1, "John Doe", 35, null, null, "1:23:45", "Finished", null)
+            }),
+            new("FEMALE RESULTS", "Female", null, new List<ExtractedRow>
+            {
+                new(1, "Jane Smith", 28, null, null, "1:30:00", "Finished", null)
+            })
+        };
+
+        var result = await _service.ProcessResultsAsync(sections);
+
+        result[0].CourseVariant.Should().Be("Full Monty");
+        result[1].CourseVariant.Should().BeNull();
     }
 
     // ── Age Category Mapping ──────────────────────────────────────────────────

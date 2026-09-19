@@ -22,6 +22,14 @@ public class ResultRow
     public string? Notes { get; set; }
 
     /// <summary>
+    /// Course/event variant this row's source section was tagged with (e.g. "Full Monty",
+    /// "Junior 1-Mile"), as detected by the LLM. Null when the uploaded document describes
+    /// only one race. Used only during upload review to group rows and route them to the
+    /// correct Race — not persisted on the saved RaceResult.
+    /// </summary>
+    public string? CourseVariant { get; set; }
+
+    /// <summary>
     /// Validation issues found for this row
     /// </summary>
     public List<ValidationIssue> ValidationIssues { get; set; } = new();

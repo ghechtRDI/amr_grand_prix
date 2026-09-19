@@ -38,6 +38,12 @@ public class AnthropicLlmProvider : ILlmProvider
         - Many PDFs print results twice: once in a "Gender Results" view and again in an "Age Group
           Results" view. Extract each runner only once — prefer the Gender Results section and skip
           any Age Group sub-sections that repeat the same runners.
+        - If the document contains results from more than one distinct race, course, or event (for
+          example, different distances, an adult/open race vs. a kids'/junior race, or named course
+          variants like "Full Monty" vs "Uphill Only"), set "course" on each section to a short label
+          identifying which race/course it belongs to, and use the SAME label on every section
+          (regardless of gender) that belongs to that race. If the document describes only one race
+          (even if split into Male/Female sections), leave "course" null on every section.
         """;
 
     private static readonly object ToolSchema = new
@@ -56,6 +62,7 @@ public class AnthropicLlmProvider : ILlmProvider
                     {
                         name    = new { type = new[] { "string", "null" }, description = "Section header text, or null" },
                         gender  = new { type = new[] { "string", "null" }, @enum = new[] { "Male", "Female", null! }, description = "Gender inferred from section name" },
+                        course  = new { type = new[] { "string", "null" }, description = "Short label identifying which distinct race/course/event this section belongs to, shared across sections of the same race; null if the document describes only one race" },
                         rows = new
                         {
                             type = "array",
@@ -101,8 +108,16 @@ public class AnthropicLlmProvider : ILlmProvider
         var body = new
         {
             model = _settings.Model,
-            max_tokens = 16000,
+            // Claude Haiku 4.5's output cap. Large results files (e.g. Mount Marathon's ~900+
+            // finishers with per-leg splits) need most of this to avoid truncated/invalid JSON.
+            max_tokens = 64000,
             temperature = 0,
+            // Required at this max_tokens: a non-streaming call whose estimated generation time
+            // exceeds Anthropic's ~10-minute threshold is rejected outright, and even when it
+            // isn't, an idle non-streaming connection (no bytes until the full response is ready)
+            // is exactly what corporate proxies/NAT idle timeouts kill — raising our own HttpClient
+            // or frontend timeout can't fix either. Streaming sends bytes continuously instead.
+            stream = true,
             system = SystemPrompt,
             tools = new[]
             {
@@ -130,32 +145,82 @@ public class AnthropicLlmProvider : ILlmProvider
 
         _logger.LogInformation("Calling Anthropic {Model} for {FileName}", _settings.Model, fileName);
 
-        var res = await _http.SendAsync(req, ct);
-        var responseBody = await res.Content.ReadAsStringAsync(ct);
+        using var res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
 
         if (!res.IsSuccessStatusCode)
         {
-            _logger.LogError("Anthropic API error {Status}: {Body}", res.StatusCode, responseBody);
-            throw new InvalidOperationException($"Anthropic API error {res.StatusCode}: {responseBody}");
+            var errorBody = await res.Content.ReadAsStringAsync(ct);
+            _logger.LogError("Anthropic API error {Status}: {Body}", res.StatusCode, errorBody);
+            throw new InvalidOperationException($"Anthropic API error {res.StatusCode}: {errorBody}");
         }
 
-        var doc = JsonNode.Parse(responseBody)!;
-        var inputTokens  = doc["usage"]?["input_tokens"]?.GetValue<int>()  ?? 0;
-        var outputTokens = doc["usage"]?["output_tokens"]?.GetValue<int>() ?? 0;
-        var model        = doc["model"]?.GetValue<string>() ?? _settings.Model;
-        var stopReason   = doc["stop_reason"]?.GetValue<string>();
+        var model             = _settings.Model;
+        var inputTokens       = 0;
+        var outputTokens      = 0;
+        string? stopReason    = null;
+        var toolBlockIndex    = -1;
+        var toolInputByIndex  = new Dictionary<int, StringBuilder>();
+
+        await using (var stream = await res.Content.ReadAsStreamAsync(ct))
+        using (var reader = new StreamReader(stream))
+        {
+            string? line;
+            while ((line = await reader.ReadLineAsync(ct)) != null)
+            {
+                if (!line.StartsWith("data:", StringComparison.Ordinal))
+                    continue;
+
+                var payload = line["data:".Length..].Trim();
+                if (payload.Length == 0)
+                    continue;
+
+                var evt  = JsonNode.Parse(payload)!;
+                var type = evt["type"]?.GetValue<string>();
+
+                switch (type)
+                {
+                    case "message_start":
+                        var message = evt["message"]!;
+                        model       = message["model"]?.GetValue<string>() ?? model;
+                        inputTokens = message["usage"]?["input_tokens"]?.GetValue<int>() ?? 0;
+                        break;
+
+                    case "content_block_start":
+                        var startIndex = evt["index"]!.GetValue<int>();
+                        if (evt["content_block"]?["type"]?.GetValue<string>() == "tool_use")
+                        {
+                            toolBlockIndex = startIndex;
+                            toolInputByIndex[startIndex] = new StringBuilder();
+                        }
+                        break;
+
+                    case "content_block_delta":
+                        var deltaIndex = evt["index"]!.GetValue<int>();
+                        var delta      = evt["delta"]!;
+                        if (delta["type"]?.GetValue<string>() == "input_json_delta"
+                            && toolInputByIndex.TryGetValue(deltaIndex, out var builder))
+                            builder.Append(delta["partial_json"]?.GetValue<string>());
+                        break;
+
+                    case "message_delta":
+                        stopReason   = evt["delta"]?["stop_reason"]?.GetValue<string>() ?? stopReason;
+                        outputTokens = evt["usage"]?["output_tokens"]?.GetValue<int>() ?? outputTokens;
+                        break;
+
+                    case "error":
+                        var errMessage = evt["error"]?["message"]?.GetValue<string>() ?? payload;
+                        throw new InvalidOperationException($"Anthropic API streaming error: {errMessage}");
+                }
+            }
+        }
 
         if (stopReason == "max_tokens")
             _logger.LogWarning("Anthropic hit max_tokens limit for {FileName} — output may be truncated", fileName);
 
-        // Locate tool_use block
-        var content = doc["content"]?.AsArray();
-        var toolBlock = content?.FirstOrDefault(c => c?["type"]?.GetValue<string>() == "tool_use");
-        if (toolBlock == null)
+        if (toolBlockIndex < 0 || !toolInputByIndex.TryGetValue(toolBlockIndex, out var toolInput))
             throw new InvalidOperationException("Anthropic response contained no tool_use block");
 
-        var resultJson = toolBlock["input"]?.ToJsonString(_jsonOpts)
-            ?? throw new InvalidOperationException("tool_use block has no input");
+        var resultJson = toolInput.ToString();
 
         _logger.LogInformation("Anthropic extraction complete. Tokens: {In}in / {Out}out", inputTokens, outputTokens);
 

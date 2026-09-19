@@ -104,18 +104,27 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
     {
         var pointsCreated = 0;
 
+        // Open Division points only count finishers outside the "17 and Under" age category,
+        // ranked among themselves — otherwise a fast junior finisher would take an Open slot
+        // (and bump adults out of top-20 points) despite not being Open-eligible. Results with
+        // unknown age are treated as Open-eligible, matching pre-existing behavior.
+        var openEligibleResults = results
+            .Where(r => GetResultAgeCategory(r) != GrandPrixConstants.AgeCategories[0].Name)
+            .ToList();
+
         for (int i = 0; i < results.Count; i++)
         {
             var result = results[i];
             var placeInGender = i + 1;
 
-            // Update PlaceGender on the result
+            // Update PlaceGender on the result (true overall gender place, includes juniors)
             result.PlaceGender = placeInGender;
 
-            // Calculate Open Division points (top 20)
-            if (placeInGender <= 20)
+            // Calculate Open Division points (top 20 among Open-eligible finishers)
+            var placeInOpenDivision = openEligibleResults.IndexOf(result) + 1;
+            if (placeInOpenDivision >= 1 && placeInOpenDivision <= 20)
             {
-                var openPoints = CalculateOpenDivisionPoints(placeInGender, result.IsNewRecord);
+                var openPoints = CalculateOpenDivisionPoints(placeInOpenDivision, result.IsNewRecord);
                 var openDivision = gender == Gender.Male ? Division.OpenMale : Division.OpenFemale;
 
                 _context.GrandPrixPoints.Add(new GrandPrixPoints

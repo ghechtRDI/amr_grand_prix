@@ -40,7 +40,19 @@ public class ValidateResultsRequest
 
 public class SaveResultsRequest
 {
-    public Guid UploadBatchId { get; set; }
+    /// <summary>
+    /// The batch to save against. Leave null (and set <see cref="SourceUploadBatchId"/> instead)
+    /// when saving an additional course-variant group split out of one upload into a different
+    /// race — the server will clone a new batch from the source for audit lineage.
+    /// </summary>
+    public Guid? UploadBatchId { get; set; }
+
+    /// <summary>
+    /// When <see cref="UploadBatchId"/> is null, the original batch to clone audit fields
+    /// (raw LLM JSON, model, token counts, file name/type) from for this group's new batch.
+    /// </summary>
+    public Guid? SourceUploadBatchId { get; set; }
+
     public Guid RaceId { get; set; }
     public List<ResultRow> Results { get; set; } = new();
 }
@@ -64,4 +76,19 @@ public class SkippedResultDto
     public int RowNumber { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Fields an admin can edit on an already-saved RaceResult.
+/// </summary>
+public class UpdateRaceResultRequest
+{
+    public int? Bib { get; set; }
+    public int? Place { get; set; }
+    public string? TimeString { get; set; }
+    public int? Age { get; set; }
+    public string? AgeCategory { get; set; }
+    public Gender Gender { get; set; }
+    public ResultStatus Status { get; set; }
+    public string? Notes { get; set; }
 }

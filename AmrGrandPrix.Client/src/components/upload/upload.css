@@ -1048,6 +1048,77 @@
 .badge-overall { background: rgba(129, 199, 132, 0.2); color: #81c784; border: 1px solid rgba(129, 199, 132, 0.4); }
 .badge-info    { background: rgba(150, 150, 150, 0.2); color: #aaa; border: 1px solid rgba(150, 150, 150, 0.3); }
 
+/* Course-variant grouping (Data Review step) */
+.course-group {
+  margin-bottom: 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.course-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.course-group-header h3 {
+  color: #fff;
+  margin: 0;
+}
+
+.group-resolved-badge {
+  color: rgba(129, 199, 132, 0.9);
+  font-size: 0.85rem;
+}
+
+.group-race-resolver {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.group-race-resolver label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.group-race-resolver select {
+  min-width: 220px;
+}
+
+.group-race-new-fields {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+  width: 100%;
+}
+
+.group-race-new-fields input[type="text"],
+.group-race-new-fields input[type="date"] {
+  padding: 0.4rem 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: #fff;
+}
+
+.group-race-new-fields label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .column-tag.small {
   font-size: 0.72rem;
   padding: 0.1rem 0.4rem;

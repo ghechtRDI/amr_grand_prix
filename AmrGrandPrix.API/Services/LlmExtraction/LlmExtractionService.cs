@@ -82,10 +82,11 @@ public class LlmExtractionService : ILlmExtractionService
     {
         public string? Name   { get; set; }
         public string? Gender { get; set; }
+        public string? Course { get; set; }
         public List<LlmRow> Rows { get; set; } = new();
 
         public ExtractedSection ToExtractedSection() =>
-            new(Name, Gender, Rows.Select(r => r.ToExtractedRow()).ToList());
+            new(Name, Gender, Course, Rows.Select(r => r.ToExtractedRow()).ToList());
     }
 
     private class LlmRow

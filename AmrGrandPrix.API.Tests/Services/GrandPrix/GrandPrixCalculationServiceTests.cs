@@ -523,6 +523,126 @@ public class GrandPrixCalculationServiceTests : IDisposable
         points.Should().HaveCount(2); // Open + Age
     }
 
+    [Fact]
+    public async Task CalculateRacePointsAsync_ShouldNotAwardOpenPoints_ToUnder18Runner()
+    {
+        // Arrange
+        var race = CreateTestRace(2024, isGrandPrix: true);
+        var youthRunner = CreateTestRunner("Young", "Star", Gender.Male);
+        var result = CreateTestResult(race, youthRunner, 1, TimeSpan.FromMinutes(28), Gender.Male, 16);
+
+        await _context.Races.AddAsync(race);
+        await _context.Runners.AddAsync(youthRunner);
+        await _context.RaceResults.AddAsync(result);
+        await _context.SaveChangesAsync();
+
+        // Act
+        await _service.CalculateRacePointsAsync(race.RaceId);
+
+        // Assert
+        var points = await _context.GrandPrixPoints.ToListAsync();
+
+        points.Should().ContainSingle(); // Age division only
+        points[0].Division.Should().Be(Division.AgeMale);
+        points[0].AgeCategory.Should().Be("17 and Under");
+        points.Should().NotContain(p => p.Division == Division.OpenMale);
+    }
+
+    [Fact]
+    public async Task CalculateRacePointsAsync_ShouldAwardOpenPoints_ToExactly18YearOld()
+    {
+        // Arrange
+        var race = CreateTestRace(2024, isGrandPrix: true);
+        var runner = CreateTestRunner("Just", "Adult", Gender.Male);
+        var result = CreateTestResult(race, runner, 1, TimeSpan.FromMinutes(28), Gender.Male, 18);
+
+        await _context.Races.AddAsync(race);
+        await _context.Runners.AddAsync(runner);
+        await _context.RaceResults.AddAsync(result);
+        await _context.SaveChangesAsync();
+
+        // Act
+        await _service.CalculateRacePointsAsync(race.RaceId);
+
+        // Assert
+        var points = await _context.GrandPrixPoints.ToListAsync();
+
+        points.Should().Contain(p => p.Division == Division.OpenMale && p.Points == 100);
+    }
+
+    [Fact]
+    public async Task CalculateRacePointsAsync_ShouldNotDilute_AdultOpenPlacement_WithFasterJuniors()
+    {
+        // Arrange: a 15-year-old finishes 1st overall, an adult finishes 2nd. The adult
+        // should still be scored as Open place 1 (100 pts), not place 2, since the junior
+        // is not Open-eligible.
+        var race = CreateTestRace(2024, isGrandPrix: true);
+        var junior = CreateTestRunner("Fast", "Junior", Gender.Male);
+        var adult = CreateTestRunner("Adult", "Runner", Gender.Male);
+
+        var juniorResult = CreateTestResult(race, junior, 1, TimeSpan.FromMinutes(28), Gender.Male, 15);
+        var adultResult = CreateTestResult(race, adult, 2, TimeSpan.FromMinutes(29), Gender.Male, 30);
+
+        await _context.Races.AddAsync(race);
+        await _context.Runners.AddRangeAsync(junior, adult);
+        await _context.RaceResults.AddRangeAsync(juniorResult, adultResult);
+        await _context.SaveChangesAsync();
+
+        // Act
+        await _service.CalculateRacePointsAsync(race.RaceId);
+
+        // Assert
+        var points = await _context.GrandPrixPoints.ToListAsync();
+
+        points.Should().NotContain(p => p.RunnerId == junior.RunnerId && p.Division == Division.OpenMale);
+
+        var adultOpenPoints = points.Single(p => p.RunnerId == adult.RunnerId && p.Division == Division.OpenMale);
+        adultOpenPoints.Points.Should().Be(100); // Ranked 1st among Open-eligible finishers
+
+        // PlaceGender still reflects true overall gender place, including the junior
+        var updatedResults = await _context.RaceResults
+            .Where(r => r.RaceId == race.RaceId)
+            .OrderBy(r => r.Time)
+            .ToListAsync();
+        updatedResults.Single(r => r.RunnerId == junior.RunnerId).PlaceGender.Should().Be(1);
+        updatedResults.Single(r => r.RunnerId == adult.RunnerId).PlaceGender.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task CalculateRacePointsAsync_ShouldAwardOpenPoints_WhenAgeIsUnknown()
+    {
+        // Arrange: no Age and no AgeCategory set — unknown age is treated as Open-eligible.
+        var race = CreateTestRace(2024, isGrandPrix: true);
+        var runner = CreateTestRunner("Unknown", "Age", Gender.Male);
+        var result = new RaceResult
+        {
+            ResultId = Guid.NewGuid(),
+            RaceId = race.RaceId,
+            Race = race,
+            RunnerId = runner.RunnerId,
+            Runner = runner,
+            Place = 1,
+            Time = TimeSpan.FromMinutes(28),
+            Status = ResultStatus.Finished,
+            Gender = Gender.Male,
+            Age = null,
+            AgeCategory = null,
+            UploadBatchId = Guid.NewGuid()
+        };
+
+        await _context.Races.AddAsync(race);
+        await _context.Runners.AddAsync(runner);
+        await _context.RaceResults.AddAsync(result);
+        await _context.SaveChangesAsync();
+
+        // Act
+        await _service.CalculateRacePointsAsync(race.RaceId);
+
+        // Assert
+        var points = await _context.GrandPrixPoints.ToListAsync();
+        points.Should().Contain(p => p.Division == Division.OpenMale && p.Points == 100);
+    }
+
     #endregion
 
     #region Standings Calculation Tests

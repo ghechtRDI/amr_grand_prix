@@ -26,6 +26,7 @@ public class ResultsProcessingService : IResultsProcessingService
             // Resolve section-level gender fallback
             var sectionGender = ParseGender(section.Gender)
                 ?? DetectGenderFromSection(section.Name);
+            var courseVariant = string.IsNullOrWhiteSpace(section.Course) ? null : section.Course.Trim();
 
             // Detect batch-wide "Last, First" format as safety net (LLM should convert,
             // but some edge cases may slip through)
@@ -39,7 +40,7 @@ public class ResultsProcessingService : IResultsProcessingService
                 rowNumber++;
                 try
                 {
-                    var resultRow = ProcessSingleRow(row, sectionGender, useLastFirst, rowNumber);
+                    var resultRow = ProcessSingleRow(row, sectionGender, courseVariant, useLastFirst, rowNumber);
                     resultRows.Add(resultRow);
                 }
                 catch (Exception ex)
@@ -63,7 +64,7 @@ public class ResultsProcessingService : IResultsProcessingService
     }
 
     private ResultRow ProcessSingleRow(
-        ExtractedRow row, Gender? sectionGender, bool useLastFirst, int rowNumber)
+        ExtractedRow row, Gender? sectionGender, string? courseVariant, bool useLastFirst, int rowNumber)
     {
         var name = row.Name?.Trim() ?? string.Empty;
 
@@ -87,7 +88,8 @@ public class ResultsProcessingService : IResultsProcessingService
             Time        = ParseTime(row.TimeString),
             Gender      = ParseGender(row.Gender) ?? sectionGender,
             Status      = status,
-            Notes       = row.Notes
+            Notes       = row.Notes,
+            CourseVariant = courseVariant
         };
 
         resultRow.ValidationIssues = ValidateRow(resultRow);

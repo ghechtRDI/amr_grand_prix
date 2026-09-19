@@ -666,6 +666,29 @@
   font-size: 0.8rem;
 }
 
+/* ── Inline row editing (Race Results admin controls) ── */
+
+.row-actions {
+  display: flex;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.row-editing td {
+  background: rgba(102, 126, 234, 0.06);
+}
+
+.cell-input {
+  width: 100%;
+  min-width: 60px;
+  padding: 0.3rem 0.4rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
 /* ── Navigation links ── */
 
 .page-footer-links {

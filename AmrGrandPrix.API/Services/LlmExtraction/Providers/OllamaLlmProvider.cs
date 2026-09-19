@@ -23,6 +23,7 @@ public class OllamaLlmProvider : ILlmProvider
             {
               "name": <string or null>,
               "gender": <"Male" | "Female" | null>,
+              "course": <string or null>,
               "rows": [
                 {
                   "place": <integer or null>,
@@ -53,6 +54,12 @@ public class OllamaLlmProvider : ILlmProvider
         - status must be one of: Finished, DNF, DNS, DQ. Default to "Finished".
         - Preserve time strings exactly (e.g. "1:23:45", "23:45"). Use null for DNF/DNS/DQ rows.
         - Annotations on times (*, #, CR, WR, etc.) belong in notes, not time_string.
+        - If the document contains results from more than one distinct race, course, or event (for
+          example, different distances, an adult/open race vs. a kids'/junior race, or named course
+          variants like "Full Monty" vs "Uphill Only"), set "course" on each section to a short label
+          identifying which race/course it belongs to, and use the SAME label on every section
+          (regardless of gender) that belongs to that race. If the document describes only one race
+          (even if split into Male/Female sections), leave "course" null on every section.
         - Output ONLY the JSON object. No markdown, no explanation.
         """;
 
@@ -62,7 +69,6 @@ public class OllamaLlmProvider : ILlmProvider
         ILogger<OllamaLlmProvider> logger)
     {
         _http = http;
-        _http.Timeout = TimeSpan.FromMinutes(10);
         _settings = options.Value.Ollama;
         _logger = logger;
     }

@@ -7,7 +7,7 @@ public record ExtractionResult(
     int InputTokens,
     int OutputTokens);
 
-public record ExtractedSection(string? Name, string? Gender, List<ExtractedRow> Rows);
+public record ExtractedSection(string? Name, string? Gender, string? Course, List<ExtractedRow> Rows);
 
 public record ExtractedRow(
     int? Place,

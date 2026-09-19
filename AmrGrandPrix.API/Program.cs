@@ -83,15 +83,21 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 
 // LLM extraction services
-builder.Services.AddHttpClient<AnthropicLlmProvider>();
+builder.Services.AddHttpClient<AnthropicLlmProvider>(client =>
+    client.Timeout = TimeSpan.FromMinutes(10));
 builder.Services.AddHttpClient<OllamaLlmProvider>(client =>
     client.Timeout = TimeSpan.FromMinutes(10));
 
+// Resolve ILlmProvider by fetching the already-configured typed client from the
+// container, rather than a second AddScoped<ILlmProvider, TImpl> registration — that
+// would construct its own instance via plain constructor injection, which resolves
+// HttpClient to the default unnamed client (100s timeout) instead of the one configured
+// above via AddHttpClient<T>(client => client.Timeout = ...).
 var llmProvider = builder.Configuration.GetValue<string>("Llm:Provider") ?? "Anthropic";
 if (llmProvider.Equals("Ollama", StringComparison.OrdinalIgnoreCase))
-    builder.Services.AddScoped<ILlmProvider, OllamaLlmProvider>();
+    builder.Services.AddScoped<ILlmProvider>(sp => sp.GetRequiredService<OllamaLlmProvider>());
 else
-    builder.Services.AddScoped<ILlmProvider, AnthropicLlmProvider>();
+    builder.Services.AddScoped<ILlmProvider>(sp => sp.GetRequiredService<AnthropicLlmProvider>());
 
 builder.Services.AddScoped<ILlmExtractionService, LlmExtractionService>();
 

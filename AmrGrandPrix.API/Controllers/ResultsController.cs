@@ -158,15 +158,49 @@ public class ResultsController : ControllerBase
         using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
-            var uploadBatch = await _context.UploadBatches.FindAsync(request.UploadBatchId);
-            if (uploadBatch == null)
-                return NotFound($"Upload batch {request.UploadBatchId} not found");
-
             var race = await _context.Races.FindAsync(request.RaceId);
             if (race == null)
                 return NotFound($"Race {request.RaceId} not found");
 
-            var user       = await _userManager.GetUserAsync(User);
+            var user = await _userManager.GetUserAsync(User);
+
+            UploadBatch? uploadBatch;
+            if (request.UploadBatchId.HasValue)
+            {
+                uploadBatch = await _context.UploadBatches.FindAsync(request.UploadBatchId.Value);
+                if (uploadBatch == null)
+                    return NotFound($"Upload batch {request.UploadBatchId} not found");
+            }
+            else if (request.SourceUploadBatchId.HasValue)
+            {
+                // An additional course-variant group split out of the same upload into a
+                // different race — clone a new batch from the source for audit lineage.
+                var sourceBatch = await _context.UploadBatches.FindAsync(request.SourceUploadBatchId.Value);
+                if (sourceBatch == null)
+                    return NotFound($"Upload batch {request.SourceUploadBatchId} not found");
+
+                uploadBatch = new UploadBatch
+                {
+                    UploadBatchId   = Guid.NewGuid(),
+                    RaceId          = request.RaceId,
+                    FileName        = sourceBatch.FileName,
+                    FileType        = sourceBatch.FileType,
+                    RecordsUploaded = request.Results.Count,
+                    UploadedBy      = user?.Id ?? "system",
+                    UploadedAt      = DateTime.UtcNow,
+                    Status          = UploadStatus.Saved,
+                    RawLlmJson      = sourceBatch.RawLlmJson,
+                    LlmModel        = sourceBatch.LlmModel,
+                    LlmInputTokens  = sourceBatch.LlmInputTokens,
+                    LlmOutputTokens = sourceBatch.LlmOutputTokens
+                };
+                _context.UploadBatches.Add(uploadBatch);
+            }
+            else
+            {
+                return BadRequest("Either UploadBatchId or SourceUploadBatchId is required");
+            }
+
             var resultIds  = new List<Guid>();
             var newRunners = 0;
             var skipped    = new List<SkippedResultDto>();
@@ -239,7 +273,7 @@ public class ResultsController : ControllerBase
                     Notes        = resultRow.Notes,
                     CreatedAt    = DateTime.UtcNow,
                     UploadedBy   = user?.Id ?? "system",
-                    UploadBatchId = request.UploadBatchId
+                    UploadBatchId = uploadBatch.UploadBatchId
                 };
                 _context.RaceResults.Add(raceResult);
                 resultIds.Add(raceResult.ResultId);
@@ -326,6 +360,105 @@ public class ResultsController : ControllerBase
             .ToListAsync();
 
         return Ok(results);
+    }
+
+    /// <summary>Update an individual race result (admin/manager only).</summary>
+    [HttpPut("{resultId}")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(typeof(RaceResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<RaceResultDto>> UpdateRaceResult(Guid resultId, [FromBody] UpdateRaceResultRequest request)
+    {
+        try
+        {
+            var result = await _context.RaceResults
+                .Include(r => r.Runner)
+                .Include(r => r.Race)
+                .FirstOrDefaultAsync(r => r.ResultId == resultId);
+
+            if (result == null)
+                return NotFound($"Result {resultId} not found");
+
+            result.Bib = request.Bib;
+            result.Place = request.Place;
+            result.Time = _resultsProcessingService.ParseTime(request.TimeString);
+            result.Age = request.Age;
+            result.AgeCategory = request.AgeCategory
+                ?? (request.Age.HasValue ? GrandPrixConstants.GetAgeCategory(request.Age.Value) : null);
+            result.Gender = request.Gender;
+            result.Status = request.Status;
+            result.Notes = request.Notes;
+
+            await _context.SaveChangesAsync();
+            await CalculateGenderPlacesAsync(result.RaceId);
+            await _grandPrixCalculationService.RecalculateAfterResultsChangeAsync(result.RaceId);
+
+            _logger.LogInformation("Updated result {ResultId} for race {RaceId}", resultId, result.RaceId);
+
+            return Ok(new RaceResultDto
+            {
+                ResultId         = result.ResultId,
+                RaceId           = result.RaceId,
+                RaceName         = result.Race.Name,
+                RaceDate         = result.Race.Date,
+                RunnerId         = result.RunnerId,
+                RunnerName       = result.Runner.FirstName + " " + result.Runner.LastName,
+                Bib              = result.Bib,
+                Place            = result.Place,
+                PlaceGender      = result.PlaceGender,
+                PlaceAgeCategory = result.PlaceAgeCategory,
+                Time             = result.Time,
+                Age              = result.Age,
+                AgeCategory      = result.AgeCategory,
+                Gender           = result.Gender,
+                Status           = result.Status,
+                Notes            = result.Notes,
+                IsNewRecord      = result.IsNewRecord,
+                CreatedAt        = result.CreatedAt
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating result {ResultId}", resultId);
+            return BadRequest($"Error updating result: {ex.Message}");
+        }
+    }
+
+    /// <summary>Delete an individual race result (admin only).</summary>
+    [HttpDelete("{resultId}")]
+    [Authorize(Roles = "Admin")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteRaceResult(Guid resultId)
+    {
+        try
+        {
+            var result = await _context.RaceResults.FindAsync(resultId);
+            if (result == null)
+                return NotFound($"Result {resultId} not found");
+
+            var raceId = result.RaceId;
+
+            var points = await _context.GrandPrixPoints
+                .Where(p => p.ResultId == resultId)
+                .ToListAsync();
+            _context.GrandPrixPoints.RemoveRange(points);
+            _context.RaceResults.Remove(result);
+
+            await _context.SaveChangesAsync();
+            await CalculateGenderPlacesAsync(raceId);
+            await _grandPrixCalculationService.RecalculateAfterResultsChangeAsync(raceId);
+
+            _logger.LogInformation("Deleted result {ResultId} from race {RaceId}", resultId, raceId);
+
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting result {ResultId}", resultId);
+            return BadRequest($"Error deleting result: {ex.Message}");
+        }
     }
 
     /// <summary>Resume a pending upload batch, re-deriving its parsed results without re-running the LLM.</summary>
@@ -426,18 +559,15 @@ public class ResultsController : ControllerBase
                 .Where(r => r.UploadBatchId == batchId)
                 .ToListAsync();
             _context.RaceResults.RemoveRange(results);
-
-            var resultIds = results.Select(r => r.ResultId).ToList();
-            var points    = await _context.GrandPrixPoints
-                .Where(p => resultIds.Contains(p.ResultId))
-                .ToListAsync();
-            _context.GrandPrixPoints.RemoveRange(points);
             _context.UploadBatches.Remove(uploadBatch);
 
             await _context.SaveChangesAsync();
 
-            if (uploadBatch.Race.IsGrandPrixRace)
-                await _grandPrixCalculationService.UpdateStandingsAsync(uploadBatch.Race.Year);
+            // Recompute gender places and GP points/standings from whatever results remain
+            // for this race (a race can have results from more than one upload batch, e.g.
+            // corrections or course-variant splits), not just this batch's own results.
+            await CalculateGenderPlacesAsync(uploadBatch.RaceId);
+            await _grandPrixCalculationService.RecalculateAfterResultsChangeAsync(uploadBatch.RaceId);
 
             await transaction.CommitAsync();
 

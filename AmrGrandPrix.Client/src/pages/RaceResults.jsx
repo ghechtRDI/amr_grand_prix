@@ -3,9 +3,28 @@
  * Shows all results for a single race, with GP points if applicable.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
+import * as tokenService from '../services/tokenService';
 import './pages.css';
+
+const STATUS_OPTIONS = ['Finished', 'DNF', 'DNS', 'DQ'];
+const GENDER_OPTIONS = ['Male', 'Female', 'Nonbinary'];
+
+function toStatusLabel(status) {
+  return typeof status === 'number' ? STATUS_OPTIONS[status] : status;
+}
+
+function toGenderLabel(gender) {
+  return typeof gender === 'number' ? GENDER_OPTIONS[gender] : gender;
+}
+
+// "1:23:45" or "23:45" formatted TimeSpan (as returned by the API) -> plain string for editing
+function timeToEditableString(timeSpan) {
+  if (!timeSpan) return '';
+  return timeSpan.split('.')[0]; // drop fractional seconds if present
+}
 
 function formatTime(timeSpan) {
   if (!timeSpan) return '—';
@@ -34,6 +53,7 @@ function statusBadge(status) {
 
 export default function RaceResults() {
   const { raceId } = useParams();
+  const { hasRole, hasAnyRole, isAuthenticated } = useAuth();
   const [race, setRace] = useState(null);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -41,36 +61,125 @@ export default function RaceResults() {
   const [genderFilter, setGenderFilter] = useState('all');
   const [sortField, setSortField] = useState('place');
   const [sortDir, setSortDir] = useState('asc');
+  const [editingResultId, setEditingResultId] = useState(null);
+  const [editValues, setEditValues] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [actionError, setActionError] = useState(null);
+
+  const canEdit = isAuthenticated() && hasAnyRole(['Admin', 'Manager']);
+  const canDelete = isAuthenticated() && hasRole('Admin');
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [raceRes, resultsRes] = await Promise.all([
+        fetch(`/api/races/detail/${raceId}`),
+        fetch(`/api/results/race/${raceId}`),
+      ]);
+
+      if (!raceRes.ok) throw new Error('Race not found');
+      if (!resultsRes.ok) throw new Error('Failed to load results');
+
+      const [raceData, resultsData] = await Promise.all([
+        raceRes.json(),
+        resultsRes.json(),
+      ]);
+
+      setRace(raceData);
+      setResults(resultsData);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [raceId]);
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [raceRes, resultsRes] = await Promise.all([
-          fetch(`/api/races/detail/${raceId}`),
-          fetch(`/api/results/race/${raceId}`),
-        ]);
-
-        if (!raceRes.ok) throw new Error('Race not found');
-        if (!resultsRes.ok) throw new Error('Failed to load results');
-
-        const [raceData, resultsData] = await Promise.all([
-          raceRes.json(),
-          resultsRes.json(),
-        ]);
-
-        setRace(raceData);
-        setResults(resultsData);
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
-  }, [raceId]);
+  }, [fetchData]);
+
+  const startEdit = (r) => {
+    setActionError(null);
+    setEditingResultId(r.resultId);
+    setEditValues({
+      bib: r.bib ?? '',
+      place: r.place ?? '',
+      time: timeToEditableString(r.time),
+      age: r.age ?? '',
+      ageCategory: r.ageCategory ?? '',
+      gender: toGenderLabel(r.gender) ?? '',
+      status: toStatusLabel(r.status) ?? 'Finished',
+      notes: r.notes ?? '',
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingResultId(null);
+    setEditValues({});
+  };
+
+  const saveEdit = async (resultId) => {
+    setSaving(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/results/${resultId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenService.getAccessToken()}`,
+        },
+        body: JSON.stringify({
+          bib: editValues.bib === '' ? null : parseInt(editValues.bib),
+          place: editValues.place === '' ? null : parseInt(editValues.place),
+          timeString: editValues.time || null,
+          age: editValues.age === '' ? null : parseInt(editValues.age),
+          ageCategory: editValues.age === '' ? (editValues.ageCategory || null) : null,
+          gender: editValues.gender,
+          status: editValues.status,
+          notes: editValues.notes || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+
+      setEditingResultId(null);
+      setEditValues({});
+      await fetchData();
+    } catch (e) {
+      setActionError(`Failed to save changes: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (r) => {
+    if (!window.confirm(`Delete ${r.runnerName}'s result from this race? This cannot be undone.`)) return;
+
+    setDeletingId(r.resultId);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/results/${r.resultId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${tokenService.getAccessToken()}` },
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+
+      await fetchData();
+    } catch (e) {
+      setActionError(`Failed to delete result: ${e.message}`);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const handleSort = (field) => {
     if (sortField === field) {
@@ -155,6 +264,8 @@ export default function RaceResults() {
           <span className="results-count">{filteredResults.length} shown</span>
         </div>
 
+        {actionError && <div className="error-banner">{actionError}</div>}
+
         <div className="table-wrapper">
           <table className="data-table">
             <thead>
@@ -177,6 +288,7 @@ export default function RaceResults() {
                 </th>
                 <th>Status</th>
                 {race?.isGrandPrixRace && <th>Record</th>}
+                {(canEdit || canDelete) && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -184,6 +296,52 @@ export default function RaceResults() {
                 const status = typeof r.status === 'number'
                   ? ['Finished', 'DNF', 'DNS', 'DQ'][r.status]
                   : r.status;
+                const isEditing = editingResultId === r.resultId;
+
+                if (isEditing) {
+                  return (
+                    <tr key={r.resultId} className="row-editing">
+                      <td>
+                        <input type="text" value={editValues.place} className="cell-input"
+                          onChange={(e) => setEditValues(v => ({ ...v, place: e.target.value }))} />
+                      </td>
+                      <td>{r.placeGender ?? '—'}</td>
+                      <td className="name-cell">
+                        <Link to={`/runners/${r.runnerId}`}>{r.runnerName}</Link>
+                      </td>
+                      <td>
+                        <input type="text" value={editValues.age} className="cell-input" placeholder="Age"
+                          onChange={(e) => setEditValues(v => ({ ...v, age: e.target.value }))} />
+                      </td>
+                      <td>
+                        <select value={editValues.gender} className="cell-input"
+                          onChange={(e) => setEditValues(v => ({ ...v, gender: e.target.value }))}>
+                          {GENDER_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+                        </select>
+                      </td>
+                      <td>
+                        <input type="text" value={editValues.time} className="cell-input" placeholder="h:mm:ss"
+                          onChange={(e) => setEditValues(v => ({ ...v, time: e.target.value }))} />
+                      </td>
+                      <td>
+                        <select value={editValues.status} className="cell-input"
+                          onChange={(e) => setEditValues(v => ({ ...v, status: e.target.value }))}>
+                          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </td>
+                      {race?.isGrandPrixRace && <td></td>}
+                      <td className="row-actions">
+                        <button className="btn-primary btn-sm" disabled={saving} onClick={() => saveEdit(r.resultId)}>
+                          {saving ? 'Saving...' : 'Save'}
+                        </button>
+                        <button className="btn-secondary btn-sm" disabled={saving} onClick={cancelEdit}>
+                          Cancel
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }
+
                 return (
                   <tr key={r.resultId} className={status !== 'Finished' ? 'dnf-row' : ''}>
                     <td className="place-cell">{r.place ?? '—'}</td>
@@ -197,6 +355,24 @@ export default function RaceResults() {
                     <td>{statusBadge(r.status)}</td>
                     {race?.isGrandPrixRace && (
                       <td>{r.isNewRecord ? <span className="record-badge">CR</span> : ''}</td>
+                    )}
+                    {(canEdit || canDelete) && (
+                      <td className="row-actions">
+                        {canEdit && (
+                          <button className="btn-secondary btn-sm" onClick={() => startEdit(r)}>
+                            Edit
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            className="btn-danger btn-sm"
+                            disabled={deletingId === r.resultId}
+                            onClick={() => handleDelete(r)}
+                          >
+                            {deletingId === r.resultId ? 'Deleting...' : 'Delete'}
+                          </button>
+                        )}
+                      </td>
                     )}
                   </tr>
                 );
