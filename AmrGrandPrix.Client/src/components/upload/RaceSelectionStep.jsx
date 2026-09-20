@@ -4,8 +4,21 @@
  */
 
 import { useState, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
   const [isCreatingNew, setIsCreatingNew] = useState(false);
@@ -14,6 +27,7 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
   const [error, setError] = useState(null);
 
   const {
+    control,
     register,
     handleSubmit,
     watch,
@@ -63,11 +77,18 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
     }
   };
 
-  // When selecting an existing race, populate the form
-  const handleRaceSelection = (e) => {
-    const raceId = e.target.value;
-    setValue('raceId', raceId);
+  // base-ui's Select doesn't resolve a selected item's label from its children the
+  // way Radix does - it needs an explicit lookup to render anything but the raw value.
+  const raceOptionLabel = (raceId) => {
+    if (!raceId) return null;
+    if (raceId === 'new') return '+ Create New Race';
+    const race = races.find(r => r.raceId === raceId);
+    if (!race) return raceId;
+    return `${race.name} - ${new Date(race.date).toLocaleDateString()}${race.courseVariant ? ` (${race.courseVariant})` : ''}`;
+  };
 
+  // When selecting an existing race, populate the form
+  const handleRaceSelection = (raceId) => {
     if (raceId && raceId !== 'new') {
       const selectedRace = races.find(r => r.raceId === raceId);
       if (selectedRace) {
@@ -150,119 +171,143 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
 
   if (loading) {
     return (
-      <div className="wizard-step">
-        <div className="step-header">
-          <h2>Step 1: Race Selection</h2>
-          <span className="step-indicator">Step 1 of 5</span>
+      <div>
+        <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+          <h2 className="text-xl font-semibold">Step 1: Race Selection</h2>
+          <span className="text-sm text-muted-foreground">Step 1 of 4</span>
         </div>
-        <div className="loading">Loading races...</div>
+        <div className="flex flex-col gap-4">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-8 w-full" />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="wizard-step">
-      <div className="step-header">
-        <h2>Step 1: Race Selection</h2>
-        <span className="step-indicator">Step 1 of 5</span>
+    <div>
+      <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+        <h2 className="text-xl font-semibold">Step 1: Race Selection</h2>
+        <span className="text-sm text-muted-foreground">Step 1 of 4</span>
       </div>
 
       {error && (
-        <div className="error-message">
-          {error}
-        </div>
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="race-selection-form">
-        <div className="form-group">
-          <label htmlFor="raceId">Select Race:</label>
-          <select
-            id="raceId"
-            {...register('raceId', { required: 'Please select a race or create new' })}
-            onChange={handleRaceSelection}
-            className={errors.raceId ? 'error' : ''}
-          >
-            <option value="">-- Select a race --</option>
-            {races.map(race => (
-              <option key={race.raceId} value={race.raceId}>
-                {race.name} - {new Date(race.date).toLocaleDateString()}
-                {race.courseVariant ? ` (${race.courseVariant})` : ''}
-              </option>
-            ))}
-            <option value="new">+ Create New Race</option>
-          </select>
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="raceId">Select Race</Label>
+          <Controller
+            name="raceId"
+            control={control}
+            rules={{ required: 'Please select a race or create new' }}
+            render={({ field }) => (
+              <Select
+                value={field.value || undefined}
+                onValueChange={(value) => {
+                  field.onChange(value);
+                  handleRaceSelection(value);
+                }}
+              >
+                <SelectTrigger
+                  id="raceId"
+                  className="w-full"
+                  aria-invalid={!!errors.raceId}
+                >
+                  <SelectValue placeholder="-- Select a race --">
+                    {(value) => raceOptionLabel(value) || '-- Select a race --'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {races.map(race => (
+                    <SelectItem key={race.raceId} value={race.raceId}>
+                      {race.name} - {new Date(race.date).toLocaleDateString()}
+                      {race.courseVariant ? ` (${race.courseVariant})` : ''}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="new">+ Create New Race</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          />
           {errors.raceId && (
-            <span className="field-error">{errors.raceId.message}</span>
+            <p className="text-sm text-destructive">{errors.raceId.message}</p>
           )}
         </div>
 
         {(isCreatingNew || selectedRaceId === 'new') && (
           <>
-            <div className="form-group">
-              <label htmlFor="raceName">Race Name:</label>
-              <input
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="raceName">Race Name</Label>
+              <Input
                 type="text"
                 id="raceName"
+                aria-invalid={!!errors.raceName}
                 {...register('raceName', {
                   required: isCreatingNew ? 'Race name is required' : false
                 })}
                 placeholder="e.g., Mount Marathon Race"
-                className={errors.raceName ? 'error' : ''}
               />
               {errors.raceName && (
-                <span className="field-error">{errors.raceName.message}</span>
+                <p className="text-sm text-destructive">{errors.raceName.message}</p>
               )}
             </div>
 
-            <div className="form-group">
-              <label htmlFor="raceDate">Race Date:</label>
-              <input
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="raceDate">Race Date</Label>
+              <Input
                 type="date"
                 id="raceDate"
+                aria-invalid={!!errors.raceDate}
                 {...register('raceDate', {
                   required: isCreatingNew ? 'Race date is required' : false
                 })}
-                className={errors.raceDate ? 'error' : ''}
               />
               {errors.raceDate && (
-                <span className="field-error">{errors.raceDate.message}</span>
+                <p className="text-sm text-destructive">{errors.raceDate.message}</p>
               )}
             </div>
 
-            <div className="form-group checkbox-group">
-              <label>
-                <input
-                  type="checkbox"
-                  {...register('isGrandPrixRace')}
-                />
-                This is a Grand Prix race
-              </label>
-            </div>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                className="size-4 rounded border-input accent-primary"
+                {...register('isGrandPrixRace')}
+              />
+              This is a Grand Prix race
+            </label>
 
             {isGrandPrixRace && (
-              <div className="form-group">
-                <label htmlFor="courseVariant">Course Variant (optional):</label>
-                <input
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="courseVariant">Course Variant (optional)</Label>
+                <Input
                   type="text"
                   id="courseVariant"
                   {...register('courseVariant')}
                   placeholder="e.g., Full Monty, Uphill Only"
                 />
-                <small className="field-hint">
+                <p className="text-xs text-muted-foreground">
                   Specify the variant if this race has multiple course options
-                </small>
+                </p>
               </div>
             )}
           </>
         )}
 
-        <div className="form-actions">
-          <button type="button" onClick={onCancel} className="btn-secondary">
+        <div className="mt-4 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">
+          <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
-          </button>
-          <button type="submit" className="btn-primary">
-            Next →
-          </button>
+          </Button>
+          <Button type="submit" disabled={loading}>
+            {loading ? <Loader2 className="animate-spin" /> : null}
+            Next &rarr;
+          </Button>
         </div>
       </form>
     </div>

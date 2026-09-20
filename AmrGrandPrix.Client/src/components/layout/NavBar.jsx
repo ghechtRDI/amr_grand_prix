@@ -6,15 +6,24 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Menu, Moon, Sun, X } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import './NavBar.css';
+import { useTheme } from '../../hooks/useTheme';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
-const linkClass = ({ isActive }) => `navbar-link${isActive ? ' active' : ''}`;
+const navLinkClass = ({ isActive }) =>
+  cn(
+    'rounded-md px-3 py-2 text-sm font-medium text-secondary-foreground/80 transition-colors hover:bg-white/10 hover:text-secondary-foreground',
+    isActive && 'bg-white/15 text-secondary-foreground'
+  );
 
 export default function NavBar() {
   const { user, isAuthenticated, hasAnyRole, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -46,74 +55,94 @@ export default function NavBar() {
   };
 
   return (
-    <header className="navbar" ref={navRef}>
-      <div className="navbar-inner">
-        <Link to="/" className="navbar-brand">
-          <span className="navbar-logo" aria-hidden="true">🏔️</span>
+    <header ref={navRef} className="sticky top-0 z-40 bg-secondary text-secondary-foreground shadow-sm">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4">
+        <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
+          <span aria-hidden="true">🏔️</span>
           <span>AMR Grand Prix</span>
         </Link>
 
         <button
           type="button"
-          className="navbar-toggle"
+          className="flex items-center justify-center rounded-md p-2 text-secondary-foreground/80 hover:bg-white/10 hover:text-secondary-foreground md:hidden"
           aria-label="Toggle navigation menu"
           aria-expanded={mobileOpen}
           onClick={() => setMobileOpen((v) => !v)}
         >
-          <span />
-          <span />
-          <span />
+          {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
         </button>
 
-        <nav className={`navbar-menu ${mobileOpen ? 'open' : ''}`}>
-          <div className="navbar-links">
-            <NavLink to={`/standings/${CURRENT_YEAR}`} className={linkClass}>
+        <nav
+          className={cn(
+            'absolute inset-x-0 top-14 flex-col gap-1 border-t border-white/10 bg-secondary p-3 md:static md:flex md:flex-1 md:flex-row md:items-center md:justify-between md:border-0 md:p-0',
+            mobileOpen ? 'flex' : 'hidden'
+          )}
+        >
+          <div className="flex flex-col gap-1 md:flex-row md:items-center">
+            <NavLink to={`/standings/${CURRENT_YEAR}`} className={navLinkClass}>
               Standings
             </NavLink>
 
             {authed && (
-              <NavLink to="/" end className={linkClass}>
+              <NavLink to="/" end className={navLinkClass}>
                 Home
               </NavLink>
             )}
 
             {isAdminOrManager && (
               <>
-                <span className="navbar-divider" aria-hidden="true" />
-                <span className="navbar-section-label">Admin</span>
-                <NavLink to="/admin/results" className={linkClass}>
+                <span className="mx-1 hidden h-4 w-px bg-white/20 md:inline-block" aria-hidden="true" />
+                <span className="px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-secondary-foreground/60 md:hidden">
+                  Admin
+                </span>
+                <NavLink to="/admin/results" className={navLinkClass}>
                   Results Management
                 </NavLink>
-                <NavLink to="/admin/results/upload" className={linkClass}>
+                <NavLink to="/admin/results/upload" className={navLinkClass}>
                   Upload Results
                 </NavLink>
               </>
             )}
           </div>
 
-          <div className="navbar-auth">
+          <div className="flex flex-col gap-2 border-t border-white/10 pt-3 md:flex-row md:items-center md:border-0 md:pt-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              onClick={toggleTheme}
+              className="text-secondary-foreground/80 hover:bg-white/10 hover:text-secondary-foreground"
+            >
+              {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </Button>
+
             {authed ? (
               <>
-                <div className="navbar-user">
-                  <span className="navbar-user-name">
-                    {user?.firstName || user?.email}
-                  </span>
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-sm font-medium">{user?.firstName || user?.email}</span>
                   {user?.roles?.length > 0 && (
-                    <span className="navbar-role-pill">{user.roles.join(', ')}</span>
+                    <Badge variant="secondary" className="border border-white/20 bg-white/10 text-secondary-foreground">
+                      {user.roles.join(', ')}
+                    </Badge>
                   )}
                 </div>
-                <button type="button" className="btn-secondary btn-sm" onClick={handleLogout}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLogout}
+                  className="border-white/30 bg-transparent text-secondary-foreground hover:bg-white/10 hover:text-secondary-foreground"
+                >
                   Logout
-                </button>
+                </Button>
               </>
             ) : (
               <>
-                <NavLink to="/login" className={linkClass}>
+                <NavLink to="/login" className={navLinkClass}>
                   Login
                 </NavLink>
-                <Link to="/register" className="btn-primary btn-sm">
-                  Register
-                </Link>
+                <Button size="sm" nativeButton={false} render={<Link to="/register">Register</Link>} />
               </>
             )}
           </div>

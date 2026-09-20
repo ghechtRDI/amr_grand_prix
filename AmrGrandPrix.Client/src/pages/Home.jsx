@@ -4,55 +4,93 @@
  */
 
 import { Link } from 'react-router-dom';
+import { ClipboardList, Trophy, Upload } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-import './pages.css';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
 const CURRENT_YEAR = new Date().getFullYear();
+
+const NAV_CARDS = (isAdminOrManager) => [
+  {
+    to: `/standings/${CURRENT_YEAR}`,
+    icon: Trophy,
+    title: 'GP Standings',
+    desc: `View ${CURRENT_YEAR} Grand Prix standings`,
+  },
+  ...(isAdminOrManager
+    ? [
+        {
+          to: '/admin/results',
+          icon: ClipboardList,
+          title: 'Results Management',
+          desc: 'Manage uploaded race results',
+        },
+        {
+          to: '/admin/results/upload',
+          icon: Upload,
+          title: 'Upload Results',
+          desc: 'Upload race results via file or paste',
+        },
+      ]
+    : []),
+];
 
 export const Home = () => {
   const { user } = useAuth();
   const isAdminOrManager = user?.roles?.some((r) => r === 'Admin' || r === 'Manager');
 
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <h1>Alaska Mountain Runners Grand Prix</h1>
-        {user && <p className="page-subtitle">Welcome back, {user.firstName || user.email}.</p>}
-      </div>
-
-      <div className="page-content">
-        <div className="nav-cards">
-          <Link to={`/standings/${CURRENT_YEAR}`} className="nav-card">
-            <div className="nav-card-icon">🏆</div>
-            <div className="nav-card-title">GP Standings</div>
-            <div className="nav-card-desc">View {CURRENT_YEAR} Grand Prix standings</div>
-          </Link>
-
-          {isAdminOrManager && (
-            <>
-              <Link to="/admin/results" className="nav-card">
-                <div className="nav-card-icon">📋</div>
-                <div className="nav-card-title">Results Management</div>
-                <div className="nav-card-desc">Manage uploaded race results</div>
-              </Link>
-              <Link to="/admin/results/upload" className="nav-card">
-                <div className="nav-card-icon">⬆</div>
-                <div className="nav-card-title">Upload Results</div>
-                <div className="nav-card-desc">Upload race results via file or paste</div>
-              </Link>
-            </>
+    <div className="min-h-svh bg-background px-4 py-8 md:py-12">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-8">
+          <h1 className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-2xl font-semibold tracking-tight text-transparent md:text-3xl">
+            Alaska Mountain Runners Grand Prix
+          </h1>
+          {user && (
+            <p className="mt-2 text-muted-foreground">
+              Welcome back, {user.firstName || user.email}.
+            </p>
           )}
         </div>
 
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {NAV_CARDS(isAdminOrManager).map((navCard) => (
+            <Link key={navCard.to} to={navCard.to} className="group block h-full">
+              <Card className="h-full border-2 border-transparent transition-all group-hover:-translate-y-0.5 group-hover:border-primary group-hover:shadow-md">
+                <CardHeader className="items-center text-center">
+                  <navCard.icon className="mb-1 size-8 text-primary" />
+                  <CardTitle>{navCard.title}</CardTitle>
+                  <CardDescription>{navCard.desc}</CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          ))}
+        </div>
+
         {user && (
-          <div className="info-card">
-            <h3>Your Account</h3>
-            <ul>
-              <li><strong>Email:</strong> {user.email}</li>
-              {user.firstName && <li><strong>Name:</strong> {user.firstName} {user.lastName}</li>}
-              <li><strong>Role:</strong> {user.roles?.join(', ') || 'ReadOnly'}</li>
-            </ul>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Your Account</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="divide-y divide-border text-sm">
+                <div className="flex items-center justify-between py-2">
+                  <dt className="text-muted-foreground">Email</dt>
+                  <dd className="font-medium text-foreground">{user.email}</dd>
+                </div>
+                {user.firstName && (
+                  <div className="flex items-center justify-between py-2">
+                    <dt className="text-muted-foreground">Name</dt>
+                    <dd className="font-medium text-foreground">{user.firstName} {user.lastName}</dd>
+                  </div>
+                )}
+                <div className="flex items-center justify-between py-2">
+                  <dt className="text-muted-foreground">Role</dt>
+                  <dd className="font-medium text-foreground">{user.roles?.join(', ') || 'ReadOnly'}</dd>
+                </div>
+              </dl>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>

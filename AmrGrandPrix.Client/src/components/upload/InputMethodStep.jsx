@@ -6,12 +6,21 @@
 
 import { useState } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { AlertCircle, ClipboardList, FileText, Loader2, UploadCloud, X } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import { cn } from '@/lib/utils';
 
 const METHOD_FILE = 'file';
 const METHOD_PASTE = 'paste';
 const PASTE_MIXED = 'mixed';
 const PASTE_BY_GENDER = 'by-gender';
+
+const TEXTAREA_CLASS =
+  'w-full rounded-lg border border-input bg-transparent px-3 py-2 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50';
 
 export default function InputMethodStep({ wizardData, onNext, onBack, onCancel }) {
   const totalSteps = wizardData.totalSteps || 5;
@@ -213,83 +222,107 @@ export default function InputMethodStep({ wizardData, onNext, onBack, onCancel }
   const handleSubmit = method === METHOD_FILE ? handleFileSubmit : handlePasteSubmit;
 
   return (
-    <div className="wizard-step">
-      <div className="step-header">
-        <h2>Step 2: Input Method</h2>
-        <span className="step-indicator">Step 2 of {totalSteps}</span>
+    <div>
+      <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+        <h2 className="text-xl font-semibold">Step 2: Input Method</h2>
+        <span className="text-sm text-muted-foreground">Step 2 of {totalSteps}</span>
       </div>
 
-      {error && <div className="error-message">{error}</div>}
+      {error && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       {/* Method selector cards */}
-      <div className="input-method-cards">
-        <div
-          className={`input-method-card ${method === METHOD_FILE ? 'selected' : ''}`}
+      <div className="mb-6 flex gap-4">
+        <button
+          type="button"
           onClick={() => { setMethod(METHOD_FILE); setError(null); }}
+          className={cn(
+            'flex flex-1 flex-col items-center gap-2 rounded-xl border-2 p-6 text-center transition-colors',
+            method === METHOD_FILE
+              ? 'border-primary bg-primary/10'
+              : 'border-border bg-muted/30 hover:border-primary/50 hover:bg-primary/5'
+          )}
         >
-          <div className="method-card-icon">📁</div>
-          <div className="method-card-title">Upload File</div>
-          <div className="method-card-desc">CSV or Excel (.xlsx, .xls)</div>
-        </div>
-        <div
-          className={`input-method-card ${method === METHOD_PASTE ? 'selected' : ''}`}
+          <UploadCloud className="size-8 text-muted-foreground" />
+          <span className="font-semibold">Upload File</span>
+          <span className="text-sm text-muted-foreground">CSV or Excel (.xlsx, .xls)</span>
+        </button>
+        <button
+          type="button"
           onClick={() => { setMethod(METHOD_PASTE); setError(null); }}
+          className={cn(
+            'flex flex-1 flex-col items-center gap-2 rounded-xl border-2 p-6 text-center transition-colors',
+            method === METHOD_PASTE
+              ? 'border-primary bg-primary/10'
+              : 'border-border bg-muted/30 hover:border-primary/50 hover:bg-primary/5'
+          )}
         >
-          <div className="method-card-icon">📋</div>
-          <div className="method-card-title">Paste Text</div>
-          <div className="method-card-desc">Copy &amp; paste from a results page or spreadsheet</div>
-        </div>
+          <ClipboardList className="size-8 text-muted-foreground" />
+          <span className="font-semibold">Paste Text</span>
+          <span className="text-sm text-muted-foreground">Copy &amp; paste from a results page or spreadsheet</span>
+        </button>
       </div>
 
       {/* File upload panel */}
       {method === METHOD_FILE && (
-        <div className="method-panel">
+        <div className="mb-4">
           {!file ? (
             <div
               {...getRootProps()}
-              className={`dropzone ${isDragActive ? 'active' : ''} ${isDragReject ? 'reject' : ''}`}
+              className={cn(
+                'flex min-h-[260px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-muted/30 p-10 text-center transition-colors',
+                'hover:border-primary/60 hover:bg-primary/5',
+                isDragActive && !isDragReject && 'border-primary bg-primary/10',
+                isDragReject && 'border-destructive bg-destructive/5'
+              )}
             >
               <input {...getInputProps()} />
               {isDragActive ? (
                 isDragReject ? (
-                  <p>Invalid file type. Please upload CSV or Excel files only.</p>
+                  <p className="text-destructive">Invalid file type. Please upload CSV or Excel files only.</p>
                 ) : (
-                  <p>Drop the file here...</p>
+                  <p className="text-foreground">Drop the file here...</p>
                 )
               ) : (
-                <div className="dropzone-content">
-                  <div className="dropzone-icon">📁</div>
-                  <p>Drag and drop race results file here, or click to browse</p>
-                  <p className="dropzone-hint">Accepted formats: CSV, Excel (.xlsx, .xls)</p>
-                  <p className="dropzone-hint">Maximum file size: 10MB</p>
+                <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                  <UploadCloud className="mb-2 size-10 text-muted-foreground/70" />
+                  <p className="text-foreground">Drag and drop race results file here, or click to browse</p>
+                  <p className="text-sm">Accepted formats: CSV, Excel (.xlsx, .xls)</p>
+                  <p className="text-sm">Maximum file size: 10MB</p>
                 </div>
               )}
             </div>
           ) : (
-            <div className="file-preview">
-              <div className="file-info">
-                <div className="file-icon">📄</div>
-                <div className="file-details">
-                  <div className="file-name">{file.name}</div>
-                  <div className="file-size">{(file.size / 1024).toFixed(2)} KB</div>
+            <div className="rounded-xl border border-border bg-muted/30 p-6">
+              <div className="flex items-center gap-3">
+                <FileText className="size-8 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{file.name}</div>
+                  <div className="text-sm text-muted-foreground">{(file.size / 1024).toFixed(2)} KB</div>
                 </div>
                 {!processing && (
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon"
                     onClick={() => { setFile(null); setUploadProgress(0); }}
-                    className="btn-icon"
                     title="Remove file"
+                    aria-label="Remove file"
                   >
-                    ✕
-                  </button>
+                    <X className="size-4" />
+                  </Button>
                 )}
               </div>
               {processing && (
-                <div className="upload-progress">
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${uploadProgress}%` }} />
+                <div className="mt-3 flex flex-col gap-2">
+                  <Progress value={uploadProgress} />
+                  <div className="text-center text-sm text-muted-foreground">
+                    Uploading and parsing... {uploadProgress}%
                   </div>
-                  <div className="progress-text">Uploading and parsing... {uploadProgress}%</div>
                 </div>
               )}
             </div>
@@ -299,89 +332,86 @@ export default function InputMethodStep({ wizardData, onNext, onBack, onCancel }
 
       {/* Paste text panel */}
       {method === METHOD_PASTE && (
-        <div className="method-panel">
-          <div className="paste-mode-toggle">
-            <button
+        <div className="mb-4">
+          <div className="mb-6 flex gap-2">
+            <Button
               type="button"
-              className={`toggle-btn ${pasteMode === PASTE_MIXED ? 'active' : ''}`}
+              variant={pasteMode === PASTE_MIXED ? 'secondary' : 'outline'}
               onClick={() => setPasteMode(PASTE_MIXED)}
             >
               All genders in one block
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className={`toggle-btn ${pasteMode === PASTE_BY_GENDER ? 'active' : ''}`}
+              variant={pasteMode === PASTE_BY_GENDER ? 'secondary' : 'outline'}
               onClick={() => setPasteMode(PASTE_BY_GENDER)}
             >
               Separate by gender
-            </button>
+            </Button>
           </div>
 
           {pasteMode === PASTE_MIXED && (
-            <div className="form-group">
-              <label>Paste results (include a header row)</label>
+            <div className="flex flex-col gap-2">
+              <Label>Paste results (include a header row)</Label>
               <textarea
-                className="paste-textarea"
+                className={TEXTAREA_CLASS}
                 value={mixedText}
                 onChange={(e) => setMixedText(e.target.value)}
                 placeholder={'Place\tName\tAge\tGender\tTime\n1\tJane Smith\t32\tF\t1:23:45\n2\tJohn Doe\t28\tM\t1:24:10'}
                 rows={12}
               />
-              <span className="field-hint">
+              <p className="text-xs text-muted-foreground">
                 Tab- or comma-separated data with a header row. Include a Gender column, or switch to &ldquo;Separate by gender&rdquo; mode if your results don&rsquo;t have one.
-              </span>
+              </p>
             </div>
           )}
 
           {pasteMode === PASTE_BY_GENDER && (
-            <div className="paste-by-gender">
-              <div className="form-group">
-                <label>Male Results (include a header row)</label>
+            <div className="flex flex-col gap-4 md:flex-row">
+              <div className="flex flex-1 flex-col gap-2">
+                <Label>Male Results (include a header row)</Label>
                 <textarea
-                  className="paste-textarea"
+                  className={TEXTAREA_CLASS}
                   value={maleText}
                   onChange={(e) => setMaleText(e.target.value)}
                   placeholder={'Place\tName\tAge\tTime\n1\tJohn Doe\t28\t1:24:10'}
                   rows={8}
                 />
               </div>
-              <div className="form-group">
-                <label>Female Results (include a header row)</label>
+              <div className="flex flex-1 flex-col gap-2">
+                <Label>Female Results (include a header row)</Label>
                 <textarea
-                  className="paste-textarea"
+                  className={TEXTAREA_CLASS}
                   value={femaleText}
                   onChange={(e) => setFemaleText(e.target.value)}
                   placeholder={'Place\tName\tAge\tTime\n1\tJane Smith\t32\t1:23:45'}
                   rows={8}
                 />
               </div>
-              <span className="field-hint">
+              <p className="w-full text-xs text-muted-foreground">
                 Each block must have its own header row. Leave a block empty to skip that gender.
-              </span>
+              </p>
             </div>
           )}
         </div>
       )}
 
-      <div className="form-actions">
-        <button type="button" onClick={onBack} className="btn-secondary">
-          ← Back
-        </button>
-        <button type="button" onClick={onCancel} className="btn-secondary">
+      <div className="mt-8 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={onBack}>
+          &larr; Back
+        </Button>
+        <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleSubmit}
-          className="btn-primary"
-          disabled={processing}
-        >
+        </Button>
+        <Button type="button" onClick={handleSubmit} disabled={processing}>
           {processing ? (
-            <><span className="spinner" /> Processing...</>
+            <>
+              <Loader2 className="animate-spin" /> Processing...
+            </>
           ) : (
-            'Next →'
+            <>Next &rarr;</>
           )}
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -334,7 +334,10 @@ public class ResultsController : ControllerBase
             .Include(r => r.Runner)
             .Include(r => r.Race)
             .Where(r => r.RaceId == raceId)
-            .OrderBy(r => r.Place)
+            .OrderBy(r => r.Status != ResultStatus.Finished
+                          || r.Place == null || r.Place == 0
+                          || r.Time == null || r.Time == TimeSpan.Zero)
+            .ThenBy(r => r.Place)
             .ThenBy(r => r.Time)
             .Select(r => new RaceResultDto
             {

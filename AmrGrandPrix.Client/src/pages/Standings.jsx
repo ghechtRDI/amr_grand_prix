@@ -5,7 +5,21 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import './pages.css';
+import { AlertCircle, Check } from 'lucide-react';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 
 const AGE_CATEGORIES = [
   '17 and Under',
@@ -21,43 +35,83 @@ const AGE_CATEGORIES = [
 const DIVISION_OPEN = 'open';
 const DIVISION_AGE = 'age';
 
+const STICKY_HEAD =
+  'sticky top-0 z-10 h-9 whitespace-nowrap bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black';
+
+const RANK_TINTS = {
+  1: 'border-amber-400/50 bg-amber-400/20 text-amber-700 dark:text-amber-400',
+  2: 'border-slate-400/50 bg-slate-400/20 text-slate-600 dark:text-slate-300',
+  3: 'border-orange-700/40 bg-orange-700/15 text-orange-700 dark:text-orange-400',
+};
+
+function RankBadge({ rank }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex size-7 items-center justify-center rounded-full border text-sm font-bold tabular-nums',
+        RANK_TINTS[rank] || 'border-transparent bg-muted text-muted-foreground'
+      )}
+    >
+      {rank}
+    </span>
+  );
+}
+
 function StandingsTable({ standings, showAgeCategory }) {
   if (!standings || standings.length === 0) {
-    return <p className="empty-state">No standings data for this division.</p>;
+    return (
+      <div className="rounded-xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+        No standings data for this division.
+      </div>
+    );
   }
 
   return (
-    <div className="table-wrapper">
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Rank</th>
-            <th>Runner</th>
-            {showAgeCategory && <th>Age Group</th>}
-            <th>Total Points</th>
-            <th>Races</th>
-            <th>Best</th>
-            <th>2nd</th>
-            <th>Gamut</th>
-          </tr>
-        </thead>
-        <tbody>
-          {standings.map((s) => (
-            <tr key={s.standingId} className={s.runTheGamutQualified ? 'gamut-row' : ''}>
-              <td className="rank-cell">{s.rank}</td>
-              <td className="name-cell">
-                <Link to={`/runners/${s.runnerId}`}>{s.runnerName}</Link>
-              </td>
-              {showAgeCategory && <td>{s.ageCategory || '—'}</td>}
-              <td className="points-cell">{s.totalPoints}</td>
-              <td>{s.racesCounted}/{s.racesCompleted}</td>
-              <td>{s.bestRacePoints || '—'}</td>
-              <td>{s.secondBestRacePoints || '—'}</td>
-              <td className="gamut-cell">{s.runTheGamutQualified ? '✓' : ''}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="overflow-hidden rounded-xl border border-border">
+      <div className="max-h-[70vh] overflow-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className={STICKY_HEAD}>Rank</TableHead>
+              <TableHead className={STICKY_HEAD}>Runner</TableHead>
+              {showAgeCategory && <TableHead className={STICKY_HEAD}>Age Group</TableHead>}
+              <TableHead className={cn(STICKY_HEAD, 'text-right')}>Total Points</TableHead>
+              <TableHead className={cn(STICKY_HEAD, 'text-right')}>Races</TableHead>
+              <TableHead className={cn(STICKY_HEAD, 'text-right')}>Best</TableHead>
+              <TableHead className={cn(STICKY_HEAD, 'text-right')}>2nd</TableHead>
+              <TableHead className={cn(STICKY_HEAD, 'text-center')}>Gamut</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {standings.map((s, idx) => (
+              <TableRow
+                key={s.standingId}
+                className={cn(
+                  idx % 2 === 1 && !s.runTheGamutQualified && 'bg-muted/20',
+                  s.runTheGamutQualified && 'bg-secondary/10 hover:bg-secondary/15'
+                )}
+              >
+                <TableCell><RankBadge rank={s.rank} /></TableCell>
+                <TableCell className="font-medium text-foreground">
+                  <Link to={`/runners/${s.runnerId}`} className="hover:text-primary">{s.runnerName}</Link>
+                </TableCell>
+                {showAgeCategory && <TableCell>{s.ageCategory || '—'}</TableCell>}
+                <TableCell className="text-right font-semibold tabular-nums text-primary">{s.totalPoints}</TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">{s.racesCounted}/{s.racesCompleted}</TableCell>
+                <TableCell className="text-right tabular-nums">{s.bestRacePoints || '—'}</TableCell>
+                <TableCell className="text-right tabular-nums">{s.secondBestRacePoints || '—'}</TableCell>
+                <TableCell className="text-center">
+                  {s.runTheGamutQualified && (
+                    <Badge variant="success" className="gap-1">
+                      <Check className="size-3" />
+                    </Badge>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }
@@ -133,107 +187,100 @@ export default function Standings() {
     return `${ageCategory} ${ageGender === 'male' ? 'Male' : 'Female'}`;
   };
 
+  const GenderToggle = ({ value, onChange }) => (
+    <div className="inline-flex overflow-hidden rounded-lg border border-border">
+      {['male', 'female'].map((g, i) => (
+        <Button
+          key={g}
+          type="button"
+          size="sm"
+          variant={value === g ? 'default' : 'ghost'}
+          className={cn('rounded-none', i > 0 && 'border-l border-border')}
+          onClick={() => onChange(g)}
+        >
+          {g === 'male' ? 'Male' : 'Female'}
+        </Button>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <div className="header-row">
-          <h1>Grand Prix Standings</h1>
-          <div className="year-selector">
-            <label htmlFor="year-select">Year:</label>
-            <select
-              id="year-select"
-              value={selectedYear}
-              onChange={(e) => handleYearChange(e.target.value)}
-              className="select-input"
-            >
-              {availableYears.map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className="page-content">
-        {/* Main division tabs */}
-        <div className="tab-bar">
-          <button
-            className={`tab-btn ${mainTab === DIVISION_OPEN ? 'active' : ''}`}
-            onClick={() => setMainTab(DIVISION_OPEN)}
-          >
-            Open Division
-          </button>
-          <button
-            className={`tab-btn ${mainTab === DIVISION_AGE ? 'active' : ''}`}
-            onClick={() => setMainTab(DIVISION_AGE)}
-          >
-            Age Divisions
-          </button>
-        </div>
-
-        {/* Open division controls */}
-        {mainTab === DIVISION_OPEN && (
-          <div className="sub-controls">
-            <div className="toggle-group">
-              <button
-                className={`toggle-btn ${genderTab === 'male' ? 'active' : ''}`}
-                onClick={() => setGenderTab('male')}
-              >
-                Male
-              </button>
-              <button
-                className={`toggle-btn ${genderTab === 'female' ? 'active' : ''}`}
-                onClick={() => setGenderTab('female')}
-              >
-                Female
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Age division controls */}
-        {mainTab === DIVISION_AGE && (
-          <div className="sub-controls age-controls">
-            <div className="form-row">
-              <label htmlFor="age-cat">Age Group:</label>
-              <select
-                id="age-cat"
-                value={ageCategory}
-                onChange={(e) => setAgeCategory(e.target.value)}
-                className="select-input"
-              >
-                {AGE_CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>{cat}</option>
+    <div className="min-h-svh bg-background px-4 py-8 md:py-12">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <h1 className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-2xl font-semibold tracking-tight text-transparent md:text-3xl">
+            Grand Prix Standings
+          </h1>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Year:</span>
+            <Select value={String(selectedYear)} onValueChange={handleYearChange}>
+              <SelectTrigger className="w-28">
+                <SelectValue>{(value) => value}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {availableYears.map((y) => (
+                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
                 ))}
-              </select>
-            </div>
-            <div className="toggle-group">
-              <button
-                className={`toggle-btn ${ageGender === 'male' ? 'active' : ''}`}
-                onClick={() => setAgeGender('male')}
-              >
-                Male
-              </button>
-              <button
-                className={`toggle-btn ${ageGender === 'female' ? 'active' : ''}`}
-                onClick={() => setAgeGender('female')}
-              >
-                Female
-              </button>
-            </div>
+              </SelectContent>
+            </Select>
           </div>
-        )}
+        </div>
 
-        {/* Table header */}
-        <div className="section-header">
-          <h2>{selectedYear} — {divisionLabel()}</h2>
-          <p className="section-hint">
-            Best 4 races count toward total. ✓ = Run the Gamut (7+ races).
+        <Tabs value={mainTab} onValueChange={setMainTab}>
+          <TabsList variant="line" className="mb-6 h-auto gap-4 border-b border-border p-0">
+            <TabsTrigger value={DIVISION_OPEN} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
+              Open Division
+            </TabsTrigger>
+            <TabsTrigger value={DIVISION_AGE} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
+              Age Divisions
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value={DIVISION_OPEN}>
+            <div className="mb-6">
+              <GenderToggle value={genderTab} onChange={setGenderTab} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value={DIVISION_AGE}>
+            <div className="mb-6 flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Age Group:</span>
+                <Select value={ageCategory} onValueChange={setAgeCategory}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue>{(value) => value}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AGE_CATEGORIES.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <GenderToggle value={ageGender} onChange={setAgeGender} />
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold">{selectedYear} — {divisionLabel()}</h2>
+          <p className="text-sm text-muted-foreground">
+            Best 4 races count toward total. <Check className="inline size-3.5" /> = Run the Gamut (7+ races).
           </p>
         </div>
 
-        {loading && <div className="loading-state">Loading standings...</div>}
-        {error && <div className="error-banner">Error loading standings: {error}</div>}
+        {loading && (
+          <div className="space-y-2">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-64 w-full" />
+          </div>
+        )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertDescription>Error loading standings: {error}</AlertDescription>
+          </Alert>
+        )}
         {!loading && !error && (
           <StandingsTable
             standings={standings}
@@ -241,8 +288,8 @@ export default function Standings() {
           />
         )}
 
-        <div className="page-footer-links">
-          <Link to="/">← Home</Link>
+        <div className="mt-6 flex gap-6 border-t border-border pt-4 text-sm">
+          <Link to="/" className="text-muted-foreground hover:text-foreground">← Home</Link>
         </div>
       </div>
     </div>

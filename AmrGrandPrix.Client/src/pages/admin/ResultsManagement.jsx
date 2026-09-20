@@ -5,11 +5,42 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
-import '../pages.css';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardHeader, CardContent } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertAction } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { cn } from '@/lib/utils';
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
+
+const BATCH_STATUS_BADGE_CLASSES = {
+  Saved: 'bg-success/10 text-success dark:bg-success/20',
+  Pending: 'bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
+  Validated: 'bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400',
+  Cancelled: 'bg-muted text-muted-foreground',
+};
 
 function fileTypeLabel(fileType) {
   if (typeof fileType === 'number') {
@@ -25,6 +56,15 @@ function statusLabel(status) {
   return status;
 }
 
+function BatchStatusBadge({ status }) {
+  const s = statusLabel(status);
+  return (
+    <Badge variant="outline" className={cn('border-transparent font-medium', BATCH_STATUS_BADGE_CLASSES[s] || 'bg-muted text-muted-foreground')}>
+      {s}
+    </Badge>
+  );
+}
+
 export default function ResultsManagement() {
   const navigate = useNavigate();
   const [batches, setBatches] = useState([]);
@@ -35,6 +75,8 @@ export default function ResultsManagement() {
   const [resuming, setResuming] = useState(null);
   const [recalculating, setRecalculating] = useState(false);
   const [message, setMessage] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
 
   const loadBatches = useCallback(async () => {
     setLoading(true);
@@ -57,8 +99,6 @@ export default function ResultsManagement() {
   }, [loadBatches]);
 
   const handleDelete = async (batch) => {
-    if (!confirm(`Delete all ${batch.recordsUploaded} results from "${batch.raceName}" (${batch.fileName})?`)) return;
-
     setDeleting(batch.uploadBatchId);
     setMessage(null);
     try {
@@ -76,6 +116,7 @@ export default function ResultsManagement() {
       setMessage({ type: 'error', text: `Delete failed: ${e.message}` });
     } finally {
       setDeleting(null);
+      setDeleteTarget(null);
     }
   };
 
@@ -117,8 +158,6 @@ export default function ResultsManagement() {
   };
 
   const handleRecalculate = async () => {
-    if (!confirm(`Recalculate all Grand Prix standings for ${year}?`)) return;
-
     setRecalculating(true);
     setMessage(null);
     try {
@@ -136,6 +175,7 @@ export default function ResultsManagement() {
       setMessage({ type: 'error', text: `Recalculation failed: ${e.message}` });
     } finally {
       setRecalculating(false);
+      setRecalculateDialogOpen(false);
     }
   };
 
@@ -160,127 +200,194 @@ export default function ResultsManagement() {
   );
 
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <div className="header-row">
-          <h1>Results Management</h1>
-          <div className="header-actions">
-            <select
-              value={year}
-              onChange={(e) => setYear(parseInt(e.target.value))}
-              className="select-input"
-            >
-              {YEAR_OPTIONS.map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-            <button
-              onClick={handleRecalculate}
-              className="btn-secondary"
+    <div className="min-h-svh bg-background px-4 py-8 md:py-12">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <h1 className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-2xl font-semibold tracking-tight text-transparent md:text-3xl">
+            Results Management
+          </h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={String(year)} onValueChange={(v) => setYear(parseInt(v))}>
+              <SelectTrigger className="w-24">
+                <SelectValue>{(value) => value}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {YEAR_OPTIONS.map((y) => (
+                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              onClick={() => setRecalculateDialogOpen(true)}
               disabled={recalculating}
             >
-              {recalculating ? 'Recalculating...' : `Recalculate GP Standings`}
-            </button>
-            <button
-              onClick={() => navigate('/admin/results/upload')}
-              className="btn-primary"
-            >
+              {recalculating ? 'Recalculating...' : 'Recalculate GP Standings'}
+            </Button>
+            <Button onClick={() => navigate('/admin/results/upload')}>
               Upload Results
-            </button>
+            </Button>
           </div>
         </div>
-      </div>
 
-      <div className="page-content">
         {message && (
-          <div className={`alert ${message.type === 'success' ? 'alert-success' : 'alert-error'}`}>
-            {message.text}
-            <button className="alert-close" onClick={() => setMessage(null)}>✕</button>
+          <Alert variant={message.type === 'success' ? 'success' : 'destructive'} className="mb-4">
+            {message.type === 'success' ? <CheckCircle2 /> : <AlertCircle />}
+            <AlertDescription className={message.type === 'success' ? 'text-success' : undefined}>
+              {message.text}
+            </AlertDescription>
+            <AlertAction>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setMessage(null)}
+                aria-label="Dismiss"
+              >
+                <X className="size-4" />
+              </Button>
+            </AlertAction>
+          </Alert>
+        )}
+
+        {loading && (
+          <div className="space-y-4">
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-32 w-full" />
           </div>
         )}
 
-        {loading && <div className="loading-state">Loading...</div>}
-        {error && <div className="error-banner">{error}</div>}
+        {!loading && error && (
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
         {!loading && !error && races.length === 0 && (
-          <div className="empty-state">
+          <div className="rounded-xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
             No uploaded results for {year}.{' '}
-            <Link to="/admin/results/upload">Upload some results.</Link>
+            <Link to="/admin/results/upload" className="text-primary hover:underline">Upload some results.</Link>
           </div>
         )}
 
-        {!loading && races.map((race) => (
-          <div key={race.raceId} className="race-card">
-            <div className="race-card-header">
-              <div className="race-card-title">
-                <h3>
-                  <Link to={`/races/${race.raceId}/results`}>{race.raceName}</Link>
+        {!loading && !error && races.map((race) => (
+          <Card key={race.raceId} className="mb-6">
+            <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 border-b border-border pb-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <h3 className="text-base font-semibold">
+                  <Link to={`/races/${race.raceId}/results`} className="text-foreground hover:text-primary">
+                    {race.raceName}
+                  </Link>
                 </h3>
-                <span className="race-card-date">
+                <span className="text-sm text-muted-foreground">
                   {new Date(race.raceDate).toLocaleDateString('en-US', {
                     year: 'numeric', month: 'short', day: 'numeric',
                   })}
                 </span>
-                {race.isGrandPrixRace && <span className="gp-badge">Grand Prix</span>}
+                {race.isGrandPrixRace && (
+                  <Badge variant="secondary" className="text-[10px] font-bold tracking-wide uppercase">Grand Prix</Badge>
+                )}
               </div>
-              <Link to={`/races/${race.raceId}/results`} className="btn-secondary btn-sm">
-                View Results
-              </Link>
-            </div>
-
-            <table className="data-table batch-table">
-              <thead>
-                <tr>
-                  <th>File</th>
-                  <th>Type</th>
-                  <th>Records</th>
-                  <th>Uploaded</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {race.batches.map((b) => (
-                  <tr key={b.uploadBatchId}>
-                    <td className="filename-cell" title={b.fileName}>{b.fileName}</td>
-                    <td>{fileTypeLabel(b.fileType)}</td>
-                    <td>{b.recordsUploaded}</td>
-                    <td>{new Date(b.uploadedAt).toLocaleString()}</td>
-                    <td>
-                      <span className={`status-badge status-${statusLabel(b.status).toLowerCase()}`}>
-                        {statusLabel(b.status)}
-                      </span>
-                    </td>
-                    <td className="batch-actions">
-                      {statusLabel(b.status) === 'Pending' && (
-                        <button
-                          className="btn-secondary btn-sm"
-                          onClick={() => handleResume(b)}
-                          disabled={resuming === b.uploadBatchId}
-                        >
-                          {resuming === b.uploadBatchId ? 'Opening...' : 'Resume'}
-                        </button>
-                      )}
-                      <button
-                        className="btn-danger btn-sm"
-                        onClick={() => handleDelete(b)}
-                        disabled={deleting === b.uploadBatchId}
-                      >
-                        {deleting === b.uploadBatchId ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              <Button
+                size="sm"
+                variant="outline"
+                nativeButton={false}
+                render={<Link to={`/races/${race.raceId}/results`}>View Results</Link>}
+              />
+            </CardHeader>
+            <CardContent className="px-0 pb-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>File</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-right">Records</TableHead>
+                    <TableHead>Uploaded</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {race.batches.map((b, idx) => (
+                    <TableRow key={b.uploadBatchId} className={cn(idx % 2 === 1 && 'bg-muted/20')}>
+                      <TableCell className="max-w-[220px] truncate" title={b.fileName}>
+                        {b.fileName}
+                      </TableCell>
+                      <TableCell>{fileTypeLabel(b.fileType)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{b.recordsUploaded}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {new Date(b.uploadedAt).toLocaleString()}
+                      </TableCell>
+                      <TableCell><BatchStatusBadge status={b.status} /></TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        <div className="flex justify-end gap-1.5">
+                          {statusLabel(b.status) === 'Pending' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleResume(b)}
+                              disabled={resuming === b.uploadBatchId}
+                            >
+                              {resuming === b.uploadBatchId ? 'Opening...' : 'Resume'}
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => setDeleteTarget(b)}
+                            disabled={deleting === b.uploadBatchId}
+                          >
+                            {deleting === b.uploadBatchId ? 'Deleting...' : 'Delete'}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         ))}
 
-        <div className="page-footer-links">
-          <Link to="/">← Home</Link>
-          <Link to={`/standings/${year}`}>View Standings →</Link>
+        <div className="mt-6 flex gap-6 border-t border-border pt-4 text-sm">
+          <Link to="/" className="text-muted-foreground hover:text-foreground">← Home</Link>
+          <Link to={`/standings/${year}`} className="text-muted-foreground hover:text-foreground">View Standings →</Link>
         </div>
       </div>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this batch?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete all {deleteTarget?.recordsUploaded} results from &ldquo;{deleteTarget?.raceName}&rdquo; ({deleteTarget?.fileName})? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => handleDelete(deleteTarget)}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={recalculateDialogOpen} onOpenChange={setRecalculateDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Recalculate standings?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Recalculate all Grand Prix standings for {year}? This may take a moment.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRecalculate}>
+              Recalculate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

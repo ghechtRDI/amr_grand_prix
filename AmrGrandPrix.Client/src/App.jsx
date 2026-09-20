@@ -3,70 +3,89 @@
  * Sets up routing and authentication
  */
 
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { AuthProvider } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import NavBar from './components/layout/NavBar';
-import LoginForm from './components/auth/LoginForm';
-import RegisterForm from './components/auth/RegisterForm';
-import EmailConfirmation from './components/auth/EmailConfirmation';
-import Home from './pages/Home';
-import Standings from './pages/Standings';
-import RaceResults from './pages/RaceResults';
-import Unauthorized from './pages/Unauthorized';
-import ResultsUpload from './pages/admin/ResultsUpload';
-import ResultsManagement from './pages/admin/ResultsManagement';
-import './App.css';
+
+// Route-level code splitting: each page (and its dependencies, e.g. the
+// upload wizard's LLM/dropzone code or TanStack Table) ships in its own
+// chunk, loaded on navigation rather than in the initial bundle.
+const LoginForm = lazy(() => import('./components/auth/LoginForm'));
+const RegisterForm = lazy(() => import('./components/auth/RegisterForm'));
+const EmailConfirmation = lazy(() => import('./components/auth/EmailConfirmation'));
+const Home = lazy(() => import('./pages/Home'));
+const Standings = lazy(() => import('./pages/Standings'));
+const RaceResults = lazy(() => import('./pages/RaceResults'));
+const Unauthorized = lazy(() => import('./pages/Unauthorized'));
+const ResultsUpload = lazy(() => import('./pages/admin/ResultsUpload'));
+const ResultsManagement = lazy(() => import('./pages/admin/ResultsManagement'));
+
+// Same loading treatment ProtectedRoute already uses for its auth check, so
+// a route-chunk fetch and an auth-check look identical to the user.
+const RouteFallback = () => (
+  <div className="flex min-h-svh flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
+    <Loader2 className="size-6 animate-spin" />
+    <p>Loading...</p>
+  </div>
+);
 
 function App() {
   return (
     <Router>
-      <AuthProvider>
-        <NavBar />
-        <Routes>
-          {/* Public routes */}
-          <Route path="/login" element={<LoginForm />} />
-          <Route path="/register" element={<RegisterForm />} />
-          <Route path="/confirm-email" element={<EmailConfirmation />} />
-          <Route path="/unauthorized" element={<Unauthorized />} />
+      <ThemeProvider>
+        <AuthProvider>
+          <NavBar />
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              {/* Public routes - auth flows (migrated to shadcn/Tailwind) */}
+              <Route path="/login" element={<LoginForm />} />
+              <Route path="/register" element={<RegisterForm />} />
+              <Route path="/confirm-email" element={<EmailConfirmation />} />
+              <Route path="/unauthorized" element={<Unauthorized />} />
 
-          {/* Protected routes */}
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Home />
-              </ProtectedRoute>
-            }
-          />
+              {/* Protected routes */}
+              <Route
+                path="/"
+                element={
+                  <ProtectedRoute>
+                    <Home />
+                  </ProtectedRoute>
+                }
+              />
 
-          {/* Public routes - standings and race results */}
-          <Route path="/standings" element={<Standings />} />
-          <Route path="/standings/:year" element={<Standings />} />
-          <Route path="/races/:raceId/results" element={<RaceResults />} />
+              {/* Public routes - standings and race results */}
+              <Route path="/standings" element={<Standings />} />
+              <Route path="/standings/:year" element={<Standings />} />
+              <Route path="/races/:raceId/results" element={<RaceResults />} />
 
-          {/* Admin routes - requires Manager or Admin role */}
-          <Route
-            path="/admin/results"
-            element={
-              <ProtectedRoute roles={['Admin', 'Manager']}>
-                <ResultsManagement />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/results/upload"
-            element={
-              <ProtectedRoute roles={['Admin', 'Manager']}>
-                <ResultsUpload />
-              </ProtectedRoute>
-            }
-          />
+              {/* Admin routes - requires Manager or Admin role */}
+              <Route
+                path="/admin/results"
+                element={
+                  <ProtectedRoute roles={['Admin', 'Manager']}>
+                    <ResultsManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/results/upload"
+                element={
+                  <ProtectedRoute roles={['Admin', 'Manager']}>
+                    <ResultsUpload />
+                  </ProtectedRoute>
+                }
+              />
 
-          {/* Redirect unknown routes to home */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AuthProvider>
+              {/* Redirect unknown routes to home */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </AuthProvider>
+      </ThemeProvider>
     </Router>
   );
 }

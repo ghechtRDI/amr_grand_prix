@@ -5,8 +5,11 @@
 
 import { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import * as authService from '../../services/authService';
-import './auth.css';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export const EmailConfirmation = () => {
   const [searchParams] = useSearchParams();
@@ -38,43 +41,57 @@ export const EmailConfirmation = () => {
   }, [searchParams]);
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        {status === 'loading' && (
-          <>
-            <h1>Confirming Email...</h1>
-            <p>Please wait while we confirm your email address.</p>
-          </>
-        )}
+    <div className="flex min-h-svh items-center justify-center bg-background px-4 py-12">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl">
+            {status === 'loading' && 'Confirming Email...'}
+            {status === 'success' && 'Email Confirmed!'}
+            {status === 'error' && 'Confirmation Failed'}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center gap-5">
+          {status === 'loading' && (
+            <div className="flex flex-col items-center gap-3 text-muted-foreground">
+              <Loader2 className="size-6 animate-spin" />
+              <p>Please wait while we confirm your email address.</p>
+            </div>
+          )}
 
-        {status === 'success' && (
-          <>
-            <h1>Email Confirmed!</h1>
-            <div className="success-message">
-              <p>{message}</p>
-            </div>
-            <div className="auth-links">
-              <Link to="/login" className="btn-primary">
-                Go to Login
-              </Link>
-            </div>
-          </>
-        )}
+          {status === 'success' && (
+            <>
+              <Alert variant="success" className="w-full">
+                <CheckCircle2 />
+                <AlertDescription>{message}</AlertDescription>
+              </Alert>
+              <Button
+                className="w-full"
+                size="lg"
+                nativeButton={false}
+                render={<Link to="/login">Go to Login</Link>}
+              />
+            </>
+          )}
 
-        {status === 'error' && (
-          <>
-            <h1>Confirmation Failed</h1>
-            <div className="error-message">
-              <p>{message}</p>
-            </div>
-            <div className="auth-links">
-              <Link to="/register">Register Again</Link>
-              {' or '}
-              <Link to="/login">Login</Link>
-            </div>
-          </>
-        )}
-      </div>
+          {status === 'error' && (
+            <>
+              <Alert variant="destructive" className="w-full">
+                <AlertCircle />
+                <AlertDescription>{message}</AlertDescription>
+              </Alert>
+              <p className="text-center text-sm text-muted-foreground">
+                <Link to="/register" className="font-medium text-primary hover:underline">
+                  Register Again
+                </Link>
+                {' or '}
+                <Link to="/login" className="font-medium text-primary hover:underline">
+                  Login
+                </Link>
+              </p>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

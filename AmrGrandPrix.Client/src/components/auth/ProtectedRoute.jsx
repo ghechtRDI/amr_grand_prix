@@ -4,6 +4,7 @@
  */
 
 import { Navigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
 /**
@@ -19,7 +20,8 @@ export const ProtectedRoute = ({ children, roles, redirectTo = '/login' }) => {
   // Show loading state while checking authentication
   if (loading) {
     return (
-      <div className="auth-loading">
+      <div className="flex min-h-svh flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
+        <Loader2 className="size-6 animate-spin" />
         <p>Loading...</p>
       </div>
     );
