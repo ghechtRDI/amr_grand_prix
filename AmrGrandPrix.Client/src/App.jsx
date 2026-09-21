@@ -18,8 +18,12 @@ const LoginForm = lazy(() => import('./components/auth/LoginForm'));
 const RegisterForm = lazy(() => import('./components/auth/RegisterForm'));
 const EmailConfirmation = lazy(() => import('./components/auth/EmailConfirmation'));
 const Home = lazy(() => import('./pages/Home'));
+const Profile = lazy(() => import('./pages/Profile'));
 const Standings = lazy(() => import('./pages/Standings'));
 const RaceResults = lazy(() => import('./pages/RaceResults'));
+const ResultsBrowser = lazy(() => import('./pages/ResultsBrowser'));
+const RaceSeriesDetail = lazy(() => import('./pages/RaceSeriesDetail'));
+const ReportIssue = lazy(() => import('./pages/ReportIssue'));
 const Unauthorized = lazy(() => import('./pages/Unauthorized'));
 const ResultsUpload = lazy(() => import('./pages/admin/ResultsUpload'));
 const ResultsManagement = lazy(() => import('./pages/admin/ResultsManagement'));
@@ -46,6 +50,17 @@ function App() {
               <Route path="/register" element={<RegisterForm />} />
               <Route path="/confirm-email" element={<EmailConfirmation />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
+              <Route path="/report" element={<ReportIssue />} />
+
+              {/* Profile - requires login */}
+              <Route
+                path="/profile"
+                element={
+                  <ProtectedRoute>
+                    <Profile />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Protected routes */}
               <Route
@@ -60,6 +75,8 @@ function App() {
               {/* Public routes - standings and race results */}
               <Route path="/standings" element={<Standings />} />
               <Route path="/standings/:year" element={<Standings />} />
+              <Route path="/race-results" element={<ResultsBrowser />} />
+              <Route path="/race-series/:seriesId" element={<RaceSeriesDetail />} />
               <Route path="/races/:raceId/results" element={<RaceResults />} />
 
               {/* Admin routes - requires Manager or Admin role */}

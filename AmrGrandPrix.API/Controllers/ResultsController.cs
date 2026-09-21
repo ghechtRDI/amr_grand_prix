@@ -66,10 +66,15 @@ public class ResultsController : ControllerBase
 
             var ext = Path.GetExtension(request.File.FileName).ToLowerInvariant();
 
+            var knownVariants = (request.KnownVariants ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct()
+                .ToList();
+
             // LLM extraction
             ExtractionResult extraction;
             using (var stream = request.File.OpenReadStream())
-                extraction = await _llmExtractionService.ExtractAsync(stream, request.File.FileName, ct);
+                extraction = await _llmExtractionService.ExtractAsync(stream, request.File.FileName, knownVariants, ct);
 
             var processedResults = await _resultsProcessingService.ProcessResultsAsync(extraction.Sections);
             processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults, race.Date);
@@ -530,6 +535,8 @@ public class ResultsController : ControllerBase
                 RaceName        = b.Race.Name,
                 RaceDate        = b.Race.Date,
                 IsGrandPrixRace = b.Race.IsGrandPrixRace,
+                RaceSeriesId    = b.Race.RaceSeriesId,
+                RaceSeriesName  = b.Race.RaceSeries != null ? b.Race.RaceSeries.Name : null,
                 FileName        = b.FileName,
                 FileType        = b.FileType,
                 RecordsUploaded = b.RecordsUploaded,
@@ -606,11 +613,13 @@ public class ResultsController : ControllerBase
             .OrderBy(r => r.Place)
             .ToListAsync();
 
-        var males   = results.Where(r => r.Gender == Gender.Male).ToList();
-        var females = results.Where(r => r.Gender == Gender.Female).ToList();
+        var males      = results.Where(r => r.Gender == Gender.Male).ToList();
+        var females    = results.Where(r => r.Gender == Gender.Female).ToList();
+        var nonbinary  = results.Where(r => r.Gender == Gender.Nonbinary).ToList();
 
-        for (int i = 0; i < males.Count;   i++) males[i].PlaceGender   = i + 1;
-        for (int i = 0; i < females.Count; i++) females[i].PlaceGender = i + 1;
+        for (int i = 0; i < males.Count;     i++) males[i].PlaceGender     = i + 1;
+        for (int i = 0; i < females.Count;   i++) females[i].PlaceGender   = i + 1;
+        for (int i = 0; i < nonbinary.Count; i++) nonbinary[i].PlaceGender = i + 1;
 
         await _context.SaveChangesAsync();
     }

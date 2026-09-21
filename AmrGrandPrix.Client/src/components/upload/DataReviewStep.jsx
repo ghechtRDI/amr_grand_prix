@@ -10,7 +10,7 @@ import {
   flexRender,
   createColumnHelper,
 } from '@tanstack/react-table';
-import { AlertTriangle, CheckCircle2, Sparkles, UserCheck, UserPlus, UserSearch, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, CheckCircle2, Sparkles, UserCheck, UserPlus, UserSearch, Trash2 } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -47,6 +47,39 @@ const AGE_CATEGORIES = [
 // Columns whose values are numbers/times - right-aligned with tabular figures
 // for scannability, matching the rest of the app's data tables.
 const NUMERIC_COLUMN_IDS = new Set(['place', 'bib', 'age', 'time']);
+
+// Must match AmrGrandPrix.API.Models.GrandPrixConstants.MaxPlausibleRaceHours. Longer than
+// this, a parsed H:MM:SS time is more likely an LLM misread of a MM:SS time (e.g. "30:21"
+// read as 30h21m instead of 30m21s) than a real AMR race result.
+const MAX_PLAUSIBLE_RACE_HOURS = 10;
+
+// Splits a "H:MM" or "H:MM:SS" time string into its fields, or null if it isn't in
+// one of those shapes.
+function parseTimeParts(value) {
+  const parts = String(value ?? '').trim().split(':');
+  if (parts.length < 2 || parts.length > 3 || parts.some(p => !/^\d+$/.test(p))) return null;
+  return parts;
+}
+
+// True when a time looks like a misread MM:SS. The LLM extracts the raw source string
+// as-is (e.g. "34:21"), but the backend's time parser reads a bare 2-field string as
+// H:MM before it ever tries MM:SS, so a MM:SS race time silently becomes "34 hours
+// 21 minutes". A first field over MAX_PLAUSIBLE_RACE_HOURS is the tell.
+function looksShifted(value) {
+  const parts = parseTimeParts(value);
+  return !!parts && Number(parts[0]) > MAX_PLAUSIBLE_RACE_HOURS;
+}
+
+// Makes an ambiguous time string unambiguous as MM:SS.
+function shiftTimeFields(value) {
+  const parts = parseTimeParts(value);
+  if (!parts) return value;
+  // 2-field "H:MM" - add an explicit "0" hours field so the backend's H:MM:SS parser
+  // reads it correctly instead of misreading it as hours:minutes.
+  if (parts.length === 2) return `0:${parts[0]}:${parts[1]}`;
+  // 3-field "H:MM:SS" where the LLM fabricated a spurious seconds field - drop it.
+  return `${parts[0]}:${parts[1]}`;
+}
 
 const STATUS_BADGE_CLASSES = {
   Finished: 'bg-success/10 text-success dark:bg-success/20',
@@ -104,6 +137,16 @@ function EditableCell({ getValue, row, column, table }) {
   const { editingCell, setEditingCell, updateData } = table.options.meta;
   const initialValue = getValue();
   const [value, setValue] = useState(initialValue);
+  const isEditing = editingCell === `${row.index}-${column.id}`;
+
+  // Bulk actions (e.g. "Shift All") write the row's value directly via updateData,
+  // bypassing this cell's own onBlur, so the displayed value must be resynced whenever
+  // it changes underneath us. Skipped while this cell is being actively edited so it
+  // doesn't clobber in-progress input.
+  useEffect(() => {
+    if (!isEditing) setValue(initialValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialValue]);
 
   const onBlur = () => {
     updateData(row.index, column.id, value);
@@ -119,7 +162,7 @@ function EditableCell({ getValue, row, column, table }) {
     }
   };
 
-  if (editingCell === `${row.index}-${column.id}`) {
+  if (isEditing) {
     if (column.id === 'gender') {
       return (
         <select
@@ -193,6 +236,34 @@ function EditableCell({ getValue, row, column, table }) {
       )}
     >
       {column.id === 'status' && value ? <StatusBadge status={value} /> : (value || '-')}
+    </div>
+  );
+}
+
+// Time column cell: wraps EditableCell with a "Shift Fields" button that appears when the
+// value looks like a MM:SS time that will be misread as H:MM (e.g. "30:21" instead of "0:30:21").
+function TimeCell(props) {
+  const { row, table } = props;
+  const { editingCell, updateData } = table.options.meta;
+  const value = props.getValue();
+  const isEditing = editingCell === `${row.index}-time`;
+  const shiftedValue = shiftTimeFields(value);
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      {!isEditing && looksShifted(value) && (
+        <button
+          type="button"
+          title={`This looks like a misread MM:SS time. Shift fields: "${value}" → "${shiftedValue}"`}
+          onClick={() => updateData(row.index, 'time', shiftedValue)}
+          className="flex size-5 shrink-0 items-center justify-center rounded text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
+        >
+          <ArrowLeftRight className="size-3.5" />
+        </button>
+      )}
+      <div className="min-w-0 flex-1">
+        <EditableCell {...props} />
+      </div>
     </div>
   );
 }
@@ -297,13 +368,20 @@ function RunnerMatchCell({ row, table }) {
 
 // Race resolver shown for each course-variant group that isn't the primary
 // (pre-selected in Step 1) race — pick an existing race or create a new one.
+// Candidates are restricted to races on the same date (and, when Step 1 picked a series, within
+// that series), since that's the only pool a same-event, same-day variant could belong to. If one
+// of them already has a matching course variant, it's auto-selected.
 function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve }) {
+  const raceSeriesId = primaryRaceSelection.raceSeriesId;
+  const raceDate = primaryRaceSelection.raceDate;
+
   const [races, setRaces] = useState([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState('select');
+  const [autoMatched, setAutoMatched] = useState(false);
   const [newRace, setNewRace] = useState({
-    name: primaryRaceSelection.raceName ? `${primaryRaceSelection.raceName} - ${groupKey}` : groupKey,
-    date: primaryRaceSelection.raceDate || new Date().toISOString().split('T')[0],
+    name: primaryRaceSelection.raceName || groupKey,
+    date: raceDate || new Date().toISOString().split('T')[0],
     isGrandPrixRace: false,
     courseVariant: groupKey,
   });
@@ -314,23 +392,51 @@ function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve
     let cancelled = false;
     (async () => {
       try {
-        const token = tokenService.getAccessToken();
-        const year = primaryRaceSelection.raceDate
-          ? new Date(primaryRaceSelection.raceDate).getFullYear()
-          : new Date().getFullYear();
-        const res = await fetch(`/api/races/${year}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const list = await res.json();
-          if (!cancelled) setRaces(list);
+        setLoading(true);
+        let candidates = [];
+
+        if (raceSeriesId) {
+          const res = await fetch(`/api/race-series/${raceSeriesId}`);
+          if (res.ok) {
+            const series = await res.json();
+            candidates = series.races.filter(r => r.date === raceDate);
+          }
+        } else {
+          const token = tokenService.getAccessToken();
+          const year = raceDate ? new Date(raceDate).getFullYear() : new Date().getFullYear();
+          const res = await fetch(`/api/races/${year}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const list = await res.json();
+            candidates = list.filter(r => r.date === raceDate);
+          }
+        }
+
+        if (cancelled) return;
+        setRaces(candidates);
+
+        // Auto-select an existing race for this date whose variant already matches.
+        const match = candidates.find(
+          r => (r.courseVariant || '').trim().toLowerCase() === groupKey.trim().toLowerCase()
+        );
+        if (match) {
+          setAutoMatched(true);
+          onResolve({
+            raceId: match.raceId,
+            raceName: primaryRaceSelection.raceName || groupKey,
+            isGrandPrixRace: !!match.isGrandPrixRace,
+          });
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [primaryRaceSelection.raceDate]);
+    // Runs once per group when its date/series context is known; onResolve is intentionally
+    // excluded (a fresh function identity every parent render would otherwise re-fire this).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raceSeriesId, raceDate, groupKey]);
 
   // base-ui's Select doesn't resolve a selected item's label from its children the
   // way Radix does - it needs an explicit lookup to render anything but the raw value.
@@ -339,17 +445,18 @@ function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve
     if (value === 'new') return '+ Create New Race';
     const race = races.find(r => r.raceId === value);
     if (!race) return value;
-    return `${race.name} - ${new Date(race.date).toLocaleDateString()}${race.courseVariant ? ` (${race.courseVariant})` : ''}`;
+    return `${race.courseVariant || 'Standard'}${race.resultsCount != null ? ` (${race.resultsCount} results)` : ''}`;
   };
 
   const handleSelect = (value) => {
+    setAutoMatched(false);
     if (value === 'new') {
       setMode('new');
       onResolve(null);
     } else if (value) {
       setMode('select');
       const race = races.find(r => r.raceId === value);
-      onResolve({ raceId: value, raceName: race?.name || value, isGrandPrixRace: !!race?.isGrandPrixRace });
+      onResolve({ raceId: value, raceName: primaryRaceSelection.raceName || groupKey, isGrandPrixRace: !!race?.isGrandPrixRace });
     } else {
       setMode('select');
       onResolve(null);
@@ -370,6 +477,7 @@ function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve
           isGrandPrixRace: newRace.isGrandPrixRace,
           courseVariant: newRace.courseVariant || null,
           location: null,
+          raceSeriesId: raceSeriesId || null,
         }),
       });
       if (!res.ok) throw new Error('Failed to create race');
@@ -402,13 +510,16 @@ function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve
           <SelectContent>
             {races.map(r => (
               <SelectItem key={r.raceId} value={r.raceId}>
-                {r.name} - {new Date(r.date).toLocaleDateString()}
-                {r.courseVariant ? ` (${r.courseVariant})` : ''}
+                {r.courseVariant || 'Standard'}
+                {r.resultsCount != null ? ` (${r.resultsCount} results)` : ''}
               </SelectItem>
             ))}
             <SelectItem value="new">+ Create New Race</SelectItem>
           </SelectContent>
         </Select>
+      )}
+      {autoMatched && mode !== 'new' && (
+        <span className="text-xs text-success">Matched by variant name</span>
       )}
       {mode === 'new' && (
         <div className="mt-2 flex w-full flex-wrap items-center gap-2">
@@ -462,7 +573,7 @@ const COLUMNS = [
   columnHelper.accessor('age',    { header: 'Age',    cell: EditableCell, size: 80 }),
   columnHelper.accessor('ageCategory', { header: 'Age Category', cell: EditableCell, size: 120 }),
   columnHelper.accessor('gender', { header: 'Gender', cell: EditableCell, size: 100 }),
-  columnHelper.accessor('time',   { header: 'Time',   cell: EditableCell, size: 120 }),
+  columnHelper.accessor('time',   { header: 'Time',   cell: TimeCell, size: 120 }),
   columnHelper.accessor('status', { header: 'Status', cell: EditableCell, size: 100 }),
   columnHelper.accessor('courseVariant', { header: 'Course Variant', cell: EditableCell, size: 140 }),
   columnHelper.display({
@@ -571,6 +682,13 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     );
   }, []);
 
+  // Applies shiftTimeFields to every row whose time looks misread, in one update.
+  const shiftAllTimes = useCallback(() => {
+    setData(old =>
+      old.map(row => (looksShifted(row.time) ? { ...row, time: shiftTimeFields(row.time) } : row))
+    );
+  }, []);
+
   // Called when the user picks a suggested runner (or "+ New Runner") from the dropdown.
   const updateRunnerMatch = useCallback((rowIndex, runnerId) => {
     setData(old =>
@@ -608,13 +726,12 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     warnings: data.filter(row => row.validationIssues?.length > 0).length,
     newRunners: data.filter(row => row.matchStatus === 'new-runner').length,
     needsReview: data.filter(row => row.matchStatus === 'needs-confirmation').length,
+    shiftableTimes: data.filter(row => looksShifted(row.time)).length,
   }), [data]);
 
   const primaryRaceSelection = wizardData.raceSelection || {};
 
-  // Group rows by detected course variant. A blank/untagged variant belongs to the
-  // primary race pre-selected in Step 1; any other distinct variant is a separate
-  // group the admin must route to its own race (existing or new) below.
+  // Group rows by detected course variant.
   const rowGroupsMap = new Map();
   for (const row of table.getRowModel().rows) {
     const key = (row.original.courseVariant || '').trim();
@@ -622,8 +739,14 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     rowGroupsMap.get(key).push(row);
   }
   const rowGroups = Array.from(rowGroupsMap.entries());
-  const primaryKey = rowGroups.some(([key]) => key === '') ? '' : (rowGroups[0]?.[0] ?? '');
   const hasMultipleGroups = rowGroups.length > 1;
+  // Only a single detected group (no variant ambiguity) is automatically the Step 1
+  // selection. When multiple variants are detected, none of them can be assumed to
+  // match Step 1's race - which variant is which isn't derivable from upload order
+  // (e.g. a junior race section can appear before the main race in the source file),
+  // so the admin must explicitly resolve every group below, including whichever one
+  // is actually the Step 1 race.
+  const primaryKey = hasMultipleGroups ? null : (rowGroups[0]?.[0] ?? '');
 
   const tableHead = (
     <TableHeader>
@@ -760,6 +883,17 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
           Click any cell to edit. Press Enter to save, Escape to cancel.
           {stats.needsReview > 0 && ' Use the Runner Match column to confirm or reject suggested matches.'}
         </p>
+        {stats.shiftableTimes > 0 && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2">
+            <span className="text-sm text-amber-700 dark:text-amber-400">
+              {stats.shiftableTimes} time{stats.shiftableTimes === 1 ? '' : 's'} look{stats.shiftableTimes === 1 ? 's' : ''} like a misread MM:SS.
+            </span>
+            <Button type="button" variant="outline" size="sm" onClick={shiftAllTimes} className="gap-1.5 border-amber-500/40">
+              <ArrowLeftRight className="size-3.5" />
+              Shift All
+            </Button>
+          </div>
+        )}
       </div>
 
       {!hasMultipleGroups && renderTable(rowGroups[0]?.[1] || [])}

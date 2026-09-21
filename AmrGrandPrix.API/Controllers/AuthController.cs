@@ -3,9 +3,12 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
 using AmrGrandPrix.API.Services;
+using AmrGrandPrix.API.Services.Captcha;
 
 namespace AmrGrandPrix.API.Controllers;
 
@@ -17,6 +20,7 @@ public class AuthController : ControllerBase
     private readonly SignInManager<ApplicationUser> _signInManager;
     private readonly ITokenService _tokenService;
     private readonly IEmailService _emailService;
+    private readonly ICaptchaService _captchaService;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
@@ -24,12 +28,14 @@ public class AuthController : ControllerBase
         SignInManager<ApplicationUser> signInManager,
         ITokenService tokenService,
         IEmailService emailService,
+        ICaptchaService captchaService,
         ILogger<AuthController> logger)
     {
         _userManager = userManager;
         _signInManager = signInManager;
         _tokenService = tokenService;
         _emailService = emailService;
+        _captchaService = captchaService;
         _logger = logger;
     }
 
@@ -38,10 +44,15 @@ public class AuthController : ControllerBase
     /// </summary>
     [HttpPost("register")]
     [AllowAnonymous]
+    [EnableRateLimiting("PublicFormSubmission")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request)
     {
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
+
+        var captchaValid = await _captchaService.VerifyAsync(request.CaptchaToken, HttpContext.Connection.RemoteIpAddress?.ToString());
+        if (!captchaValid)
+            return BadRequest(new { message = "Captcha verification failed. Please try again." });
 
         // Check if user already exists
         var existingUser = await _userManager.FindByEmailAsync(request.Email);
@@ -55,6 +66,9 @@ public class AuthController : ControllerBase
             Email = request.Email,
             FirstName = request.FirstName,
             LastName = request.LastName,
+            PreferredName = request.PreferredName,
+            Hometown = request.Hometown,
+            AlternateNames = request.AlternateNames,
             DateOfBirth = request.DateOfBirth,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -152,10 +166,15 @@ public class AuthController : ControllerBase
                 Email = user.Email!,
                 FirstName = user.FirstName,
                 LastName = user.LastName,
+                PreferredName = user.PreferredName,
+                Hometown = user.Hometown,
+                AlternateNames = user.AlternateNames,
                 DateOfBirth = user.DateOfBirth,
+                Gender = user.Gender,
                 EmailConfirmed = user.EmailConfirmed,
                 Roles = userRoles.ToList(),
-                CreatedAt = user.CreatedAt
+                CreatedAt = user.CreatedAt,
+                RunnerId = user.RunnerId
             }
         });
     }
@@ -196,16 +215,10 @@ public class AuthController : ControllerBase
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
-        var principal = _tokenService.GetPrincipalFromExpiredToken(request.RefreshToken);
-        if (principal == null)
-            return Unauthorized(new { message = "Invalid token" });
-
-        var userId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (userId == null)
-            return Unauthorized(new { message = "Invalid token" });
-
-        var user = await _userManager.FindByIdAsync(userId);
-        if (user == null || user.RefreshToken != request.RefreshToken)
+        // RefreshToken is an opaque random value (see TokenService.GenerateRefreshToken), not a JWT,
+        // so the user is looked up by the stored value directly rather than decoded as a token.
+        var user = await _userManager.Users.FirstOrDefaultAsync(u => u.RefreshToken == request.RefreshToken);
+        if (user == null)
             return Unauthorized(new { message = "Invalid refresh token" });
 
         if (user.RefreshTokenExpiryTime == null || user.RefreshTokenExpiryTime <= DateTime.UtcNow)
@@ -234,7 +247,7 @@ public class AuthController : ControllerBase
         user.UpdatedAt = DateTime.UtcNow;
         await _userManager.UpdateAsync(user);
 
-        _logger.LogInformation("User {UserId} refreshed token", userId);
+        _logger.LogInformation("User {UserId} refreshed token", user.Id);
 
         return Ok(new
         {
@@ -381,10 +394,15 @@ public class AuthController : ControllerBase
             Email = user.Email!,
             FirstName = user.FirstName,
             LastName = user.LastName,
+            PreferredName = user.PreferredName,
+            Hometown = user.Hometown,
+            AlternateNames = user.AlternateNames,
             DateOfBirth = user.DateOfBirth,
+            Gender = user.Gender,
             EmailConfirmed = user.EmailConfirmed,
             Roles = roles.ToList(),
-            CreatedAt = user.CreatedAt
+            CreatedAt = user.CreatedAt,
+            RunnerId = user.RunnerId
         });
     }
 
@@ -410,8 +428,20 @@ public class AuthController : ControllerBase
         if (request.LastName != null)
             user.LastName = request.LastName;
 
+        if (request.PreferredName != null)
+            user.PreferredName = request.PreferredName;
+
+        if (request.Hometown != null)
+            user.Hometown = request.Hometown;
+
+        if (request.AlternateNames != null)
+            user.AlternateNames = request.AlternateNames;
+
         if (request.DateOfBirth != null)
             user.DateOfBirth = request.DateOfBirth;
+
+        if (request.Gender != null)
+            user.Gender = request.Gender;
 
         user.UpdatedAt = DateTime.UtcNow;
 
@@ -429,10 +459,15 @@ public class AuthController : ControllerBase
             Email = user.Email!,
             FirstName = user.FirstName,
             LastName = user.LastName,
+            PreferredName = user.PreferredName,
+            Hometown = user.Hometown,
+            AlternateNames = user.AlternateNames,
             DateOfBirth = user.DateOfBirth,
+            Gender = user.Gender,
             EmailConfirmed = user.EmailConfirmed,
             Roles = roles.ToList(),
-            CreatedAt = user.CreatedAt
+            CreatedAt = user.CreatedAt,
+            RunnerId = user.RunnerId
         });
     }
 

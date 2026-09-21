@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Services;
+using AmrGrandPrix.API.Services.Captcha;
 
 namespace AmrGrandPrix.API.Tests.Infrastructure;
 
@@ -48,6 +49,17 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
             // Add fake email service for testing
             services.AddSingleton<IEmailService>(FakeEmailService);
+
+            // Remove the real captcha service (would otherwise call out to Cloudflare)
+            var captchaServiceDescriptor = services.SingleOrDefault(
+                d => d.ServiceType == typeof(ICaptchaService));
+
+            if (captchaServiceDescriptor != null)
+            {
+                services.Remove(captchaServiceDescriptor);
+            }
+
+            services.AddSingleton<ICaptchaService, FakeCaptchaService>();
         });
     }
 

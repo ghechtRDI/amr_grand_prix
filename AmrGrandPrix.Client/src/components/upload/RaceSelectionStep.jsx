@@ -1,6 +1,8 @@
 /**
  * Step 1: Race Selection
- * Allows user to select an existing race or create a new one
+ * Series-first: pick a race series, then either add results to an existing race instance in that
+ * series (e.g. one that's missing finishers) or create a new instance on a new date (race name is
+ * inherited from the series). "+ Create New Race" covers an event that isn't in any series yet.
  */
 
 import { useState, useEffect } from 'react';
@@ -20,10 +22,21 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+const NEW_RACE = '__new_race__';   // top-level: an event with no series yet
+const NEW_DATE = '__new_date__';   // within an existing series: a new instance
+const NEW_SERIES = '__new_series__'; // nested, within NEW_RACE: create a matching series too
+
+const authHeaders = () => ({
+  'Content-Type': 'application/json',
+  Authorization: `Bearer ${tokenService.getAccessToken()}`,
+});
+
 export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
-  const [isCreatingNew, setIsCreatingNew] = useState(false);
-  const [races, setRaces] = useState([]);
+  const [raceSeriesList, setRaceSeriesList] = useState([]);
+  const [seriesDetail, setSeriesDetail] = useState(null);
+  const [seriesDetailLoading, setSeriesDetailLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
   const {
@@ -35,137 +48,169 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
     formState: { errors },
   } = useForm({
     defaultValues: wizardData.raceSelection || {
+      seriesSelection: '',
+      raceInstanceId: '',
       raceId: '',
       raceName: '',
       raceDate: new Date().toISOString().split('T')[0],
       isGrandPrixRace: false,
       courseVariant: '',
+      newRaceSeriesId: NEW_SERIES,
+      newRaceSeriesName: '',
     },
   });
 
-  const selectedRaceId = watch('raceId');
-  const isGrandPrixRace = watch('isGrandPrixRace');
+  const seriesSelection = watch('seriesSelection');
+  const raceInstanceId = watch('raceInstanceId');
+  const newRaceSeriesId = watch('newRaceSeriesId');
 
-  // Fetch existing races
+  const isNewRaceMode = seriesSelection === NEW_RACE;
+  const isExistingSeriesMode = !!seriesSelection && !isNewRaceMode;
+  const isNewDateMode = isExistingSeriesMode && raceInstanceId === NEW_DATE;
+  const isExistingRaceMode = isExistingSeriesMode && !!raceInstanceId && raceInstanceId !== NEW_DATE;
+  const showRaceDateAndDetails = isNewRaceMode || isNewDateMode;
+
   useEffect(() => {
-    fetchRaces();
+    fetch('/api/race-series')
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setRaceSeriesList)
+      .catch(() => setRaceSeriesList([]))
+      .finally(() => setLoading(false));
   }, []);
 
-  const fetchRaces = async () => {
-    try {
-      setLoading(true);
-      const token = tokenService.getAccessToken();
-      const currentYear = new Date().getFullYear();
+  // When an existing series is picked, load its race instances.
+  useEffect(() => {
+    if (!isExistingSeriesMode) {
+      setSeriesDetail(null);
+      return;
+    }
+    setSeriesDetailLoading(true);
+    fetch(`/api/race-series/${seriesSelection}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setSeriesDetail)
+      .catch(() => setSeriesDetail(null))
+      .finally(() => setSeriesDetailLoading(false));
+  }, [seriesSelection, isExistingSeriesMode]);
 
-      const response = await fetch(`/api/races/${currentYear}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+  const seriesOptionLabel = (value) => {
+    if (value === NEW_RACE) return '+ Create New Race';
+    return raceSeriesList.find((s) => s.raceSeriesId === value)?.name || null;
+  };
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch races');
-      }
+  const raceInstanceOptionLabel = (value) => {
+    if (value === NEW_DATE) return '+ New Date';
+    const race = seriesDetail?.races.find((r) => r.raceId === value);
+    if (!race) return null;
+    return `${race.date} — ${race.courseVariant || 'Standard'} (${race.resultsCount} result${race.resultsCount === 1 ? '' : 's'})`;
+  };
 
-      const data = await response.json();
-      setRaces(data);
-    } catch (err) {
-      setError(err.message);
-      console.error('Error fetching races:', err);
-    } finally {
-      setLoading(false);
+  const handleSeriesChange = (value) => {
+    setValue('seriesSelection', value);
+    setValue('raceInstanceId', '');
+    setValue('raceId', '');
+    setValue('raceDate', new Date().toISOString().split('T')[0]);
+    setValue('isGrandPrixRace', false);
+    setValue('courseVariant', '');
+
+    if (value === NEW_RACE) {
+      setValue('raceName', '');
+      setValue('newRaceSeriesId', NEW_SERIES);
+      setValue('newRaceSeriesName', '');
     }
   };
 
-  // base-ui's Select doesn't resolve a selected item's label from its children the
-  // way Radix does - it needs an explicit lookup to render anything but the raw value.
-  const raceOptionLabel = (raceId) => {
-    if (!raceId) return null;
-    if (raceId === 'new') return '+ Create New Race';
-    const race = races.find(r => r.raceId === raceId);
-    if (!race) return raceId;
-    return `${race.name} - ${new Date(race.date).toLocaleDateString()}${race.courseVariant ? ` (${race.courseVariant})` : ''}`;
-  };
+  const handleRaceInstanceChange = (value) => {
+    setValue('raceInstanceId', value);
 
-  // When selecting an existing race, populate the form
-  const handleRaceSelection = (raceId) => {
-    if (raceId && raceId !== 'new') {
-      const selectedRace = races.find(r => r.raceId === raceId);
-      if (selectedRace) {
-        setValue('raceName', selectedRace.name);
-        setValue('raceDate', selectedRace.date.split('T')[0]);
-        setValue('isGrandPrixRace', selectedRace.isGrandPrixRace);
-        setValue('courseVariant', selectedRace.courseVariant || '');
-        setIsCreatingNew(false);
-      }
-    } else if (raceId === 'new') {
-      setIsCreatingNew(true);
-      setValue('raceName', '');
+    if (value === NEW_DATE) {
+      setValue('raceId', '');
+      setValue('raceName', seriesDetail?.name || '');
       setValue('raceDate', new Date().toISOString().split('T')[0]);
       setValue('isGrandPrixRace', false);
       setValue('courseVariant', '');
+      return;
+    }
+
+    const race = seriesDetail?.races.find((r) => r.raceId === value);
+    if (race) {
+      setValue('raceId', race.raceId);
+      setValue('raceName', seriesDetail.name);
+      setValue('raceDate', race.date);
+      setValue('isGrandPrixRace', race.isGrandPrixRace);
+      setValue('courseVariant', race.courseVariant || '');
     }
   };
 
+  // Course/variant names already on record for this series' other race instances - passed
+  // through as an LLM hint in Step 2 so a multi-variant file gets labeled consistently.
+  const knownVariants = isExistingSeriesMode
+    ? [...new Set((seriesDetail?.races || []).map((r) => r.courseVariant).filter(Boolean))]
+    : [];
+
   const onSubmit = async (data) => {
-    // If creating a new race, create it in the database first
-    if (data.raceId === 'new') {
-      try {
-        setLoading(true);
-        setError(null);
+    // Existing race instance selected - nothing to create, just proceed.
+    if (isExistingRaceMode) {
+      onNext({ raceSelection: { ...data, knownVariants, raceSeriesId: seriesSelection } });
+      return;
+    }
 
-        const token = tokenService.getAccessToken();
-        const response = await fetch('/api/races', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            name: data.raceName,
-            date: data.raceDate,
-            isGrandPrixRace: data.isGrandPrixRace,
-            courseVariant: data.courseVariant || null,
-            location: null,
-          }),
-        });
+    try {
+      setSubmitting(true);
+      setError(null);
 
-        if (!response.ok) {
-          let errorMessage = 'Failed to create race';
-          try {
-            // Read as text first, then try to parse as JSON
-            const responseText = await response.text();
-            if (responseText) {
-              try {
-                const errorData = JSON.parse(responseText);
-                errorMessage = errorData.message || errorData.title || responseText;
-              } catch {
-                errorMessage = responseText;
-              }
-            } else {
-              errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-            }
-          } catch {
-            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      let raceSeriesId = null;
+      if (isNewDateMode) {
+        raceSeriesId = seriesSelection;
+      } else if (isNewRaceMode) {
+        if (data.newRaceSeriesId === NEW_SERIES && data.newRaceSeriesName?.trim()) {
+          const seriesResponse = await fetch('/api/race-series', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ name: data.newRaceSeriesName.trim() }),
+          });
+          if (seriesResponse.ok) {
+            const createdSeries = await seriesResponse.json();
+            raceSeriesId = createdSeries.raceSeriesId;
           }
-          throw new Error(errorMessage);
+        } else if (data.newRaceSeriesId && data.newRaceSeriesId !== NEW_SERIES) {
+          raceSeriesId = data.newRaceSeriesId;
         }
-
-        const createdRace = await response.json();
-
-        // Update the data with the newly created race ID
-        data.raceId = createdRace.raceId;
-
-        onNext({ raceSelection: data });
-      } catch (err) {
-        setError(err.message);
-        console.error('Error creating race:', err);
-      } finally {
-        setLoading(false);
       }
-    } else {
-      // Existing race selected, proceed normally
-      onNext({ raceSelection: data });
+
+      const response = await fetch('/api/races', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          name: data.raceName,
+          date: data.raceDate,
+          isGrandPrixRace: data.isGrandPrixRace,
+          courseVariant: data.courseVariant || null,
+          location: null,
+          raceSeriesId,
+        }),
+      });
+
+      if (!response.ok) {
+        const responseText = await response.text().catch(() => '');
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        if (responseText) {
+          try {
+            const errorData = JSON.parse(responseText);
+            errorMessage = errorData.message || errorData.title || responseText;
+          } catch {
+            errorMessage = responseText;
+          }
+        }
+        throw new Error(errorMessage);
+      }
+
+      const createdRace = await response.json();
+      onNext({ raceSelection: { ...data, raceId: createdRace.raceId, knownVariants, raceSeriesId } });
+    } catch (err) {
+      setError(err.message);
+      console.error('Error creating race:', err);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -202,77 +247,175 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
 
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
         <div className="flex flex-col gap-2">
-          <Label htmlFor="raceId">Select Race</Label>
+          <Label htmlFor="seriesSelection">Race Series</Label>
           <Controller
-            name="raceId"
+            name="seriesSelection"
             control={control}
-            rules={{ required: 'Please select a race or create new' }}
+            rules={{ required: 'Please select a race series or create a new race' }}
             render={({ field }) => (
               <Select
                 value={field.value || undefined}
                 onValueChange={(value) => {
                   field.onChange(value);
-                  handleRaceSelection(value);
+                  handleSeriesChange(value);
                 }}
               >
-                <SelectTrigger
-                  id="raceId"
-                  className="w-full"
-                  aria-invalid={!!errors.raceId}
-                >
-                  <SelectValue placeholder="-- Select a race --">
-                    {(value) => raceOptionLabel(value) || '-- Select a race --'}
+                <SelectTrigger id="seriesSelection" className="w-full" aria-invalid={!!errors.seriesSelection}>
+                  <SelectValue placeholder="-- Select a race series --">
+                    {(value) => seriesOptionLabel(value) || '-- Select a race series --'}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {races.map(race => (
-                    <SelectItem key={race.raceId} value={race.raceId}>
-                      {race.name} - {new Date(race.date).toLocaleDateString()}
-                      {race.courseVariant ? ` (${race.courseVariant})` : ''}
-                    </SelectItem>
+                  {raceSeriesList.map((s) => (
+                    <SelectItem key={s.raceSeriesId} value={s.raceSeriesId}>{s.name}</SelectItem>
                   ))}
-                  <SelectItem value="new">+ Create New Race</SelectItem>
+                  <SelectItem value={NEW_RACE}>+ Create New Race</SelectItem>
                 </SelectContent>
               </Select>
             )}
           />
-          {errors.raceId && (
-            <p className="text-sm text-destructive">{errors.raceId.message}</p>
+          {errors.seriesSelection && (
+            <p className="text-sm text-destructive">{errors.seriesSelection.message}</p>
           )}
         </div>
 
-        {(isCreatingNew || selectedRaceId === 'new') && (
-          <>
+        {isExistingSeriesMode && (
+          seriesDetailLoading ? (
+            <Skeleton className="h-8 w-full" />
+          ) : (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="raceName">Race Name</Label>
-              <Input
-                type="text"
-                id="raceName"
-                aria-invalid={!!errors.raceName}
-                {...register('raceName', {
-                  required: isCreatingNew ? 'Race name is required' : false
-                })}
-                placeholder="e.g., Mount Marathon Race"
+              <Label htmlFor="raceInstanceId">Race Instance</Label>
+              <Controller
+                name="raceInstanceId"
+                control={control}
+                rules={{ required: 'Please select a race instance or a new date' }}
+                render={({ field }) => (
+                  <Select
+                    value={field.value || undefined}
+                    onValueChange={(value) => {
+                      field.onChange(value);
+                      handleRaceInstanceChange(value);
+                    }}
+                  >
+                    <SelectTrigger id="raceInstanceId" className="w-full" aria-invalid={!!errors.raceInstanceId}>
+                      <SelectValue placeholder="-- Select a race instance --">
+                        {(value) => raceInstanceOptionLabel(value) || '-- Select a race instance --'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {seriesDetail?.races.map((r) => (
+                        <SelectItem key={r.raceId} value={r.raceId}>
+                          {r.date} — {r.courseVariant || 'Standard'} ({r.resultsCount} result{r.resultsCount === 1 ? '' : 's'})
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={NEW_DATE}>+ New Date</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               />
-              {errors.raceName && (
-                <p className="text-sm text-destructive">{errors.raceName.message}</p>
+              {errors.raceInstanceId && (
+                <p className="text-sm text-destructive">{errors.raceInstanceId.message}</p>
               )}
+              <p className="text-xs text-muted-foreground">
+                Pick an existing date to add more results to it (e.g. one that's missing
+                finishers), or "+ New Date" to record a new running of this race.
+              </p>
             </div>
+          )
+        )}
 
+        {isExistingRaceMode && (
+          <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+            <dl className="grid grid-cols-2 gap-2">
+              <dt className="text-muted-foreground">Race Name</dt>
+              <dd className="font-medium">{seriesDetail?.name}</dd>
+              <dt className="text-muted-foreground">Grand Prix Race</dt>
+              <dd className="font-medium">{watch('isGrandPrixRace') ? 'Yes' : 'No'}</dd>
+              {watch('courseVariant') && (
+                <>
+                  <dt className="text-muted-foreground">Course Variant</dt>
+                  <dd className="font-medium">{watch('courseVariant')}</dd>
+                </>
+              )}
+            </dl>
+            <p className="mt-2 text-xs text-muted-foreground">
+              These are fixed for an existing race and can't be changed here.
+            </p>
+          </div>
+        )}
+
+        {isNewRaceMode && (
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="raceName">Race Name</Label>
+            <Input
+              type="text"
+              id="raceName"
+              aria-invalid={!!errors.raceName}
+              {...register('raceName', { required: 'Race name is required' })}
+              placeholder="e.g., Mount Marathon Race"
+            />
+            {errors.raceName && (
+              <p className="text-sm text-destructive">{errors.raceName.message}</p>
+            )}
+          </div>
+        )}
+
+        {isNewDateMode && (
+          <p className="text-sm text-muted-foreground">
+            Race name: <span className="font-medium text-foreground">{seriesDetail?.name}</span>
+          </p>
+        )}
+
+        {showRaceDateAndDetails && (
+          <>
             <div className="flex flex-col gap-2">
               <Label htmlFor="raceDate">Race Date</Label>
               <Input
                 type="date"
                 id="raceDate"
                 aria-invalid={!!errors.raceDate}
-                {...register('raceDate', {
-                  required: isCreatingNew ? 'Race date is required' : false
-                })}
+                {...register('raceDate', { required: 'Race date is required' })}
               />
               {errors.raceDate && (
                 <p className="text-sm text-destructive">{errors.raceDate.message}</p>
               )}
             </div>
+
+            {isNewRaceMode && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="newRaceSeriesId">Race Series (optional)</Label>
+                <Controller
+                  name="newRaceSeriesId"
+                  control={control}
+                  render={({ field }) => (
+                    <Select value={field.value || undefined} onValueChange={field.onChange}>
+                      <SelectTrigger id="newRaceSeriesId" className="w-full">
+                        <SelectValue placeholder="-- No series --">
+                          {(value) =>
+                            value === NEW_SERIES
+                              ? '+ Create New Series'
+                              : raceSeriesList.find((s) => s.raceSeriesId === value)?.name || '-- No series --'
+                          }
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {raceSeriesList.map((s) => (
+                          <SelectItem key={s.raceSeriesId} value={s.raceSeriesId}>{s.name}</SelectItem>
+                        ))}
+                        <SelectItem value={NEW_SERIES}>+ Create New Series</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {newRaceSeriesId === NEW_SERIES && (
+                  <Input
+                    type="text"
+                    placeholder="New series name, e.g. Mount Marathon Race"
+                    {...register('newRaceSeriesName')}
+                  />
+                )}
+              </div>
+            )}
 
             <label className="flex items-center gap-2 text-sm font-medium">
               <input
@@ -282,21 +425,6 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
               />
               This is a Grand Prix race
             </label>
-
-            {isGrandPrixRace && (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="courseVariant">Course Variant (optional)</Label>
-                <Input
-                  type="text"
-                  id="courseVariant"
-                  {...register('courseVariant')}
-                  placeholder="e.g., Full Monty, Uphill Only"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Specify the variant if this race has multiple course options
-                </p>
-              </div>
-            )}
           </>
         )}
 
@@ -304,8 +432,8 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="submit" disabled={loading}>
-            {loading ? <Loader2 className="animate-spin" /> : null}
+          <Button type="submit" disabled={submitting}>
+            {submitting ? <Loader2 className="animate-spin" /> : null}
             Next &rarr;
           </Button>
         </div>

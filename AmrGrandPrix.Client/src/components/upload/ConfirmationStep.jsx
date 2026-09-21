@@ -10,7 +10,7 @@ import * as tokenService from '../../services/tokenService';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { cn } from '@/lib/utils';
+import { cn, formatDateOnly } from '@/lib/utils';
 
 // Row's courseVariant, normalized the same way DataReviewStep groups rows.
 const groupKeyFor = (row) => (row.courseVariant || '').trim();
@@ -48,7 +48,10 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
   const reviewedData = wizardData.reviewedData || [];
   const uploadBatchId = wizardData.uploadBatchId;
   const groupRaces = wizardData.groupRaces || {};
-  const primaryGroupKey = wizardData.primaryGroupKey ?? '';
+  // null when Data Review detected multiple course variants - in that case every
+  // group (including whichever one is actually the Step 1 race) was explicitly
+  // resolved via groupRaces, and none is auto-matched to the Step 1 selection.
+  const primaryGroupKey = wizardData.primaryGroupKey ?? null;
 
   // Partition reviewed rows by detected course variant, resolving each group to the
   // race it should be saved against (the Step 1 selection for the primary group, or
@@ -60,16 +63,22 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key).push(row);
     }
-    return Array.from(byKey.entries()).map(([key, rows]) => {
-      const isPrimary = key === primaryGroupKey;
+    return Array.from(byKey.entries()).map(([key, rows], index) => {
+      const isPrimary = primaryGroupKey != null && key === primaryGroupKey;
+      // Whichever group's save call carries the real uploadBatchId (marking the
+      // original UploadBatch row Saved) vs. a sourceUploadBatchId (cloning an audit
+      // row for the others) - independent of which race each group maps to. When
+      // there's a primary group it owns the batch; otherwise the first group does,
+      // arbitrarily, since batch ownership doesn't need to track any particular race.
+      const isBatchOwner = primaryGroupKey != null ? isPrimary : index === 0;
       return {
         key,
         rows,
         raceId: isPrimary ? raceSelection.raceId : groupRaces[key]?.raceId,
         raceName: isPrimary ? raceSelection.raceName : (groupRaces[key]?.raceName || key),
         isGrandPrixRace: isPrimary ? !!raceSelection.isGrandPrixRace : !!groupRaces[key]?.isGrandPrixRace,
-        uploadBatchId: isPrimary ? uploadBatchId : null,
-        sourceUploadBatchId: isPrimary ? null : uploadBatchId,
+        uploadBatchId: isBatchOwner ? uploadBatchId : null,
+        sourceUploadBatchId: isBatchOwner ? null : uploadBatchId,
       };
     });
   })();
@@ -271,7 +280,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
               </dd>
 
               <dt className="font-medium text-muted-foreground">Date:</dt>
-              <dd>{new Date(raceSelection.raceDate).toLocaleDateString()}</dd>
+              <dd>{formatDateOnly(raceSelection.raceDate)}</dd>
 
               {raceSelection.courseVariant && (
                 <>

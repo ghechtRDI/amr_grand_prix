@@ -428,6 +428,319 @@ public class RunnerMatchingServiceTests : IDisposable
 
     #endregion
 
+    #region Alias fallback (preferred/alternate names) Tests
+
+    [Fact]
+    public async Task FindMatchesAsync_NicknameMatchesPreferredName_UsesPreferredNameSimilarity()
+    {
+        // Arrange: legal name "Robert Jones" is a poor match for "Bob Jones", but his
+        // preferred name is an exact match.
+        _context.Runners.Add(new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "Robert",
+            LastName = "Jones",
+            PreferredName = "Bob Jones",
+            Gender = Gender.Male
+        });
+        await _context.SaveChangesAsync();
+
+        // Act
+        var matches = await _service.FindMatchesAsync("Bob Jones", null, Gender.Male);
+
+        // Assert
+        var match = matches.FirstOrDefault(m => m.LastName == "Jones");
+        match.Should().NotBeNull();
+        match!.Confidence.Should().BeGreaterThan(0.95);
+    }
+
+    [Fact]
+    public async Task FindMatchesAsync_NicknameMatchesAlternateName_UsesAlternateNameSimilarity()
+    {
+        // Arrange: legal name doesn't match well, but a recorded alternate (e.g. maiden name)
+        // matches exactly.
+        _context.Runners.Add(new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "Emily",
+            LastName = "Carter",
+            AlternateNames = new List<string> { "Emily Walsh" },
+            Gender = Gender.Female
+        });
+        await _context.SaveChangesAsync();
+
+        // Act
+        var matches = await _service.FindMatchesAsync("Emily Walsh", null, Gender.Female);
+
+        // Assert
+        var match = matches.FirstOrDefault(m => m.LastName == "Carter");
+        match.Should().NotBeNull();
+        match!.Confidence.Should().BeGreaterThan(0.95);
+    }
+
+    [Fact]
+    public async Task FindMatchesAsync_ExactLegalNameMatch_DoesNotNeedAliasFallback()
+    {
+        // "John Doe" already matches the legal name 100% — the alias fallback should never lower
+        // that result even though a (deliberately wrong) alternate name is also on file.
+        var runner = _context.Runners.First(r => r.FirstName == "John");
+        runner.AlternateNames = new List<string> { "Zzz Nomatch" };
+        await _context.SaveChangesAsync();
+
+        var matches = await _service.FindMatchesAsync("John Doe", 35, Gender.Male);
+
+        var match = matches.First(m => m.FirstName == "John" && m.LastName == "Doe");
+        match.Confidence.Should().BeGreaterThan(0.95);
+    }
+
+    #endregion
+
+    #region FindMatchesForProfileAsync Tests
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_NameAndDobMatch_ReturnsAutoClaimConfidence()
+    {
+        // Arrange
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1990, 1, 1),
+            Gender = Gender.Male
+        };
+        _context.Runners.Add(runner);
+        await _context.SaveChangesAsync();
+
+        var user = new ApplicationUser
+        {
+            Id = "user-1",
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1990, 1, 1)
+        };
+
+        // Act
+        var matches = await _service.FindMatchesForProfileAsync(user);
+
+        // Assert
+        var match = matches.FirstOrDefault(m => m.RunnerId == runner.RunnerId);
+        match.Should().NotBeNull();
+        match!.Confidence.Should().BeGreaterThanOrEqualTo(0.90);
+    }
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_NameMatchesButDobDoesNot_ReturnsLowerConfidence()
+    {
+        // Arrange
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1990, 1, 1),
+            Gender = Gender.Male
+        };
+        _context.Runners.Add(runner);
+        await _context.SaveChangesAsync();
+
+        var user = new ApplicationUser
+        {
+            Id = "user-1",
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1985, 6, 12)
+        };
+
+        // Act
+        var matches = await _service.FindMatchesForProfileAsync(user);
+
+        // Assert
+        var match = matches.FirstOrDefault(m => m.RunnerId == runner.RunnerId);
+        match.Should().NotBeNull();
+        match!.Confidence.Should().BeLessThan(0.90);
+    }
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_NameMatchesAndEstimatedBirthYearMatches_ReturnsAutoClaimConfidence()
+    {
+        // Arrange: runner has no verified DOB (the common case for upload-created runners),
+        // only an EstimatedBirthYear derived from a reported age.
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "Alex",
+            LastName = "Rivera",
+            EstimatedBirthYear = 1990,
+            Gender = Gender.Male
+        };
+        _context.Runners.Add(runner);
+        await _context.SaveChangesAsync();
+
+        var user = new ApplicationUser
+        {
+            Id = "user-1",
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1990, 1, 1)
+        };
+
+        // Act
+        var matches = await _service.FindMatchesForProfileAsync(user);
+
+        // Assert
+        var match = matches.FirstOrDefault(m => m.RunnerId == runner.RunnerId);
+        match.Should().NotBeNull();
+        match!.Confidence.Should().BeGreaterThanOrEqualTo(0.90);
+        match.AgeMatch.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_GenderMismatch_ReturnsLowerConfidenceAndFalseGenderMatch()
+    {
+        // Arrange: name and estimated year of birth both match perfectly, but the user's
+        // self-reported gender conflicts with the runner's.
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1990, 1, 1),
+            Gender = Gender.Male
+        };
+        _context.Runners.Add(runner);
+        await _context.SaveChangesAsync();
+
+        var user = new ApplicationUser
+        {
+            Id = "user-1",
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1990, 1, 1),
+            Gender = Gender.Female
+        };
+
+        // Act
+        var matches = await _service.FindMatchesForProfileAsync(user);
+
+        // Assert: the missing 10% gender bonus is the only thing separating this from a full
+        // 100% match.
+        var match = matches.FirstOrDefault(m => m.RunnerId == runner.RunnerId);
+        match.Should().NotBeNull();
+        match!.GenderMatch.Should().BeFalse();
+        match.Confidence.Should().BeApproximately(0.90, 0.001);
+    }
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_GenderMatch_IncreasesConfidenceOverMismatch()
+    {
+        // Arrange: exact name match plus an estimated-birth-year match (no verified DOB on the
+        // runner).
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "Alex",
+            LastName = "Rivera",
+            EstimatedBirthYear = 1990,
+            Gender = Gender.Female
+        };
+        _context.Runners.Add(runner);
+        await _context.SaveChangesAsync();
+
+        var user = new ApplicationUser
+        {
+            Id = "user-1",
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1990, 1, 1),
+            Gender = Gender.Male // mismatched
+        };
+
+        // Act: once with a mismatched gender, once with a matching gender.
+        var matchesWithMismatch = await _service.FindMatchesForProfileAsync(user);
+        var withMismatch = matchesWithMismatch.FirstOrDefault(m => m.RunnerId == runner.RunnerId);
+
+        user.Gender = Gender.Female;
+        var matchesWithMatch = await _service.FindMatchesForProfileAsync(user);
+        var withMatch = matchesWithMatch.FirstOrDefault(m => m.RunnerId == runner.RunnerId);
+
+        // Assert
+        withMismatch.Should().NotBeNull();
+        withMatch.Should().NotBeNull();
+        withMismatch!.GenderMatch.Should().BeFalse();
+        withMatch!.GenderMatch.Should().BeTrue();
+        withMatch.Confidence.Should().BeApproximately(withMismatch.Confidence + 0.10, 0.001);
+    }
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_RunnerAlreadyClaimedByAnotherUser_IsExcluded()
+    {
+        // Arrange
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1990, 1, 1),
+            Gender = Gender.Male
+        };
+        _context.Runners.Add(runner);
+        _context.Users.Add(new ApplicationUser
+        {
+            Id = "other-user",
+            UserName = "other@example.com",
+            RunnerId = runner.RunnerId
+        });
+        await _context.SaveChangesAsync();
+
+        var user = new ApplicationUser
+        {
+            Id = "user-1",
+            FirstName = "Alex",
+            LastName = "Rivera",
+            DateOfBirth = new DateOnly(1990, 1, 1)
+        };
+
+        // Act
+        var matches = await _service.FindMatchesForProfileAsync(user);
+
+        // Assert
+        matches.Should().NotContain(m => m.RunnerId == runner.RunnerId);
+    }
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_PreferredNameMatchesRunner_FoundViaAliasFallback()
+    {
+        // Arrange: the user's legal name doesn't match, but their preferred name does.
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "William",
+            LastName = "Turner",
+            DateOfBirth = new DateOnly(1990, 1, 1),
+            Gender = Gender.Male
+        };
+        _context.Runners.Add(runner);
+        await _context.SaveChangesAsync();
+
+        var user = new ApplicationUser
+        {
+            Id = "user-1",
+            FirstName = "Will",
+            LastName = "T",
+            PreferredName = "William Turner",
+            DateOfBirth = new DateOnly(1990, 1, 1)
+        };
+
+        // Act
+        var matches = await _service.FindMatchesForProfileAsync(user);
+
+        // Assert
+        matches.Should().Contain(m => m.RunnerId == runner.RunnerId && m.Confidence >= 0.90);
+    }
+
+    #endregion
+
     public void Dispose()
     {
         _context?.Dispose();

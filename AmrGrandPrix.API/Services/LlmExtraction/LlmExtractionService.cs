@@ -21,13 +21,13 @@ public class LlmExtractionService : ILlmExtractionService
         _logger   = logger;
     }
 
-    public async Task<ExtractionResult> ExtractAsync(Stream file, string fileName, CancellationToken ct = default)
+    public async Task<ExtractionResult> ExtractAsync(Stream file, string fileName, IReadOnlyList<string>? knownVariants = null, CancellationToken ct = default)
     {
         _logger.LogInformation("Extracting text from {FileName}", fileName);
         var text = await ExtractTextAsync(file, fileName);
         _logger.LogInformation("Extracted {Chars} characters from {FileName}", text.Length, fileName);
 
-        var providerResult = await _provider.ExtractAsync(text, fileName, ct);
+        var providerResult = await _provider.ExtractAsync(text, fileName, knownVariants, ct);
         var sections       = RehydrateSections(providerResult.Json, fileName);
 
         return new ExtractionResult(

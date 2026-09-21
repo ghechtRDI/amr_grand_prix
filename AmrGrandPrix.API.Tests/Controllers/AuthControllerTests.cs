@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
 using AmrGrandPrix.API.Tests.Infrastructure;
 
@@ -37,7 +40,8 @@ public class AuthControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             Password = "Test@1234",
             ConfirmPassword = "Test@1234",
             FirstName = "Test",
-            LastName = "User"
+            LastName = "User",
+            CaptchaToken = "test-token"
         };
 
         // Act
@@ -60,7 +64,8 @@ public class AuthControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             Password = "Test@1234",
             ConfirmPassword = "Different@1234",
             FirstName = "Test",
-            LastName = "User"
+            LastName = "User",
+            CaptchaToken = "test-token"
         };
 
         // Act
@@ -81,7 +86,8 @@ public class AuthControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             Password = "Test@1234",
             ConfirmPassword = "Test@1234",
             FirstName = "Test",
-            LastName = "User"
+            LastName = "User",
+            CaptchaToken = "test-token"
         };
 
         // Act - Register first time
@@ -102,7 +108,8 @@ public class AuthControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         {
             Email = $"unconfirmed{Guid.NewGuid()}@example.com",
             Password = "Test@1234",
-            ConfirmPassword = "Test@1234"
+            ConfirmPassword = "Test@1234",
+            CaptchaToken = "test-token"
         };
         await _client.PostAsJsonAsync("/api/auth/register", registerRequest);
 
@@ -149,5 +156,51 @@ public class AuthControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task RefreshToken_WithValidToken_ShouldReturnNewTokens()
+    {
+        // Arrange - create a confirmed user directly (bypassing the rate-limited register
+        // endpoint, which other tests in this class also share a quota with), then log in
+        // to obtain a real refresh token
+        var email = $"refresh{Guid.NewGuid()}@example.com";
+        const string password = "Test@1234";
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = new ApplicationUser
+            {
+                UserName = email,
+                Email = email,
+                FirstName = "Test",
+                LastName = "User",
+                EmailConfirmed = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            await userManager.CreateAsync(user, password);
+        }
+
+        var loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest
+        {
+            Email = email,
+            Password = password
+        });
+        var loginData = await loginResponse.Content.ReadFromJsonAsync<LoginResponse>();
+
+        // Act
+        var response = await _client.PostAsJsonAsync("/api/auth/refresh-token", new RefreshTokenRequest
+        {
+            RefreshToken = loginData!.RefreshToken
+        });
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var content = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        content.GetProperty("accessToken").GetString().Should().NotBeNullOrEmpty();
+        content.GetProperty("refreshToken").GetString().Should().NotBeNullOrEmpty()
+            .And.NotBe(loginData.RefreshToken);
     }
 }

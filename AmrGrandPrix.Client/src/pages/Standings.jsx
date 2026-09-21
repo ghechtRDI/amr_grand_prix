@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SearchInput } from '@/components/ui/search-input';
 import { cn } from '@/lib/utils';
 
 const AGE_CATEGORIES = [
@@ -132,6 +133,11 @@ export default function Standings() {
   const [standings, setStandings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredStandings = standings.filter((s) =>
+    s.runnerName?.toLowerCase().includes(searchTerm.trim().toLowerCase())
+  );
 
   useEffect(() => {
     fetch('/api/standings/years')
@@ -180,6 +186,9 @@ export default function Standings() {
     navigate(`/standings/${y}`, { replace: true });
   };
 
+  // The Grand Prix doesn't have an official Nonbinary division yet, even though individual
+  // races do report a nonbinary gender place (see RaceResults.jsx) and the backend already
+  // computes Nonbinary Open/Age Grand Prix standings for whenever this division is added here.
   const divisionLabel = () => {
     if (mainTab === DIVISION_OPEN) {
       return `Open ${genderTab === 'male' ? 'Male' : 'Female'} Division`;
@@ -262,11 +271,19 @@ export default function Standings() {
           </TabsContent>
         </Tabs>
 
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold">{selectedYear} — {divisionLabel()}</h2>
-          <p className="text-sm text-muted-foreground">
-            Best 4 races count toward total. <Check className="inline size-3.5" /> = Run the Gamut (7+ races).
-          </p>
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">{selectedYear} — {divisionLabel()}</h2>
+            <p className="text-sm text-muted-foreground">
+              Best 4 races count toward total. <Check className="inline size-3.5" /> = Run the Gamut (7+ races).
+            </p>
+          </div>
+          <SearchInput
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search runners…"
+            className="w-full sm:w-64"
+          />
         </div>
 
         {loading && (
@@ -283,7 +300,7 @@ export default function Standings() {
         )}
         {!loading && !error && (
           <StandingsTable
-            standings={standings}
+            standings={filteredStandings}
             showAgeCategory={mainTab === DIVISION_AGE}
           />
         )}

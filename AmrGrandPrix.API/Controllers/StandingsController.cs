@@ -79,15 +79,16 @@ public class StandingsController : ControllerBase
         {
             "male" or "m" => (Gender?)Gender.Male,
             "female" or "f" => (Gender?)Gender.Female,
+            "nonbinary" or "nb" or "x" => (Gender?)Gender.Nonbinary,
             _ => null
         };
 
         if (!genderEnum.HasValue)
         {
-            return BadRequest("Invalid gender. Use 'male' or 'female'");
+            return BadRequest("Invalid gender. Use 'male', 'female', or 'nonbinary'");
         }
 
-        var division = genderEnum.Value == Gender.Male ? Division.OpenMale : Division.OpenFemale;
+        var division = GrandPrixConstants.GetOpenDivision(genderEnum.Value);
 
         var standings = await _context.GrandPrixStandings
             .Include(s => s.Runner)
@@ -172,15 +173,16 @@ public class StandingsController : ControllerBase
         {
             "male" or "m" => (Gender?)Gender.Male,
             "female" or "f" => (Gender?)Gender.Female,
+            "nonbinary" or "nb" or "x" => (Gender?)Gender.Nonbinary,
             _ => null
         };
 
         if (!genderEnum.HasValue)
         {
-            return BadRequest("Invalid gender. Use 'male' or 'female'");
+            return BadRequest("Invalid gender. Use 'male', 'female', or 'nonbinary'");
         }
 
-        var division = genderEnum == Gender.Male ? Division.AgeMale : Division.AgeFemale;
+        var division = GrandPrixConstants.GetAgeDivision(genderEnum.Value);
 
         var standings = await _context.GrandPrixStandings
             .Include(s => s.Runner)

@@ -45,6 +45,8 @@ public class UploadBatchDto
     public string RaceName { get; set; } = string.Empty;
     public DateOnly RaceDate { get; set; }
     public bool IsGrandPrixRace { get; set; }
+    public Guid? RaceSeriesId { get; set; }
+    public string? RaceSeriesName { get; set; }
     public string FileName { get; set; } = string.Empty;
     public FileType FileType { get; set; }
     public int RecordsUploaded { get; set; }

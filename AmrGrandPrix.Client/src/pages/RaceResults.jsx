@@ -24,7 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { cn } from '@/lib/utils';
+import { cn, formatDateOnly } from '@/lib/utils';
 
 const STATUS_OPTIONS = ['Finished', 'DNF', 'DNS', 'DQ'];
 const GENDER_OPTIONS = ['Male', 'Female', 'Nonbinary'];
@@ -322,7 +322,7 @@ export default function RaceResults() {
 
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
           {race?.date && (
-            <span>{new Date(race.date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+            <span>{formatDateOnly(race.date)}</span>
           )}
           {race?.location && <span>{race.location}</span>}
           {race?.courseVariant && <span>Course: {race.courseVariant}</span>}
@@ -540,11 +540,17 @@ export default function RaceResults() {
           </div>
         </div>
 
-        <div className="mt-6 flex gap-6 border-t border-border pt-4 text-sm">
+        <div className="mt-6 flex flex-wrap gap-6 border-t border-border pt-4 text-sm">
           <Link to="/" className="text-muted-foreground hover:text-foreground">← Home</Link>
           {race?.isGrandPrixRace && (
             <Link to={`/standings/${race.year}`} className="text-muted-foreground hover:text-foreground">View GP Standings →</Link>
           )}
+          {race?.raceSeriesId && (
+            <Link to={`/race-series/${race.raceSeriesId}?tab=stats`} className="text-muted-foreground hover:text-foreground">
+              View Race Statistics →
+            </Link>
+          )}
+          <Link to="/report" className="text-muted-foreground hover:text-foreground">Report an issue with these results</Link>
         </div>
       </div>
 

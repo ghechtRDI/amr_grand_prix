@@ -14,12 +14,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 
     // Race Results DbSets
     public DbSet<Race> Races { get; set; } = null!;
+    public DbSet<RaceSeries> RaceSeries { get; set; } = null!;
     public DbSet<Runner> Runners { get; set; } = null!;
     public DbSet<RaceResult> RaceResults { get; set; } = null!;
     public DbSet<GrandPrixPoints> GrandPrixPoints { get; set; } = null!;
     public DbSet<GrandPrixStanding> GrandPrixStandings { get; set; } = null!;
     public DbSet<UploadBatch> UploadBatches { get; set; } = null!;
     public DbSet<RunnerClaim> RunnerClaims { get; set; } = null!;
+    public DbSet<ResultReport> ResultReports { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -76,6 +78,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(r => r.Name).IsRequired().HasMaxLength(200);
             entity.Property(r => r.Date).IsRequired();
             entity.Property(r => r.Year).IsRequired();
+
+            entity.HasOne(r => r.RaceSeries)
+                .WithMany(s => s.Races)
+                .HasForeignKey(r => r.RaceSeriesId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Configure RaceSeries entity
+        builder.Entity<RaceSeries>(entity =>
+        {
+            entity.HasKey(s => s.RaceSeriesId);
+            entity.HasIndex(s => s.Name);
+
+            entity.Property(s => s.Name).IsRequired().HasMaxLength(200);
         });
 
         // Configure Runner entity
@@ -201,6 +217,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .WithMany()
                 .HasForeignKey(c => c.RunnerId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Configure ResultReport entity
+        builder.Entity<ResultReport>(entity =>
+        {
+            entity.HasKey(r => r.ReportId);
+            entity.HasIndex(r => r.SubmittedAt);
+            entity.HasIndex(r => r.Status);
+
+            entity.Property(r => r.Status).IsRequired();
+
+            entity.HasOne(r => r.Race)
+                .WithMany()
+                .HasForeignKey(r => r.RaceId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

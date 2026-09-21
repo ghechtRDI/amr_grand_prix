@@ -86,12 +86,15 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
 
         var pointsCreated = 0;
 
-        // Calculate place within gender
-        var maleResults = results.Where(r => r.Gender == Gender.Male).ToList();
-        var femaleResults = results.Where(r => r.Gender == Gender.Female).ToList();
+        // Calculate place within gender - nonbinary finishers are ranked and scored only
+        // against other nonbinary finishers, as their own division, same as Male/Female.
+        var maleResults      = results.Where(r => r.Gender == Gender.Male).ToList();
+        var femaleResults    = results.Where(r => r.Gender == Gender.Female).ToList();
+        var nonbinaryResults = results.Where(r => r.Gender == Gender.Nonbinary).ToList();
 
         pointsCreated += await CalculateGenderDivisionPoints(race, maleResults, Gender.Male);
         pointsCreated += await CalculateGenderDivisionPoints(race, femaleResults, Gender.Female);
+        pointsCreated += await CalculateGenderDivisionPoints(race, nonbinaryResults, Gender.Nonbinary);
 
         await _context.SaveChangesAsync();
 
@@ -125,7 +128,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
             if (placeInOpenDivision >= 1 && placeInOpenDivision <= 20)
             {
                 var openPoints = CalculateOpenDivisionPoints(placeInOpenDivision, result.IsNewRecord);
-                var openDivision = gender == Gender.Male ? Division.OpenMale : Division.OpenFemale;
+                var openDivision = GrandPrixConstants.GetOpenDivision(gender);
 
                 _context.GrandPrixPoints.Add(new GrandPrixPoints
                 {
@@ -149,7 +152,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
             var ageCategory = GetResultAgeCategory(result);
             if (ageCategory != null)
             {
-                var ageDivision = gender == Gender.Male ? Division.AgeMale : Division.AgeFemale;
+                var ageDivision = GrandPrixConstants.GetAgeDivision(gender);
 
                 // Find place within age category
                 var resultsInCategory = results
@@ -202,6 +205,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         // Calculate standings for each division
         standingsCreated += await CalculateDivisionStandings(year, Division.OpenMale, null);
         standingsCreated += await CalculateDivisionStandings(year, Division.OpenFemale, null);
+        standingsCreated += await CalculateDivisionStandings(year, Division.OpenNonbinary, null);
 
         // Calculate standings for each age category
         var ageCategories = GrandPrixConstants.AgeCategories.Select(c => c.Name);
@@ -210,6 +214,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         {
             standingsCreated += await CalculateDivisionStandings(year, Division.AgeMale, category);
             standingsCreated += await CalculateDivisionStandings(year, Division.AgeFemale, category);
+            standingsCreated += await CalculateDivisionStandings(year, Division.AgeNonbinary, category);
         }
 
         await _context.SaveChangesAsync();

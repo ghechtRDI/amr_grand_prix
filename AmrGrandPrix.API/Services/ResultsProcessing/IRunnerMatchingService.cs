@@ -28,6 +28,15 @@ public interface IRunnerMatchingService
     Task<List<ResultRow>> FindMatchesForResultsAsync(List<ResultRow> resultRows, DateOnly raceDate);
 
     /// <summary>
+    /// Find unclaimed Runner records that could belong to the given user, for the self-serve
+    /// "claim your results" flow. Compares the user's legal, preferred, and alternate names
+    /// (and each runner's, per <see cref="FindMatchesAsync"/>'s alias fallback) plus an exact
+    /// date-of-birth match. Excludes runners already linked to any account and runners the user
+    /// already has a pending or approved claim on.
+    /// </summary>
+    Task<List<RunnerMatch>> FindMatchesForProfileAsync(ApplicationUser user);
+
+    /// <summary>
     /// Calculate similarity between two names using Levenshtein distance
     /// </summary>
     /// <param name="name1">First name</param>

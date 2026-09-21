@@ -6,6 +6,13 @@ public class UploadResultsRequest
 {
     public Guid RaceId { get; set; }
     public IFormFile File { get; set; } = null!;
+
+    /// <summary>
+    /// Comma-separated course/variant names already known for this event (e.g. from other race
+    /// instances in the same series), used to hint the LLM when this file covers multiple
+    /// variants at once. Optional.
+    /// </summary>
+    public string? KnownVariants { get; set; }
 }
 
 public class UploadResultsResponse

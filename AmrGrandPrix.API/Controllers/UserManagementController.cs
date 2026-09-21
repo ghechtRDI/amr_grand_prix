@@ -64,6 +64,7 @@ public class UserManagementController : ControllerBase
                 FirstName = user.FirstName,
                 LastName = user.LastName,
                 DateOfBirth = user.DateOfBirth,
+                Gender = user.Gender,
                 EmailConfirmed = user.EmailConfirmed,
                 Roles = roles.ToList(),
                 CreatedAt = user.CreatedAt
@@ -99,6 +100,7 @@ public class UserManagementController : ControllerBase
             FirstName = user.FirstName,
             LastName = user.LastName,
             DateOfBirth = user.DateOfBirth,
+            Gender = user.Gender,
             EmailConfirmed = user.EmailConfirmed,
             Roles = roles.ToList(),
             CreatedAt = user.CreatedAt
@@ -224,6 +226,9 @@ public class UserManagementController : ControllerBase
         if (request.DateOfBirth != null)
             user.DateOfBirth = request.DateOfBirth;
 
+        if (request.Gender != null)
+            user.Gender = request.Gender;
+
         user.UpdatedAt = DateTime.UtcNow;
 
         var result = await _userManager.UpdateAsync(user);
@@ -241,6 +246,7 @@ public class UserManagementController : ControllerBase
             FirstName = user.FirstName,
             LastName = user.LastName,
             DateOfBirth = user.DateOfBirth,
+            Gender = user.Gender,
             EmailConfirmed = user.EmailConfirmed,
             Roles = roles.ToList(),
             CreatedAt = user.CreatedAt

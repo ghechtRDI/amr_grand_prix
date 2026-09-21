@@ -103,6 +103,36 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   /**
+   * Update the current user's profile
+   */
+  const updateProfile = useCallback(async (profileData) => {
+    try {
+      setError(null);
+      const data = await authService.updateProfile(profileData);
+      setUser(data);
+      return { success: true, data };
+    } catch (err) {
+      setError(err.message);
+      return { success: false, error: err.message };
+    }
+  }, []);
+
+  /**
+   * Re-fetch the current user from the server, e.g. after an instant claim approval sets
+   * RunnerId server-side and the cached user object needs to catch up.
+   */
+  const refreshUser = useCallback(async () => {
+    try {
+      const data = await authService.fetchCurrentUser();
+      setUser(data);
+      return data;
+    } catch (err) {
+      console.error('Failed to refresh user:', err);
+      return null;
+    }
+  }, []);
+
+  /**
    * Check if user has a specific role
    */
   const hasRole = useCallback((role) => {
@@ -131,6 +161,8 @@ export const AuthProvider = ({ children }) => {
     error,
     login,
     register,
+    updateProfile,
+    refreshUser,
     logout: handleLogout,
     hasRole,
     hasAnyRole,

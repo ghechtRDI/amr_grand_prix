@@ -12,6 +12,8 @@ public class RaceDto
     public int Year { get; set; }
     public string? CourseVariant { get; set; }
     public string? Location { get; set; }
+    public Guid? RaceSeriesId { get; set; }
+    public string? RaceSeriesName { get; set; }
     public TimeSpan? RecordTimeMale { get; set; }
     public TimeSpan? RecordTimeFemale { get; set; }
     public string? RecordHolderMale { get; set; }
@@ -29,6 +31,7 @@ public class CreateRaceRequest
     public DateOnly Date { get; set; }
     public string? CourseVariant { get; set; }
     public string? Location { get; set; }
+    public Guid? RaceSeriesId { get; set; }
 }
 
 /// <summary>
@@ -40,6 +43,7 @@ public class UpdateRaceRequest
     public DateOnly Date { get; set; }
     public string? CourseVariant { get; set; }
     public string? Location { get; set; }
+    public Guid? RaceSeriesId { get; set; }
     public TimeSpan? RecordTimeMale { get; set; }
     public TimeSpan? RecordTimeFemale { get; set; }
     public string? RecordHolderMale { get; set; }

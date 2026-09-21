@@ -20,7 +20,9 @@ public enum Division
     OpenMale,
     OpenFemale,
     AgeMale,
-    AgeFemale
+    AgeFemale,
+    OpenNonbinary,
+    AgeNonbinary
 }
 
 public enum FileType
@@ -44,4 +46,10 @@ public enum ClaimStatus
     Pending,
     Approved,
     Rejected
+}
+
+public enum ReportStatus
+{
+    New,
+    Reviewed
 }

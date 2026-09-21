@@ -29,6 +29,13 @@ public class Race
     public string? Location { get; set; }
 
     /// <summary>
+    /// The <see cref="RaceSeries"/> this instance of the race belongs to, if it has been grouped
+    /// with other years/variants of the same event. Nullable so ungrouped races don't block
+    /// existing workflows.
+    /// </summary>
+    public Guid? RaceSeriesId { get; set; }
+
+    /// <summary>
     /// Record time for male division
     /// </summary>
     public TimeSpan? RecordTimeMale { get; set; }
@@ -54,4 +61,5 @@ public class Race
     // Navigation properties
     public virtual ICollection<RaceResult> Results { get; set; } = new List<RaceResult>();
     public virtual ICollection<UploadBatch> UploadBatches { get; set; } = new List<UploadBatch>();
+    public virtual RaceSeries? RaceSeries { get; set; }
 }

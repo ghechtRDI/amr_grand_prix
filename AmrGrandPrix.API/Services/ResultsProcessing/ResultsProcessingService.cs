@@ -189,9 +189,10 @@ public class ResultsProcessingService : IResultsProcessingService
             if (!row.Time.HasValue)
                 issues.Add(new() { Field = "Time", Severity = ValidationSeverity.Error,
                                    Message = "Finish time is required for completed results" });
-            else if (row.Time.Value.TotalHours > 24)
+            else if (row.Time.Value.TotalHours > GrandPrixConstants.MaxPlausibleRaceHours)
                 issues.Add(new() { Field = "Time", Severity = ValidationSeverity.Warning,
-                                   Message = "Finish time exceeds 24 hours - please verify" });
+                                   Message = $"Finish time exceeds {GrandPrixConstants.MaxPlausibleRaceHours} hours - AMR races rarely take this long; " +
+                                             "this often means the LLM misread a MM:SS time as H:MM:SS. Check the source and use \"Shift Fields\" on the Time cell if needed." });
         }
 
         if (row.Status == ResultStatus.Finished && !row.Place.HasValue)

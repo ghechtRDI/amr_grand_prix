@@ -9,6 +9,8 @@ import { useDropzone } from 'react-dropzone';
 import { AlertCircle, FileText, Loader2, UploadCloud, X } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
@@ -19,6 +21,9 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
+  const [knownVariants, setKnownVariants] = useState(
+    (wizardData.raceSelection?.knownVariants || []).join(', ')
+  );
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
     accept: {
@@ -58,6 +63,7 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
       const formData = new FormData();
       formData.append('file', file);
       formData.append('raceId', raceId);
+      if (knownVariants.trim()) formData.append('knownVariants', knownVariants.trim());
 
       // Fake progress while LLM processes (can take 10–30 s)
       let fakeProgress = 0;
@@ -182,6 +188,25 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
         Results are extracted automatically — no column mapping needed.
         PDF, CSV, and Excel files are all supported.
       </p>
+
+      <div className="mt-6 flex flex-col gap-2 border-t border-border pt-6">
+        <Label htmlFor="knownVariants">Known course/variant names (optional)</Label>
+        <Input
+          id="knownVariants"
+          type="text"
+          value={knownVariants}
+          onChange={(e) => setKnownVariants(e.target.value)}
+          placeholder="e.g. Junior - Blueberry Knoll, Adult - Young at Heart Blueberry Knoll"
+          disabled={processing}
+        />
+        <p className="text-xs text-muted-foreground">
+          If this file's results cover more than one course or division at once, list the known
+          names here, comma-separated. The AI extractor will reuse these exact labels instead of
+          inventing its own when it splits the file into sections.
+          {wizardData.raceSelection?.knownVariants?.length > 0 &&
+            ' Pre-filled from this series’ other race instances — edit as needed.'}
+        </p>
+      </div>
 
       <div className="mt-8 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">
         <Button type="button" variant="outline" onClick={onBack}>

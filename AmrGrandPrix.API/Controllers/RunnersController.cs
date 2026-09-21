@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using AmrGrandPrix.API.Common;
@@ -19,15 +20,18 @@ public class RunnersController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly IRunnerMatchingService _runnerMatchingService;
+    private readonly UserManager<ApplicationUser> _userManager;
     private readonly ILogger<RunnersController> _logger;
 
     public RunnersController(
         ApplicationDbContext context,
         IRunnerMatchingService runnerMatchingService,
+        UserManager<ApplicationUser> userManager,
         ILogger<RunnersController> logger)
     {
         _context = context;
         _runnerMatchingService = runnerMatchingService;
+        _userManager = userManager;
         _logger = logger;
     }
 
@@ -385,6 +389,59 @@ public class RunnersController : ControllerBase
 
         return Ok(results);
     }
+
+    /// <summary>
+    /// A runner's results within one race series, across every year they've raced it — for the
+    /// "my performance over time" chart. Only the linked account owner (or an Admin/Manager) can
+    /// view it, since this surfaces a specific person's personal history rather than public
+    /// race results.
+    /// </summary>
+    [HttpGet("{runnerId}/series/{seriesId}/history")]
+    [Authorize]
+    [ProducesResponseType(typeof(List<RunnerSeriesHistoryEntryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<List<RunnerSeriesHistoryEntryDto>>> GetRunnerSeriesHistory(Guid runnerId, Guid seriesId)
+    {
+        var user = await _userManager.GetUserAsync(User);
+        if (user == null)
+            return Unauthorized();
+
+        var isOwnRunner = user.RunnerId == runnerId;
+        var isPrivileged = User.IsInRole("Admin") || User.IsInRole("Manager");
+        if (!isOwnRunner && !isPrivileged)
+            return Forbid();
+
+        var history = await _context.RaceResults
+            .Include(rr => rr.Race)
+            .Where(rr => rr.RunnerId == runnerId && rr.Race.RaceSeriesId == seriesId)
+            .OrderBy(rr => rr.Race.Date)
+            .Select(rr => new RunnerSeriesHistoryEntryDto
+            {
+                RaceId = rr.RaceId,
+                Year = rr.Race.Year,
+                Date = rr.Race.Date,
+                CourseVariant = rr.Race.CourseVariant,
+                Time = rr.Time,
+                Place = rr.Place,
+                PlaceAgeCategory = rr.PlaceAgeCategory,
+                Status = rr.Status
+            })
+            .ToListAsync();
+
+        return Ok(history);
+    }
+}
+
+public class RunnerSeriesHistoryEntryDto
+{
+    public Guid RaceId { get; set; }
+    public int Year { get; set; }
+    public DateOnly Date { get; set; }
+    public string? CourseVariant { get; set; }
+    public TimeSpan? Time { get; set; }
+    public int? Place { get; set; }
+    public int? PlaceAgeCategory { get; set; }
+    public ResultStatus Status { get; set; }
 }
 
 /// <summary>

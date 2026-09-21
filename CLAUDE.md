@@ -59,7 +59,7 @@ dotnet ef database update
 - `Race` — race event with `IsGrandPrixRace`, `Year`, `Date`
 - `Runner` — person with gender, DOB, name
 - `RaceResult` — links Runner to Race with time, place, age, gender, status (Finished/DNF/DNS/DQ)
-- `GrandPrixPoints` — computed points per runner per race, split by Division (OpenMale/OpenFemale/AgeMale/AgeFemale)
+- `GrandPrixPoints` — computed points per runner per race, split by Division (OpenMale/OpenFemale/OpenNonbinary/AgeMale/AgeFemale/AgeNonbinary); Nonbinary runners score in their own division, ranked only against other nonbinary finishers
 - `GrandPrixStanding` — season standings per runner per division, best-4-races logic
 - `UploadBatch` — tracks file uploads; includes LLM audit fields (RawLlmJson, LlmModel, LlmInputTokens, LlmOutputTokens)
 

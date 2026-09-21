@@ -45,6 +45,8 @@ public class RacesController : ControllerBase
                 Year = r.Year,
                 CourseVariant = r.CourseVariant,
                 Location = r.Location,
+                RaceSeriesId = r.RaceSeriesId,
+                RaceSeriesName = r.RaceSeries != null ? r.RaceSeries.Name : null,
                 RecordTimeMale = r.RecordTimeMale,
                 RecordTimeFemale = r.RecordTimeFemale,
                 RecordHolderMale = r.RecordHolderMale,
@@ -77,6 +79,8 @@ public class RacesController : ControllerBase
                 Year = r.Year,
                 CourseVariant = r.CourseVariant,
                 Location = r.Location,
+                RaceSeriesId = r.RaceSeriesId,
+                RaceSeriesName = r.RaceSeries != null ? r.RaceSeries.Name : null,
                 RecordTimeMale = r.RecordTimeMale,
                 RecordTimeFemale = r.RecordTimeFemale,
                 RecordHolderMale = r.RecordHolderMale,
@@ -109,6 +113,8 @@ public class RacesController : ControllerBase
                 Year = r.Year,
                 CourseVariant = r.CourseVariant,
                 Location = r.Location,
+                RaceSeriesId = r.RaceSeriesId,
+                RaceSeriesName = r.RaceSeries != null ? r.RaceSeries.Name : null,
                 RecordTimeMale = r.RecordTimeMale,
                 RecordTimeFemale = r.RecordTimeFemale,
                 RecordHolderMale = r.RecordHolderMale,
@@ -141,6 +147,8 @@ public class RacesController : ControllerBase
                 Year = r.Year,
                 CourseVariant = r.CourseVariant,
                 Location = r.Location,
+                RaceSeriesId = r.RaceSeriesId,
+                RaceSeriesName = r.RaceSeries != null ? r.RaceSeries.Name : null,
                 RecordTimeMale = r.RecordTimeMale,
                 RecordTimeFemale = r.RecordTimeFemale,
                 RecordHolderMale = r.RecordHolderMale,
@@ -177,11 +185,16 @@ public class RacesController : ControllerBase
                 Year = request.Date.Year,
                 CourseVariant = request.CourseVariant,
                 Location = request.Location,
+                RaceSeriesId = request.RaceSeriesId,
                 CreatedAt = DateTime.UtcNow
             };
 
             _context.Races.Add(race);
             await _context.SaveChangesAsync();
+
+            var seriesName = race.RaceSeriesId.HasValue
+                ? (await _context.RaceSeries.FindAsync(race.RaceSeriesId.Value))?.Name
+                : null;
 
             var raceDto = new RaceDto
             {
@@ -192,6 +205,8 @@ public class RacesController : ControllerBase
                 Year = race.Year,
                 CourseVariant = race.CourseVariant,
                 Location = race.Location,
+                RaceSeriesId = race.RaceSeriesId,
+                RaceSeriesName = seriesName,
                 RecordTimeMale = race.RecordTimeMale,
                 RecordTimeFemale = race.RecordTimeFemale,
                 RecordHolderMale = race.RecordHolderMale,
@@ -234,12 +249,17 @@ public class RacesController : ControllerBase
             race.Year = request.Date.Year;
             race.CourseVariant = request.CourseVariant;
             race.Location = request.Location;
+            race.RaceSeriesId = request.RaceSeriesId;
             race.RecordTimeMale = request.RecordTimeMale;
             race.RecordTimeFemale = request.RecordTimeFemale;
             race.RecordHolderMale = request.RecordHolderMale;
             race.RecordHolderFemale = request.RecordHolderFemale;
 
             await _context.SaveChangesAsync();
+
+            var seriesName = race.RaceSeriesId.HasValue
+                ? (await _context.RaceSeries.FindAsync(race.RaceSeriesId.Value))?.Name
+                : null;
 
             var raceDto = new RaceDto
             {
@@ -250,6 +270,8 @@ public class RacesController : ControllerBase
                 Year = race.Year,
                 CourseVariant = race.CourseVariant,
                 Location = race.Location,
+                RaceSeriesId = race.RaceSeriesId,
+                RaceSeriesName = seriesName,
                 RecordTimeMale = race.RecordTimeMale,
                 RecordTimeFemale = race.RecordTimeFemale,
                 RecordHolderMale = race.RecordHolderMale,

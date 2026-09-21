@@ -83,10 +83,19 @@ export default function NavBar() {
               Standings
             </NavLink>
 
+            <NavLink to="/race-results" className={navLinkClass}>
+              Race Results
+            </NavLink>
+
             {authed && (
-              <NavLink to="/" end className={navLinkClass}>
-                Home
-              </NavLink>
+              <>
+                <NavLink to="/" end className={navLinkClass}>
+                  Home
+                </NavLink>
+                <NavLink to="/profile" className={navLinkClass}>
+                  Profile
+                </NavLink>
+              </>
             )}
 
             {isAdminOrManager && (

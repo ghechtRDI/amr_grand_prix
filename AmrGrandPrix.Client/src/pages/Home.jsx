@@ -4,7 +4,7 @@
  */
 
 import { Link } from 'react-router-dom';
-import { ClipboardList, Trophy, Upload } from 'lucide-react';
+import { ClipboardList, ListChecks, Trophy, Upload, UserCircle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
@@ -16,6 +16,18 @@ const NAV_CARDS = (isAdminOrManager) => [
     icon: Trophy,
     title: 'GP Standings',
     desc: `View ${CURRENT_YEAR} Grand Prix standings`,
+  },
+  {
+    to: '/race-results',
+    icon: ListChecks,
+    title: 'Race Results',
+    desc: 'Browse historical race results',
+  },
+  {
+    to: '/profile',
+    icon: UserCircle,
+    title: 'My Profile',
+    desc: 'Edit your profile and claim your results',
   },
   ...(isAdminOrManager
     ? [

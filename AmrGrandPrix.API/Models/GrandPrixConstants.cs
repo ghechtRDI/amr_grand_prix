@@ -36,6 +36,13 @@ public static class GrandPrixConstants
     public const int AgeDivisionTopFinishers = 5;
 
     /// <summary>
+    /// Longest finish time a real AMR race result is expected to have. Used to flag results
+    /// upload rows whose parsed time likely comes from an LLM misreading a MM:SS time as
+    /// H:MM:SS (e.g. "30:21" read as 30 hours 21 minutes instead of 30 minutes 21 seconds).
+    /// </summary>
+    public const int MaxPlausibleRaceHours = 10;
+
+    /// <summary>
     /// Open Division points table (FIS Continental Cup scoring system)
     /// Position -> Points
     /// </summary>
@@ -120,6 +127,30 @@ public static class GrandPrixConstants
     {
         return AgeDivisionPoints.GetValueOrDefault(place, 0);
     }
+
+    /// <summary>
+    /// Gets the Open Division for a gender. Nonbinary runners score in their own Open
+    /// division, ranked only against other nonbinary finishers.
+    /// </summary>
+    public static Division GetOpenDivision(Gender gender) => gender switch
+    {
+        Gender.Male => Division.OpenMale,
+        Gender.Female => Division.OpenFemale,
+        Gender.Nonbinary => Division.OpenNonbinary,
+        _ => throw new ArgumentOutOfRangeException(nameof(gender))
+    };
+
+    /// <summary>
+    /// Gets the Age Division for a gender. Nonbinary runners score in their own Age
+    /// division, ranked only against other nonbinary finishers in the same age category.
+    /// </summary>
+    public static Division GetAgeDivision(Gender gender) => gender switch
+    {
+        Gender.Male => Division.AgeMale,
+        Gender.Female => Division.AgeFemale,
+        Gender.Nonbinary => Division.AgeNonbinary,
+        _ => throw new ArgumentOutOfRangeException(nameof(gender))
+    };
 }
 
 /// <summary>
