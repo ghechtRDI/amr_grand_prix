@@ -36,13 +36,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { AGE_CATEGORIES } from '@/lib/ageCategories';
 
 const columnHelper = createColumnHelper();
-
-// Must match AmrGrandPrix.API.Models.GrandPrixConstants.AgeCategories
-const AGE_CATEGORIES = [
-  '17 and Under', '18-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89',
-];
 
 // Columns whose values are numbers/times - right-aligned with tabular figures
 // for scannability, matching the rest of the app's data tables.

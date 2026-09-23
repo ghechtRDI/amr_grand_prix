@@ -21,17 +21,7 @@ import {
 } from '@/components/ui/select';
 import { SearchInput } from '@/components/ui/search-input';
 import { cn } from '@/lib/utils';
-
-const AGE_CATEGORIES = [
-  '17 and Under',
-  '18-29',
-  '30-39',
-  '40-49',
-  '50-59',
-  '60-69',
-  '70-79',
-  '80-89',
-];
+import { AGE_CATEGORIES } from '@/lib/ageCategories';
 
 const DIVISION_OPEN = 'open';
 const DIVISION_AGE = 'age';

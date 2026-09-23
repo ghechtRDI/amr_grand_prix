@@ -163,8 +163,8 @@ public class GrandPrixCalculationServiceTests : IDisposable
     [InlineData(80, "80-89")]
     [InlineData(85, "80-89")]
     [InlineData(89, "80-89")]
-    [InlineData(90, "80-89")]
-    [InlineData(100, "80-89")]
+    [InlineData(90, "90+")]
+    [InlineData(100, "90+")]
     public void DetermineAgeCategory_ShouldReturnCorrectCategory(int age, string expectedCategory)
     {
         // Act
@@ -184,6 +184,8 @@ public class GrandPrixCalculationServiceTests : IDisposable
         _service.DetermineAgeCategory(30).Should().Be("30-39");
         _service.DetermineAgeCategory(39).Should().Be("30-39");
         _service.DetermineAgeCategory(40).Should().Be("40-49");
+        _service.DetermineAgeCategory(89).Should().Be("80-89");
+        _service.DetermineAgeCategory(90).Should().Be("90+");
     }
 
     #endregion

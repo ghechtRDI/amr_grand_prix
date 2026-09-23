@@ -3,9 +3,9 @@
  * Shows all results for a single race, with GP points if applicable.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronsUpDown, Medal } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import * as tokenService from '../services/tokenService';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -14,6 +14,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,13 +33,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { cn, formatDateOnly } from '@/lib/utils';
+import { AGE_CATEGORIES } from '@/lib/ageCategories';
 
 const STATUS_OPTIONS = ['Finished', 'DNF', 'DNS', 'DQ'];
 const GENDER_OPTIONS = ['Male', 'Female', 'Nonbinary'];
-const GENDER_FILTERS = ['all', 'Male', 'Female'];
 
-// Columns whose values are numbers/times - right-aligned with tabular figures.
-const NUMERIC_COLUMNS = new Set(['place', 'placeGender', 'age', 'time']);
+const RACE_RESULTS_TAB = 'race-results';
+const AGE_GROUP_TAB = 'age-group';
 
 const STATUS_BADGE_CLASSES = {
   Finished: 'bg-success/10 text-success dark:bg-success/20',
@@ -81,19 +89,58 @@ function isZeroTime(t) {
   return m.slice(1).every(part => !part || parseFloat(part) === 0);
 }
 
-// DNF/DNS/DQ rows, and legacy rows saved with sentinel place=0/time=0:00:00, have no
-// meaningful result and should always sort to the bottom regardless of sort direction.
+// DNF/DNS/DQ rows, and legacy rows saved with sentinel time=0:00:00, have no meaningful
+// result and should always sort to the bottom regardless of sort direction.
 function hasNoResult(r) {
   const status = toStatusLabel(r.status);
-  if (status && status !== 'Finished') return true;
-  if (r.place == null || r.place === 0) return true;
-  return isZeroTime(r.time);
+  return (status && status !== 'Finished') || isZeroTime(r.time);
 }
 
 function genderLabel(g) {
   if (g === 0 || g === 'Male') return 'M';
   if (g === 1 || g === 'Female') return 'F';
   return g;
+}
+
+// Overall/gender/age-group places are computed from finish time rather than trusted from
+// the stored `place`/`placeGender` fields, which can reflect a section-relative place (e.g.
+// a per-gender results sheet) rather than the true rank - see RaceResults place computation.
+function withComputedPlaces(results) {
+  const finished = results.filter((r) => !hasNoResult(r));
+  const byTime = [...finished].sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+
+  const overallPlace = new Map();
+  byTime.forEach((r, i) => overallPlace.set(r.resultId, i + 1));
+
+  const genderPlace = new Map();
+  const byGender = new Map();
+  byTime.forEach((r) => {
+    const g = toGenderLabel(r.gender);
+    if (!byGender.has(g)) byGender.set(g, []);
+    byGender.get(g).push(r);
+  });
+  byGender.forEach((list) => {
+    list.forEach((r, i) => genderPlace.set(r.resultId, i + 1));
+  });
+
+  const ageGroupPlace = new Map();
+  const byGenderAndAge = new Map();
+  byTime.forEach((r) => {
+    const key = `${toGenderLabel(r.gender)}|${r.ageCategory ?? ''}`;
+    if (!r.ageCategory) return;
+    if (!byGenderAndAge.has(key)) byGenderAndAge.set(key, []);
+    byGenderAndAge.get(key).push(r);
+  });
+  byGenderAndAge.forEach((list) => {
+    list.forEach((r, i) => ageGroupPlace.set(r.resultId, i + 1));
+  });
+
+  return results.map((r) => ({
+    ...r,
+    computedPlace: overallPlace.get(r.resultId) ?? null,
+    computedGenderPlace: genderPlace.get(r.resultId) ?? null,
+    computedAgeGroupPlace: ageGroupPlace.get(r.resultId) ?? null,
+  }));
 }
 
 function StatusBadge({ status }) {
@@ -112,8 +159,9 @@ export default function RaceResults() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [mainTab, setMainTab] = useState(RACE_RESULTS_TAB);
   const [genderFilter, setGenderFilter] = useState('all');
-  const [sortField, setSortField] = useState('place');
+  const [sortField, setSortField] = useState('computedPlace');
   const [sortDir, setSortDir] = useState('asc');
   const [editingResultId, setEditingResultId] = useState(null);
   const [editValues, setEditValues] = useState({});
@@ -121,6 +169,8 @@ export default function RaceResults() {
   const [deletingId, setDeletingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [actionError, setActionError] = useState(null);
+  const [ageGroupGender, setAgeGroupGender] = useState('Male');
+  const [ageGroupCategory, setAgeGroupCategory] = useState(AGE_CATEGORIES[2]); // default 30-39
 
   const canEdit = isAuthenticated() && hasAnyRole(['Admin', 'Manager']);
   const canDelete = isAuthenticated() && hasRole('Admin');
@@ -154,6 +204,16 @@ export default function RaceResults() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const augmentedResults = useMemo(() => withComputedPlaces(results), [results]);
+
+  const hasNonbinary = useMemo(
+    () => augmentedResults.some((r) => toGenderLabel(r.gender) === 'Nonbinary'),
+    [augmentedResults]
+  );
+
+  const genderFilters = hasNonbinary ? ['all', 'Male', 'Female', 'Nonbinary'] : ['all', 'Male', 'Female'];
+  const ageGroupGenders = hasNonbinary ? ['Male', 'Female', 'Nonbinary'] : ['Male', 'Female'];
 
   const startEdit = (r) => {
     setActionError(null);
@@ -251,13 +311,10 @@ export default function RaceResults() {
       : <ArrowDown className="ml-1 inline size-3.5" />;
   };
 
-  const filteredResults = results
+  const filteredResults = augmentedResults
     .filter((r) => {
       if (genderFilter === 'all') return true;
-      const g = typeof r.gender === 'number'
-        ? ['Male', 'Female', 'Nonbinary'][r.gender]
-        : r.gender;
-      return g === genderFilter;
+      return toGenderLabel(r.gender) === genderFilter;
     })
     .sort((a, b) => {
       const aNo = hasNoResult(a);
@@ -273,6 +330,16 @@ export default function RaceResults() {
       if (typeof valB === 'string') valB = valB.toLowerCase();
       const cmp = valA < valB ? -1 : valA > valB ? 1 : 0;
       return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+  const ageGroupResults = augmentedResults
+    .filter((r) => toGenderLabel(r.gender) === ageGroupGender && r.ageCategory === ageGroupCategory)
+    .sort((a, b) => {
+      const aNo = hasNoResult(a);
+      const bNo = hasNoResult(b);
+      if (aNo !== bNo) return aNo ? 1 : -1;
+      if (aNo) return 0;
+      return a.computedAgeGroupPlace - b.computedAgeGroupPlace;
     });
 
   const finishersCount = results.filter((r) => {
@@ -336,209 +403,289 @@ export default function RaceResults() {
           {finishersCount !== results.length && <span> ({finishersCount} finishers)</span>}
         </div>
 
-        <div className="mt-6 mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex overflow-hidden rounded-lg border border-border">
-            {GENDER_FILTERS.map((g, i) => (
-              <Button
-                key={g}
-                type="button"
-                size="sm"
-                variant={genderFilter === g ? 'default' : 'ghost'}
-                className={cn('rounded-none', i > 0 && 'border-l border-border')}
-                onClick={() => setGenderFilter(g)}
-              >
-                {g === 'all' ? 'All' : g}
-              </Button>
-            ))}
-          </div>
-          <span className="text-sm text-muted-foreground">{filteredResults.length} shown</span>
-        </div>
-
         {actionError && (
-          <Alert variant="destructive" className="mb-4">
+          <Alert variant="destructive" className="mt-4">
             <AlertCircle />
             <AlertDescription>{actionError}</AlertDescription>
           </Alert>
         )}
 
-        <div className="overflow-hidden rounded-xl border border-border">
-          <div className="max-h-[70vh] overflow-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead
-                    onClick={() => handleSort('place')}
-                    className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
-                  >
-                    Place<SortIcon field="place" />
-                  </TableHead>
-                  <TableHead
-                    onClick={() => handleSort('placeGender')}
-                    className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
-                  >
-                    {genderFilter === 'all' ? 'Gender Place' : 'Place'}<SortIcon field="placeGender" />
-                  </TableHead>
-                  <TableHead
-                    onClick={() => handleSort('runnerName')}
-                    className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
-                  >
-                    Name<SortIcon field="runnerName" />
-                  </TableHead>
-                  <TableHead
-                    onClick={() => handleSort('age')}
-                    className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
-                  >
-                    Age<SortIcon field="age" />
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
-                    Gender
-                  </TableHead>
-                  <TableHead
-                    onClick={() => handleSort('time')}
-                    className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
-                  >
-                    Time<SortIcon field="time" />
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
-                    Status
-                  </TableHead>
-                  {race?.isGrandPrixRace && (
-                    <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
-                      Record
-                    </TableHead>
-                  )}
-                  {(canEdit || canDelete) && (
-                    <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
-                      Actions
-                    </TableHead>
-                  )}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredResults.map((r, idx) => {
-                  const status = toStatusLabel(r.status);
-                  const isEditing = editingResultId === r.resultId;
-                  const isDnf = status !== 'Finished';
+        <Tabs value={mainTab} onValueChange={setMainTab} className="mt-6">
+          <TabsList variant="line" className="mb-4 h-auto gap-4 border-b border-border p-0">
+            <TabsTrigger value={RACE_RESULTS_TAB} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
+              Race Results
+            </TabsTrigger>
+            <TabsTrigger value={AGE_GROUP_TAB} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
+              Age Group Results
+            </TabsTrigger>
+          </TabsList>
 
-                  if (isEditing) {
-                    return (
-                      <TableRow key={r.resultId} className="bg-primary/5 hover:bg-primary/5">
-                        <TableCell>
-                          <Input
-                            type="text"
-                            value={editValues.place}
-                            className="h-8 text-right text-sm tabular-nums"
-                            onChange={(e) => setEditValues(v => ({ ...v, place: e.target.value }))}
-                          />
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{r.placeGender ?? '—'}</TableCell>
-                        <TableCell className="font-medium text-foreground">
-                          <Link to={`/runners/${r.runnerId}`} className="hover:text-primary">{r.runnerName}</Link>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="text"
-                            value={editValues.age}
-                            placeholder="Age"
-                            className="h-8 text-right text-sm tabular-nums"
-                            onChange={(e) => setEditValues(v => ({ ...v, age: e.target.value }))}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <select
-                            value={editValues.gender}
-                            className={SELECT_CLASS}
-                            onChange={(e) => setEditValues(v => ({ ...v, gender: e.target.value }))}
-                          >
-                            {GENDER_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
-                          </select>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="text"
-                            value={editValues.time}
-                            placeholder="h:mm:ss"
-                            className="h-8 text-right text-sm tabular-nums"
-                            onChange={(e) => setEditValues(v => ({ ...v, time: e.target.value }))}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <select
-                            value={editValues.status}
-                            className={SELECT_CLASS}
-                            onChange={(e) => setEditValues(v => ({ ...v, status: e.target.value }))}
-                          >
-                            {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                        </TableCell>
-                        {race?.isGrandPrixRace && <TableCell></TableCell>}
-                        <TableCell className="text-right whitespace-nowrap">
-                          <div className="flex justify-end gap-1.5">
-                            <Button size="sm" disabled={saving} onClick={() => saveEdit(r.resultId)}>
-                              {saving ? 'Saving...' : 'Save'}
-                            </Button>
-                            <Button size="sm" variant="outline" disabled={saving} onClick={cancelEdit}>
-                              Cancel
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  }
+          <TabsContent value={RACE_RESULTS_TAB}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="inline-flex overflow-hidden rounded-lg border border-border">
+                {genderFilters.map((g, i) => (
+                  <Button
+                    key={g}
+                    type="button"
+                    size="sm"
+                    variant={genderFilter === g ? 'default' : 'ghost'}
+                    className={cn('rounded-none', i > 0 && 'border-l border-border')}
+                    onClick={() => setGenderFilter(g)}
+                  >
+                    {g === 'all' ? 'Overall' : g}
+                  </Button>
+                ))}
+              </div>
+              <span className="text-sm text-muted-foreground">{filteredResults.length} shown</span>
+            </div>
 
-                  return (
-                    <TableRow
-                      key={r.resultId}
-                      className={cn(idx % 2 === 1 && 'bg-muted/20', isDnf && 'opacity-70')}
-                    >
-                      <TableCell className={cn('text-right font-bold tabular-nums', NUMERIC_COLUMNS.has('place') && 'text-primary')}>
-                        {r.place ?? '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{r.placeGender ?? '—'}</TableCell>
-                      <TableCell className="font-medium text-foreground">
-                        <Link to={`/runners/${r.runnerId}`} className="hover:text-primary">{r.runnerName}</Link>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{r.age ?? r.ageCategory ?? '—'}</TableCell>
-                      <TableCell>{genderLabel(r.gender)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm tabular-nums">{formatTime(r.time)}</TableCell>
-                      <TableCell><StatusBadge status={status} /></TableCell>
-                      {race?.isGrandPrixRace && (
-                        <TableCell>
-                          {r.isNewRecord && (
-                            <Badge className="gap-1 text-[10px] font-bold tracking-wide uppercase">
-                              <Medal className="size-3" /> CR
-                            </Badge>
-                          )}
-                        </TableCell>
-                      )}
+            <div className="overflow-hidden rounded-xl border border-border">
+              <div className="max-h-[70vh] overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead
+                        onClick={() => handleSort('computedPlace')}
+                        className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
+                      >
+                        Place<SortIcon field="computedPlace" />
+                      </TableHead>
+                      <TableHead
+                        onClick={() => handleSort('computedGenderPlace')}
+                        className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
+                      >
+                        {genderFilter === 'all' ? 'Gender Place' : 'Place'}<SortIcon field="computedGenderPlace" />
+                      </TableHead>
+                      <TableHead
+                        onClick={() => handleSort('runnerName')}
+                        className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
+                      >
+                        Name<SortIcon field="runnerName" />
+                      </TableHead>
+                      <TableHead
+                        onClick={() => handleSort('age')}
+                        className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
+                      >
+                        Age<SortIcon field="age" />
+                      </TableHead>
+                      <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
+                        Gender
+                      </TableHead>
+                      <TableHead
+                        onClick={() => handleSort('time')}
+                        className={cn('sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black', sortableHeaderClass)}
+                      >
+                        Time<SortIcon field="time" />
+                      </TableHead>
+                      <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
+                        Status
+                      </TableHead>
                       {(canEdit || canDelete) && (
-                        <TableCell className="text-right whitespace-nowrap">
-                          <div className="flex justify-end gap-1.5">
-                            {canEdit && (
-                              <Button size="sm" variant="outline" onClick={() => startEdit(r)}>
-                                Edit
-                              </Button>
-                            )}
-                            {canDelete && (
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                disabled={deletingId === r.resultId}
-                                onClick={() => setDeleteTarget(r)}
-                              >
-                                {deletingId === r.resultId ? 'Deleting...' : 'Delete'}
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
+                        <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
+                          Actions
+                        </TableHead>
                       )}
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredResults.map((r, idx) => {
+                      const status = toStatusLabel(r.status);
+                      const isEditing = editingResultId === r.resultId;
+                      const isDnf = status !== 'Finished';
+
+                      if (isEditing) {
+                        return (
+                          <TableRow key={r.resultId} className="bg-primary/5 hover:bg-primary/5">
+                            <TableCell className="text-right font-bold tabular-nums text-primary">
+                              {r.computedPlace ?? '—'}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{r.computedGenderPlace ?? '—'}</TableCell>
+                            <TableCell className="font-medium text-foreground">
+                              <Link to={`/runners/${r.runnerId}`} className="hover:text-primary">{r.runnerName}</Link>
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="text"
+                                value={editValues.age}
+                                placeholder="Age"
+                                className="h-8 text-right text-sm tabular-nums"
+                                onChange={(e) => setEditValues(v => ({ ...v, age: e.target.value }))}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <select
+                                value={editValues.gender}
+                                className={SELECT_CLASS}
+                                onChange={(e) => setEditValues(v => ({ ...v, gender: e.target.value }))}
+                              >
+                                {GENDER_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+                              </select>
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="text"
+                                value={editValues.time}
+                                placeholder="h:mm:ss"
+                                className="h-8 text-right text-sm tabular-nums"
+                                onChange={(e) => setEditValues(v => ({ ...v, time: e.target.value }))}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <select
+                                value={editValues.status}
+                                className={SELECT_CLASS}
+                                onChange={(e) => setEditValues(v => ({ ...v, status: e.target.value }))}
+                              >
+                                {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                              </select>
+                            </TableCell>
+                            <TableCell className="text-right whitespace-nowrap">
+                              <div className="flex justify-end gap-1.5">
+                                <Button size="sm" disabled={saving} onClick={() => saveEdit(r.resultId)}>
+                                  {saving ? 'Saving...' : 'Save'}
+                                </Button>
+                                <Button size="sm" variant="outline" disabled={saving} onClick={cancelEdit}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      return (
+                        <TableRow
+                          key={r.resultId}
+                          className={cn(idx % 2 === 1 && 'bg-muted/20', isDnf && 'opacity-70')}
+                        >
+                          <TableCell className="text-right font-bold tabular-nums text-primary">
+                            {r.computedPlace ?? '—'}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{r.computedGenderPlace ?? '—'}</TableCell>
+                          <TableCell className="font-medium text-foreground">
+                            <Link to={`/runners/${r.runnerId}`} className="hover:text-primary">{r.runnerName}</Link>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{r.age ?? r.ageCategory ?? '—'}</TableCell>
+                          <TableCell>{genderLabel(r.gender)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm tabular-nums">{formatTime(r.time)}</TableCell>
+                          <TableCell><StatusBadge status={status} /></TableCell>
+                          {(canEdit || canDelete) && (
+                            <TableCell className="text-right whitespace-nowrap">
+                              <div className="flex justify-end gap-1.5">
+                                {canEdit && (
+                                  <Button size="sm" variant="outline" onClick={() => startEdit(r)}>
+                                    Edit
+                                  </Button>
+                                )}
+                                {canDelete && (
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    disabled={deletingId === r.resultId}
+                                    onClick={() => setDeleteTarget(r)}
+                                  >
+                                    {deletingId === r.resultId ? 'Deleting...' : 'Delete'}
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value={AGE_GROUP_TAB}>
+            <div className="mb-4 flex flex-wrap items-center gap-4">
+              <div className="inline-flex overflow-hidden rounded-lg border border-border">
+                {ageGroupGenders.map((g, i) => (
+                  <Button
+                    key={g}
+                    type="button"
+                    size="sm"
+                    variant={ageGroupGender === g ? 'default' : 'ghost'}
+                    className={cn('rounded-none', i > 0 && 'border-l border-border')}
+                    onClick={() => setAgeGroupGender(g)}
+                  >
+                    {g}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Age Group:</span>
+                <Select value={ageGroupCategory} onValueChange={setAgeGroupCategory}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue>{(value) => value}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AGE_CATEGORIES.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <span className="text-sm text-muted-foreground">{ageGroupResults.length} shown</span>
+            </div>
+
+            {ageGroupResults.length === 0 ? (
+              <div className="rounded-xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+                No {ageGroupGender} {ageGroupCategory} results for this race.
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-border">
+                <div className="max-h-[70vh] overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
+                          Age Group Place
+                        </TableHead>
+                        <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
+                          Name
+                        </TableHead>
+                        <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
+                          Age
+                        </TableHead>
+                        <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-right text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
+                          Time
+                        </TableHead>
+                        <TableHead className="sticky top-0 z-10 h-9 bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black">
+                          Status
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ageGroupResults.map((r, idx) => {
+                        const status = toStatusLabel(r.status);
+                        const isDnf = status !== 'Finished';
+                        return (
+                          <TableRow
+                            key={r.resultId}
+                            className={cn(idx % 2 === 1 && 'bg-muted/20', isDnf && 'opacity-70')}
+                          >
+                            <TableCell className="text-right font-bold tabular-nums text-primary">
+                              {r.computedAgeGroupPlace ?? '—'}
+                            </TableCell>
+                            <TableCell className="font-medium text-foreground">
+                              <Link to={`/runners/${r.runnerId}`} className="hover:text-primary">{r.runnerName}</Link>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{r.age ?? '—'}</TableCell>
+                            <TableCell className="text-right font-mono text-sm tabular-nums">{formatTime(r.time)}</TableCell>
+                            <TableCell><StatusBadge status={status} /></TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
 
         <div className="mt-6 flex flex-wrap gap-6 border-t border-border pt-4 text-sm">
           <Link to="/" className="text-muted-foreground hover:text-foreground">← Home</Link>

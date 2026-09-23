@@ -95,7 +95,8 @@ public static class GrandPrixConstants
         new AgeCategory { Name = "50-59", MinAge = 50, MaxAge = 59 },
         new AgeCategory { Name = "60-69", MinAge = 60, MaxAge = 69 },
         new AgeCategory { Name = "70-79", MinAge = 70, MaxAge = 79 },
-        new AgeCategory { Name = "80-89", MinAge = 80, MaxAge = 89 }
+        new AgeCategory { Name = "80-89", MinAge = 80, MaxAge = 89 },
+        new AgeCategory { Name = "90+", MinAge = 90, MaxAge = 999 }
     };
 
     /// <summary>
