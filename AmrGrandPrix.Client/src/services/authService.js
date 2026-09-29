@@ -155,6 +155,22 @@ export const forgotPassword = async (email) => {
 };
 
 /**
+ * Update the current user's profile
+ */
+export const updateProfile = async (profileData) => {
+  const data = await makeRequest(`${API_URL}/profile`, {
+    method: 'PUT',
+    body: JSON.stringify(profileData),
+  });
+
+  if (data) {
+    tokenService.setUser(data);
+  }
+
+  return data;
+};
+
+/**
  * Reset password with token
  */
 export const resetPassword = async (resetData) => {
@@ -164,6 +180,18 @@ export const resetPassword = async (resetData) => {
     skipAuth: true,
   });
 
+  return data;
+};
+
+/**
+ * Fetch the current user's up-to-date profile from the server (e.g. after an action like a
+ * claim that changes server-side state the cached user object doesn't reflect yet).
+ */
+export const fetchCurrentUser = async () => {
+  const data = await makeRequest(`${API_URL}/me`, { method: 'GET' });
+  if (data) {
+    tokenService.setUser(data);
+  }
   return data;
 };
 
@@ -198,6 +226,8 @@ export default {
   resendConfirmation,
   forgotPassword,
   resetPassword,
+  updateProfile,
   getCurrentUser,
+  fetchCurrentUser,
   isAuthenticated,
 };

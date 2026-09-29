@@ -41,10 +41,13 @@ public class RaceResultDetailDto : RaceResultDto
 public class UploadBatchDto
 {
     public Guid UploadBatchId { get; set; }
-    public Guid RaceId { get; set; }
+    /// <summary>Null for a pending multi-variant upload not yet saved to any race.</summary>
+    public Guid? RaceId { get; set; }
     public string RaceName { get; set; } = string.Empty;
     public DateOnly RaceDate { get; set; }
     public bool IsGrandPrixRace { get; set; }
+    public Guid RaceSeriesId { get; set; }
+    public string RaceSeriesName { get; set; } = string.Empty;
     public string FileName { get; set; } = string.Empty;
     public FileType FileType { get; set; }
     public int RecordsUploaded { get; set; }

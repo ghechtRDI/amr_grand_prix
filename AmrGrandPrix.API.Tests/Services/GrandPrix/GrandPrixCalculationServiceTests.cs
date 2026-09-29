@@ -1,5 +1,6 @@
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
+using AmrGrandPrix.API.Tests.Infrastructure;
 using AmrGrandPrix.API.Services.GrandPrix;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -163,8 +164,8 @@ public class GrandPrixCalculationServiceTests : IDisposable
     [InlineData(80, "80-89")]
     [InlineData(85, "80-89")]
     [InlineData(89, "80-89")]
-    [InlineData(90, "80-89")]
-    [InlineData(100, "80-89")]
+    [InlineData(90, "90+")]
+    [InlineData(100, "90+")]
     public void DetermineAgeCategory_ShouldReturnCorrectCategory(int age, string expectedCategory)
     {
         // Act
@@ -184,6 +185,8 @@ public class GrandPrixCalculationServiceTests : IDisposable
         _service.DetermineAgeCategory(30).Should().Be("30-39");
         _service.DetermineAgeCategory(39).Should().Be("30-39");
         _service.DetermineAgeCategory(40).Should().Be("40-49");
+        _service.DetermineAgeCategory(89).Should().Be("80-89");
+        _service.DetermineAgeCategory(90).Should().Be("90+");
     }
 
     #endregion
@@ -204,13 +207,45 @@ public class GrandPrixCalculationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CalculateRacePointsAsync_RaceNoLongerGrandPrix_RemovesExistingPoints()
+    {
+        // e.g. a snowy Knoya year where the GP moves from the Full Monty to the Dome
+        var race = new Race
+        {
+            RaceId = Guid.NewGuid(),
+            RaceVariant = TestData.Variant("Knoya", "Full Monty"),
+            Date = new DateOnly(2024, 5, 22),
+            Year = 2024,
+            IsGrandPrixRace = true
+        };
+        var runner = CreateTestRunner("Test", "Runner", Gender.Male);
+        await _context.Races.AddAsync(race);
+        await _context.Runners.AddAsync(runner);
+        var result = new RaceResult
+        {
+            ResultId = Guid.NewGuid(), RaceId = race.RaceId, RunnerId = runner.RunnerId, Place = 1,
+            Time = TimeSpan.FromMinutes(60), Age = 35, AgeCategory = "30-39", Gender = Gender.Male,
+            Status = ResultStatus.Finished, UploadBatchId = Guid.NewGuid()
+        };
+        await _context.RaceResults.AddAsync(result);
+        await _context.SaveChangesAsync();
+        (await _service.CalculateRacePointsAsync(race.RaceId)).Should().BeGreaterThan(0);
+
+        race.IsGrandPrixRace = false;
+        await _context.SaveChangesAsync();
+        await _service.CalculateRacePointsAsync(race.RaceId);
+
+        (await _context.GrandPrixPoints.AnyAsync(p => p.RaceId == race.RaceId)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task CalculateRacePointsAsync_ShouldReturnZero_ForNonGrandPrixRace()
     {
         // Arrange
         var race = new Race
         {
             RaceId = Guid.NewGuid(),
-            Name = "Regular Race",
+            RaceVariant = TestData.Variant("Regular Race"),
             Date = new DateOnly(2024, 6, 1),
             Year = 2024,
             IsGrandPrixRace = false
@@ -697,7 +732,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
             var race = new Race
             {
                 RaceId = Guid.NewGuid(),
-                Name = $"Race {i + 1}",
+                RaceVariant = TestData.Variant($"Race {i + 1}"),
                 Date = new DateOnly(year, i + 1, 1),
                 Year = year,
                 IsGrandPrixRace = true
@@ -750,7 +785,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
             var race = new Race
             {
                 RaceId = Guid.NewGuid(),
-                Name = $"Race {i + 1}",
+                RaceVariant = TestData.Variant($"Race {i + 1}"),
                 Date = new DateOnly(year, i + 1, 1),
                 Year = year,
                 IsGrandPrixRace = true
@@ -803,7 +838,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
             var race = new Race
             {
                 RaceId = Guid.NewGuid(),
-                Name = $"Race {i + 1}",
+                RaceVariant = TestData.Variant($"Race {i + 1}"),
                 Date = new DateOnly(year, i + 1, 1),
                 Year = year,
                 IsGrandPrixRace = true
@@ -828,7 +863,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
             var race = new Race
             {
                 RaceId = Guid.NewGuid(),
-                Name = $"Race B{i + 1}",
+                RaceVariant = TestData.Variant($"Race B{i + 1}"),
                 Date = new DateOnly(year, i + 1, 15),
                 Year = year,
                 IsGrandPrixRace = true
@@ -875,7 +910,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
         var race = new Race
         {
             RaceId = Guid.NewGuid(),
-            Name = "Test Race",
+            RaceVariant = TestData.Variant("Test Race"),
             Date = new DateOnly(year, 1, 1),
             Year = year,
             IsGrandPrixRace = true
@@ -1106,8 +1141,8 @@ public class GrandPrixCalculationServiceTests : IDisposable
         await _context.Runners.AddAsync(runner);
         await _context.SaveChangesAsync();
 
-        var race1 = new Race { RaceId = Guid.NewGuid(), Name = "Race 1", Date = new DateOnly(year, 1, 1), Year = year, IsGrandPrixRace = true };
-        var race2 = new Race { RaceId = Guid.NewGuid(), Name = "Race 2", Date = new DateOnly(year, 2, 1), Year = year, IsGrandPrixRace = true };
+        var race1 = new Race { RaceId = Guid.NewGuid(), RaceVariant = TestData.Variant("Race 1"), Date = new DateOnly(year, 1, 1), Year = year, IsGrandPrixRace = true };
+        var race2 = new Race { RaceId = Guid.NewGuid(), RaceVariant = TestData.Variant("Race 2"), Date = new DateOnly(year, 2, 1), Year = year, IsGrandPrixRace = true };
         await _context.Races.AddRangeAsync(race1, race2);
 
         await _context.GrandPrixPoints.AddRangeAsync(
@@ -1212,7 +1247,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
         return new Race
         {
             RaceId = Guid.NewGuid(),
-            Name = "Test Race",
+            RaceVariant = TestData.Variant("Test Race"),
             Date = new DateOnly(year, 6, 1),
             Year = year,
             IsGrandPrixRace = isGrandPrix,
@@ -1254,7 +1289,7 @@ public class GrandPrixCalculationServiceTests : IDisposable
         return new Race
         {
             RaceId = Guid.NewGuid(),
-            Name = $"Race {month}",
+            RaceVariant = TestData.Variant($"Race {month}"),
             Date = new DateOnly(year, month, 1),
             Year = year,
             IsGrandPrixRace = true

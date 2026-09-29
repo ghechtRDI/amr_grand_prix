@@ -32,6 +32,12 @@ public class AnthropicLlmProvider : ILlmProvider
         - If neither an age nor an age group is present, leave both "age" and "age_category" null.
         - status must be one of: Finished, DNF, DNS, DQ. Default to "Finished".
         - Preserve time strings exactly (e.g. "1:23:45", "23:45"). Use null for DNF/DNS/DQ rows.
+        - These are Alaska mountain/trail races; even the longest events almost never take more
+          than about 10 hours. Preserve the source time's field count exactly — a two-field time
+          like "23:45" is MM:SS, do NOT reformat it into a three-field H:MM:SS by inserting a
+          fabricated ":00" seconds or shifting digits. Only output three fields (H:MM:SS) when the
+          source itself clearly shows three fields. If your reading of a time would imply a finish
+          over ~10 hours, re-check the source text for a simpler MM:SS reading before outputting it.
         - If a field is absent from the source data set it to null.
         - Annotations on times (*, #, CR, WR, etc.) belong in the notes field, not time_string.
         - Do not invent data. If something is unclear, use null.
@@ -101,9 +107,9 @@ public class AnthropicLlmProvider : ILlmProvider
         _logger = logger;
     }
 
-    public async Task<LlmProviderResult> ExtractAsync(string text, string fileName, CancellationToken ct = default)
+    public async Task<LlmProviderResult> ExtractAsync(string text, string fileName, IReadOnlyList<string>? knownVariants = null, bool onlyTheseVariants = false, CancellationToken ct = default)
     {
-        var userContent = $"filename: {fileName}\n---\n{text}";
+        var userContent = $"{KnownVariantsHint.BuildPrefix(knownVariants, onlyTheseVariants)}filename: {fileName}\n---\n{text}";
 
         var body = new
         {

@@ -5,91 +5,69 @@
 
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import './auth.css';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Captcha } from './Captcha';
+
+const CAPTCHA_REQUIRED = !!import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 export const RegisterForm = () => {
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    confirmPassword: '',
-    firstName: '',
-    lastName: '',
-  });
-  const [errors, setErrors] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [registerError, setRegisterError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState('');
 
-  const { register } = useAuth();
+  const { register: registerUser } = useAuth();
   const navigate = useNavigate();
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value,
-    }));
-    // Clear error for this field
-    if (errors[name]) {
-      setErrors(prev => ({ ...prev, [name]: '' }));
-    }
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    defaultValues: {
+      email: '',
+      password: '',
+      confirmPassword: '',
+      firstName: '',
+      lastName: '',
+      preferredName: '',
+      hometown: '',
+      dateOfBirth: '',
+      alternateName1: '',
+      alternateName2: '',
+      alternateName3: '',
+    },
+  });
+
+  const onSubmit = async (data) => {
     setRegisterError('');
-  };
 
-  const validate = () => {
-    const newErrors = {};
+    const alternateNames = [data.alternateName1, data.alternateName2, data.alternateName3]
+      .map((name) => name?.trim())
+      .filter(Boolean);
 
-    // Email validation
-    if (!formData.email) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Email is invalid';
-    }
-
-    // Password validation
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
-    } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
-    } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/.test(formData.password)) {
-      newErrors.password = 'Password must contain uppercase, lowercase, number, and special character';
-    }
-
-    // Confirm password validation
-    if (!formData.confirmPassword) {
-      newErrors.confirmPassword = 'Please confirm your password';
-    } else if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match';
-    }
-
-    // First name validation (optional but if provided, must be valid)
-    if (formData.firstName && formData.firstName.length > 50) {
-      newErrors.firstName = 'First name is too long';
-    }
-
-    // Last name validation (optional but if provided, must be valid)
-    if (formData.lastName && formData.lastName.length > 50) {
-      newErrors.lastName = 'Last name is too long';
-    }
-
-    return newErrors;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    const newErrors = validate();
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
-
-    setIsSubmitting(true);
-    setRegisterError('');
+    const payload = {
+      email: data.email,
+      password: data.password,
+      confirmPassword: data.confirmPassword,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      preferredName: data.preferredName || null,
+      hometown: data.hometown || null,
+      dateOfBirth: data.dateOfBirth || null,
+      alternateNames,
+      captchaToken: captchaToken || 'no-captcha-configured',
+    };
 
     try {
-      const result = await register(formData);
+      const result = await registerUser(payload);
 
       if (result.success) {
         setSuccess(true);
@@ -102,132 +80,221 @@ export const RegisterForm = () => {
       }
     } catch {
       setRegisterError('An error occurred. Please try again.');
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
   if (success) {
     return (
-      <div className="auth-container">
-        <div className="auth-card">
-          <h1>Registration Successful!</h1>
-          <div className="success-message">
-            <p>Your account has been created successfully.</p>
-            <p>Please check your email to confirm your account before logging in.</p>
-            <p>Redirecting to login page...</p>
-          </div>
-        </div>
+      <div className="flex min-h-svh items-center justify-center bg-background px-4 py-12">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Registration Successful!</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Alert variant="success">
+              <CheckCircle2 />
+              <AlertDescription className="text-success">
+                <p>Your account has been created successfully.</p>
+                <p>Please check your email to confirm your account before logging in.</p>
+                <p>Redirecting to login page...</p>
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        <h1>Register</h1>
-        <p className="auth-subtitle">Create a new account</p>
+    <div className="flex min-h-svh items-center justify-center bg-background px-4 py-12">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl">Register</CardTitle>
+          <CardDescription>Create a new account</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-5">
+          {registerError && (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertDescription>{registerError}</AlertDescription>
+            </Alert>
+          )}
 
-        {registerError && (
-          <div className="error-message">
-            {registerError}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="auth-form">
-          <div className="form-group">
-            <label htmlFor="email">Email *</label>
-            <input
-              type="email"
-              id="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              className={errors.email ? 'error' : ''}
-              disabled={isSubmitting}
-              required
-            />
-            {errors.email && <span className="field-error">{errors.email}</span>}
-          </div>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="firstName">First Name</label>
-              <input
-                type="text"
-                id="firstName"
-                name="firstName"
-                value={formData.firstName}
-                onChange={handleChange}
-                className={errors.firstName ? 'error' : ''}
+          <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="email">Email *</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                aria-invalid={!!errors.email}
                 disabled={isSubmitting}
+                {...register('email', {
+                  required: 'Email is required',
+                  pattern: { value: /\S+@\S+\.\S+/, message: 'Email is invalid' },
+                })}
               />
-              {errors.firstName && <span className="field-error">{errors.firstName}</span>}
+              {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
             </div>
 
-            <div className="form-group">
-              <label htmlFor="lastName">Last Name</label>
-              <input
-                type="text"
-                id="lastName"
-                name="lastName"
-                value={formData.lastName}
-                onChange={handleChange}
-                className={errors.lastName ? 'error' : ''}
-                disabled={isSubmitting}
-              />
-              {errors.lastName && <span className="field-error">{errors.lastName}</span>}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="firstName">First Name</Label>
+                <Input
+                  id="firstName"
+                  type="text"
+                  autoComplete="given-name"
+                  aria-invalid={!!errors.firstName}
+                  disabled={isSubmitting}
+                  {...register('firstName', {
+                    maxLength: { value: 50, message: 'First name is too long' },
+                  })}
+                />
+                {errors.firstName && <p className="text-sm text-destructive">{errors.firstName.message}</p>}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="lastName">Last Name</Label>
+                <Input
+                  id="lastName"
+                  type="text"
+                  autoComplete="family-name"
+                  aria-invalid={!!errors.lastName}
+                  disabled={isSubmitting}
+                  {...register('lastName', {
+                    maxLength: { value: 50, message: 'Last name is too long' },
+                  })}
+                />
+                {errors.lastName && <p className="text-sm text-destructive">{errors.lastName.message}</p>}
+              </div>
             </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="preferredName">Preferred Name</Label>
+              <Input
+                id="preferredName"
+                type="text"
+                autoComplete="nickname"
+                disabled={isSubmitting}
+                {...register('preferredName', {
+                  maxLength: { value: 100, message: 'Preferred name is too long' },
+                })}
+              />
+              {errors.preferredName && (
+                <p className="text-sm text-destructive">{errors.preferredName.message}</p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="dateOfBirth">Date of Birth</Label>
+                <Input
+                  id="dateOfBirth"
+                  type="date"
+                  disabled={isSubmitting}
+                  {...register('dateOfBirth')}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="hometown">Hometown</Label>
+                <Input
+                  id="hometown"
+                  type="text"
+                  autoComplete="address-level2"
+                  disabled={isSubmitting}
+                  {...register('hometown', {
+                    maxLength: { value: 200, message: 'Hometown is too long' },
+                  })}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label>Alternate names</Label>
+              <p className="text-xs text-muted-foreground">
+                Raced under a different name (maiden name, a nickname, a different spelling)? List
+                up to 3 so we can match your past results.
+              </p>
+              {[1, 2, 3].map((n) => (
+                <Input
+                  key={n}
+                  type="text"
+                  placeholder={`Alternate name ${n}`}
+                  disabled={isSubmitting}
+                  {...register(`alternateName${n}`, {
+                    maxLength: { value: 200, message: 'Name is too long' },
+                  })}
+                />
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="password">Password *</Label>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="new-password"
+                aria-invalid={!!errors.password}
+                disabled={isSubmitting}
+                {...register('password', {
+                  required: 'Password is required',
+                  minLength: { value: 8, message: 'Password must be at least 8 characters' },
+                  pattern: {
+                    value: /(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/,
+                    message: 'Password must contain uppercase, lowercase, number, and special character',
+                  },
+                })}
+              />
+              {errors.password ? (
+                <p className="text-sm text-destructive">{errors.password.message}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Must be at least 8 characters with uppercase, lowercase, number, and special character
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="confirmPassword">Confirm Password *</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                autoComplete="new-password"
+                aria-invalid={!!errors.confirmPassword}
+                disabled={isSubmitting}
+                {...register('confirmPassword', {
+                  required: 'Please confirm your password',
+                  validate: (value) => value === watch('password') || 'Passwords do not match',
+                })}
+              />
+              {errors.confirmPassword && (
+                <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>
+              )}
+            </div>
+
+            <Captcha onVerify={setCaptchaToken} onExpire={() => setCaptchaToken('')} />
+
+            <Button
+              type="submit"
+              className="mt-2 w-full"
+              size="lg"
+              disabled={isSubmitting || (CAPTCHA_REQUIRED && !captchaToken)}
+            >
+              {isSubmitting ? 'Registering...' : 'Register'}
+            </Button>
+          </form>
+
+          <div className="text-center text-sm text-muted-foreground">
+            <p>
+              Already have an account?{' '}
+              <Link to="/login" className="font-medium text-primary hover:underline">
+                Login
+              </Link>
+            </p>
           </div>
-
-          <div className="form-group">
-            <label htmlFor="password">Password *</label>
-            <input
-              type="password"
-              id="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              className={errors.password ? 'error' : ''}
-              disabled={isSubmitting}
-              required
-            />
-            {errors.password && <span className="field-error">{errors.password}</span>}
-            <small className="field-hint">
-              Must be at least 8 characters with uppercase, lowercase, number, and special character
-            </small>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="confirmPassword">Confirm Password *</label>
-            <input
-              type="password"
-              id="confirmPassword"
-              name="confirmPassword"
-              value={formData.confirmPassword}
-              onChange={handleChange}
-              className={errors.confirmPassword ? 'error' : ''}
-              disabled={isSubmitting}
-              required
-            />
-            {errors.confirmPassword && <span className="field-error">{errors.confirmPassword}</span>}
-          </div>
-
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Registering...' : 'Register'}
-          </button>
-        </form>
-
-        <div className="auth-links">
-          <p>
-            Already have an account? <Link to="/login">Login</Link>
-          </p>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

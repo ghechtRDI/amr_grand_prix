@@ -45,8 +45,7 @@ public class RunnerMatchingService : IRunnerMatchingService
 
         foreach (var runner in allRunners)
         {
-            var fullName = $"{runner.FirstName} {runner.LastName}";
-            var similarity = CalculateNameSimilarity(name, fullName);
+            var similarity = CalculateBestNameSimilarity(name, runner);
 
             // Only consider matches above minimum similarity threshold
             if (similarity < MinimumNameSimilarity)
@@ -152,6 +151,127 @@ public class RunnerMatchingService : IRunnerMatchingService
         }
 
         return resultRows;
+    }
+
+    /// <summary>
+    /// Compares <paramref name="candidateName"/> against the runner's legal full name first.
+    /// Only if that isn't a 100% match does it also try the runner's preferred name and each
+    /// alternate name, returning the best score found across all of them.
+    /// </summary>
+    private double CalculateBestNameSimilarity(string candidateName, Runner runner)
+    {
+        var legalNameSimilarity = CalculateNameSimilarity(candidateName, runner.FullName);
+        if (legalNameSimilarity >= 1.0)
+            return legalNameSimilarity;
+
+        var best = legalNameSimilarity;
+
+        if (!string.IsNullOrWhiteSpace(runner.PreferredName))
+            best = Math.Max(best, CalculateNameSimilarity(candidateName, runner.PreferredName));
+
+        foreach (var alternateName in runner.AlternateNames)
+        {
+            if (string.IsNullOrWhiteSpace(alternateName))
+                continue;
+            best = Math.Max(best, CalculateNameSimilarity(candidateName, alternateName));
+        }
+
+        return best;
+    }
+
+    public async Task<List<RunnerMatch>> FindMatchesForProfileAsync(ApplicationUser user)
+    {
+        if (string.IsNullOrWhiteSpace(user.FirstName) || string.IsNullOrWhiteSpace(user.LastName))
+            return new List<RunnerMatch>();
+
+        var claimedRunnerIds = await _context.Users
+            .Where(u => u.RunnerId != null)
+            .Select(u => u.RunnerId!.Value)
+            .ToListAsync();
+
+        var excludedRunnerIds = await _context.RunnerClaims
+            .Where(c => c.ApplicationUserId == user.Id &&
+                        (c.Status == ClaimStatus.Pending || c.Status == ClaimStatus.Approved))
+            .Select(c => c.RunnerId)
+            .ToListAsync();
+
+        var candidateRunners = await _context.Runners
+            .Where(r => !claimedRunnerIds.Contains(r.RunnerId) && !excludedRunnerIds.Contains(r.RunnerId))
+            .ToListAsync();
+
+        var matches = new List<RunnerMatch>();
+
+        foreach (var runner in candidateRunners)
+        {
+            var similarity = CalculateBestProfileNameSimilarity(user, runner);
+            if (similarity < MinimumNameSimilarity)
+                continue;
+
+            // Race results essentially never carry a verified DOB, so a runner's DateOfBirth is
+            // rarely set. EstimatedBirthYear (derived from a reported age) is the realistic
+            // signal here, so a birth-year match counts the same as an exact verified DOB match.
+            var dobMatch = user.DateOfBirth.HasValue && runner.DateOfBirth.HasValue &&
+                           user.DateOfBirth.Value == runner.DateOfBirth.Value;
+
+            var birthYearMatch = !dobMatch && user.DateOfBirth.HasValue && runner.EstimatedBirthYear.HasValue &&
+                                  user.DateOfBirth.Value.Year == runner.EstimatedBirthYear.Value;
+
+            var yearOfBirthMatch = dobMatch || birthYearMatch;
+
+            // The user isn't required to set a gender on their profile, so an unset gender
+            // doesn't penalize the match — it just means this signal has nothing to add.
+            var genderMatch = !user.Gender.HasValue || runner.Gender == user.Gender.Value;
+
+            var runnerAge = AgeCalculator.GetRunnerAge(runner, DateOnly.FromDateTime(DateTime.Today));
+            var runnerAgeCategory = runnerAge.HasValue ? GrandPrixConstants.GetAgeCategory(runnerAge.Value) : null;
+
+            matches.Add(new RunnerMatch
+            {
+                RunnerId = runner.RunnerId,
+                FirstName = runner.FirstName,
+                LastName = runner.LastName,
+                Age = runnerAge,
+                HasVerifiedDateOfBirth = runner.DateOfBirth.HasValue,
+                AgeCategory = runnerAgeCategory,
+                Gender = runner.Gender,
+                // Name (60%) is the primary signal; a year-of-birth match — verified DOB or,
+                // failing that, estimated birth year — (30%) and a gender match (10%) corroborate it.
+                Confidence = Math.Min((similarity * 0.60) + (yearOfBirthMatch ? 0.30 : 0.0) + (genderMatch ? 0.10 : 0.0), 1.0),
+                NameMatch = similarity >= 0.90,
+                AgeMatch = yearOfBirthMatch,
+                GenderMatch = genderMatch
+            });
+        }
+
+        return matches
+            .OrderByDescending(m => m.Confidence)
+            .ThenByDescending(m => m.NameMatch)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Compares the user's legal name against the runner first; only if that isn't a 100% match
+    /// does it also try the user's preferred name and each alternate name (each itself checked
+    /// against the runner's legal, preferred, and alternate names via <see cref="CalculateBestNameSimilarity"/>).
+    /// </summary>
+    private double CalculateBestProfileNameSimilarity(ApplicationUser user, Runner runner)
+    {
+        var legalName = $"{user.FirstName} {user.LastName}".Trim();
+        var best = CalculateBestNameSimilarity(legalName, runner);
+        if (best >= 1.0)
+            return best;
+
+        if (!string.IsNullOrWhiteSpace(user.PreferredName))
+            best = Math.Max(best, CalculateBestNameSimilarity(user.PreferredName, runner));
+
+        foreach (var alternateName in user.AlternateNames)
+        {
+            if (string.IsNullOrWhiteSpace(alternateName))
+                continue;
+            best = Math.Max(best, CalculateBestNameSimilarity(alternateName, runner));
+        }
+
+        return best;
     }
 
     public double CalculateNameSimilarity(string name1, string name2)

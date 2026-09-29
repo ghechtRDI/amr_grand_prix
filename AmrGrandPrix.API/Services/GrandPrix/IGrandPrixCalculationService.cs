@@ -47,7 +47,7 @@ public interface IGrandPrixCalculationService
     /// Get standings for a specific division and year
     /// </summary>
     /// <param name="year">Year</param>
-    /// <param name="division">Division (OpenMale, OpenFemale, AgeMale, AgeFemale)</param>
+    /// <param name="division">Division (OpenMale, OpenFemale, OpenNonbinary, AgeMale, AgeFemale, AgeNonbinary)</param>
     /// <param name="ageCategory">Age category (required for Age divisions)</param>
     /// <returns>Ordered list of standings</returns>
     Task<List<GrandPrixStanding>> GetStandingsAsync(int year, Division division, string? ageCategory = null);
@@ -66,4 +66,10 @@ public interface IGrandPrixCalculationService
     /// <param name="raceId">Race that was modified</param>
     /// <returns>True if successful</returns>
     Task<bool> RecalculateAfterResultsChangeAsync(Guid raceId);
+
+    /// <summary>
+    /// Whether the given year's Grand Prix has been finalized. While it is, points and standings
+    /// for that year can't be recalculated.
+    /// </summary>
+    Task<bool> IsSeasonFinalizedAsync(int year);
 }

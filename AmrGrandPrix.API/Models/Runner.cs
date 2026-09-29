@@ -35,6 +35,16 @@ public class Runner
     [EmailAddress]
     public string? Email { get; set; }
 
+    /// <summary>
+    /// Denormalized from the linked <see cref="ApplicationUser"/>'s profile when a claim is
+    /// approved (or set directly by an admin for runners with no linked account). Used as
+    /// additional name candidates by <see cref="Services.ResultsProcessing.RunnerMatchingService"/>.
+    /// </summary>
+    [MaxLength(100)]
+    public string? PreferredName { get; set; }
+
+    public List<string> AlternateNames { get; set; } = new();
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

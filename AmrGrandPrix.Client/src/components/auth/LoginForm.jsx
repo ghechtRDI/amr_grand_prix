@@ -5,64 +5,32 @@
 
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { AlertCircle } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import './auth.css';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export const LoginForm = () => {
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-  });
-  const [errors, setErrors] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginError, setLoginError] = useState('');
 
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value,
-    }));
-    // Clear error for this field
-    if (errors[name]) {
-      setErrors(prev => ({ ...prev, [name]: '' }));
-    }
-    setLoginError('');
-  };
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm({ defaultValues: { email: '', password: '' } });
 
-  const validate = () => {
-    const newErrors = {};
-
-    if (!formData.email) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Email is invalid';
-    }
-
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
-    }
-
-    return newErrors;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    const newErrors = validate();
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
-
-    setIsSubmitting(true);
+  const onSubmit = async (data) => {
     setLoginError('');
 
     try {
-      const result = await login(formData);
+      const result = await login(data);
 
       if (result.success) {
         navigate('/', { replace: true });
@@ -71,70 +39,72 @@ export const LoginForm = () => {
       }
     } catch {
       setLoginError('An error occurred. Please try again.');
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        <h1>Login</h1>
-        <p className="auth-subtitle">Sign in to your account</p>
+    <div className="flex min-h-svh items-center justify-center bg-background px-4 py-12">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl">Login</CardTitle>
+          <CardDescription>Sign in to your account</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-5">
+          {loginError && (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertDescription>{loginError}</AlertDescription>
+            </Alert>
+          )}
 
-        {loginError && (
-          <div className="error-message">
-            {loginError}
+          <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                aria-invalid={!!errors.email}
+                disabled={isSubmitting}
+                {...register('email', {
+                  required: 'Email is required',
+                  pattern: { value: /\S+@\S+\.\S+/, message: 'Email is invalid' },
+                })}
+              />
+              {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                aria-invalid={!!errors.password}
+                disabled={isSubmitting}
+                {...register('password', { required: 'Password is required' })}
+              />
+              {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
+            </div>
+
+            <Button type="submit" className="mt-2 w-full" size="lg" disabled={isSubmitting}>
+              {isSubmitting ? 'Logging in...' : 'Login'}
+            </Button>
+          </form>
+
+          <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
+            <p>
+              Don&apos;t have an account?{' '}
+              <Link to="/register" className="font-medium text-primary hover:underline">
+                Register
+              </Link>
+            </p>
+            <Link to="/forgot-password" className="font-medium text-primary hover:underline">
+              Forgot password?
+            </Link>
           </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="auth-form">
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              type="email"
-              id="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              className={errors.email ? 'error' : ''}
-              disabled={isSubmitting}
-            />
-            {errors.email && <span className="field-error">{errors.email}</span>}
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <input
-              type="password"
-              id="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              className={errors.password ? 'error' : ''}
-              disabled={isSubmitting}
-            />
-            {errors.password && <span className="field-error">{errors.password}</span>}
-          </div>
-
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Logging in...' : 'Login'}
-          </button>
-        </form>
-
-        <div className="auth-links">
-          <p>
-            Don't have an account? <Link to="/register">Register</Link>
-          </p>
-          <p>
-            <Link to="/forgot-password">Forgot password?</Link>
-          </p>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

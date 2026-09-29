@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>amr_grand_prix_client</title>
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('amr-theme');
+          var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (e) {
+          // localStorage unavailable - default to light, ThemeProvider will reconcile
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

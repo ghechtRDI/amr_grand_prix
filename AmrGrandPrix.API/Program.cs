@@ -1,11 +1,14 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Services;
+using AmrGrandPrix.API.Services.Captcha;
 using AmrGrandPrix.API.Services.LlmExtraction;
 using AmrGrandPrix.API.Services.LlmExtraction.Providers;
 
@@ -15,6 +18,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.Configure<LlmSettings>(builder.Configuration.GetSection("Llm"));
+builder.Services.Configure<CaptchaSettings>(builder.Configuration.GetSection("Captcha"));
 
 // Add DbContext with PostgreSQL (or InMemory for testing)
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -82,6 +86,27 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 
+// Captcha (Cloudflare Turnstile) verification for public bot-sensitive endpoints
+builder.Services.AddHttpClient<TurnstileCaptchaService>();
+builder.Services.AddScoped<ICaptchaService>(sp => sp.GetRequiredService<TurnstileCaptchaService>());
+
+// Rate limiting for public, bot-sensitive endpoints (registration, result reports),
+// partitioned by remote IP.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("PublicFormSubmission", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0
+            }));
+});
+
 // LLM extraction services
 builder.Services.AddHttpClient<AnthropicLlmProvider>(client =>
     client.Timeout = TimeSpan.FromMinutes(10));
@@ -110,6 +135,10 @@ builder.Services.AddScoped<AmrGrandPrix.API.Services.ResultsProcessing.IRunnerMa
 // Grand Prix calculation service
 builder.Services.AddScoped<AmrGrandPrix.API.Services.GrandPrix.IGrandPrixCalculationService,
                            AmrGrandPrix.API.Services.GrandPrix.GrandPrixCalculationService>();
+
+// Race statistics service (top times, course records)
+builder.Services.AddScoped<AmrGrandPrix.API.Services.RaceStatistics.IRaceStatisticsService,
+                           AmrGrandPrix.API.Services.RaceStatistics.RaceStatisticsService>();
 
 builder.Services.AddOpenApi();
 
@@ -145,6 +174,13 @@ if (!app.Environment.IsEnvironment("Testing"))
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
         var logger      = scope.ServiceProvider.GetRequiredService<ILogger<RoleSeedingService>>();
         await new RoleSeedingService(roleManager, logger).SeedRolesAsync();
+
+        if (app.Environment.IsDevelopment())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var raceLogger = scope.ServiceProvider.GetRequiredService<ILogger<RaceSeedingService>>();
+            await new RaceSeedingService(context, raceLogger).SeedRaceCatalogAsync();
+        }
     }
     catch (Exception ex)
     {
@@ -161,6 +197,7 @@ if (!app.Environment.IsDevelopment())
 
 app.UseRouting();
 app.UseCors("DevPolicy");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapHealthChecks("/health");

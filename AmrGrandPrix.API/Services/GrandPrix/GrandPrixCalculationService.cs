@@ -64,19 +64,25 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
             return 0;
         }
 
-        if (!race.IsGrandPrixRace)
-        {
-            _logger.LogInformation("Race {RaceId} is not a Grand Prix race, skipping points calculation", raceId);
+        if (!await AffectsStandingsAsync(race))
             return 0;
-        }
 
-        // Delete existing points for this race
+        await EnsureSeasonNotFinalizedAsync(race.Year);
+
+        // Delete existing points for this race (also clears stale points if the race was
+        // un-flagged as a Grand Prix race)
         var existingPoints = await _context.GrandPrixPoints
             .Where(p => p.RaceId == raceId)
             .ToListAsync();
 
         _context.GrandPrixPoints.RemoveRange(existingPoints);
         await _context.SaveChangesAsync();
+
+        if (!race.IsGrandPrixRace)
+        {
+            _logger.LogInformation("Race {RaceId} is not a Grand Prix race, skipping points calculation", raceId);
+            return 0;
+        }
 
         // Get finished results only
         var results = race.Results
@@ -86,12 +92,15 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
 
         var pointsCreated = 0;
 
-        // Calculate place within gender
-        var maleResults = results.Where(r => r.Gender == Gender.Male).ToList();
-        var femaleResults = results.Where(r => r.Gender == Gender.Female).ToList();
+        // Calculate place within gender - nonbinary finishers are ranked and scored only
+        // against other nonbinary finishers, as their own division, same as Male/Female.
+        var maleResults      = results.Where(r => r.Gender == Gender.Male).ToList();
+        var femaleResults    = results.Where(r => r.Gender == Gender.Female).ToList();
+        var nonbinaryResults = results.Where(r => r.Gender == Gender.Nonbinary).ToList();
 
         pointsCreated += await CalculateGenderDivisionPoints(race, maleResults, Gender.Male);
         pointsCreated += await CalculateGenderDivisionPoints(race, femaleResults, Gender.Female);
+        pointsCreated += await CalculateGenderDivisionPoints(race, nonbinaryResults, Gender.Nonbinary);
 
         await _context.SaveChangesAsync();
 
@@ -125,7 +134,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
             if (placeInOpenDivision >= 1 && placeInOpenDivision <= 20)
             {
                 var openPoints = CalculateOpenDivisionPoints(placeInOpenDivision, result.IsNewRecord);
-                var openDivision = gender == Gender.Male ? Division.OpenMale : Division.OpenFemale;
+                var openDivision = GrandPrixConstants.GetOpenDivision(gender);
 
                 _context.GrandPrixPoints.Add(new GrandPrixPoints
                 {
@@ -149,7 +158,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
             var ageCategory = GetResultAgeCategory(result);
             if (ageCategory != null)
             {
-                var ageDivision = gender == Gender.Male ? Division.AgeMale : Division.AgeFemale;
+                var ageDivision = GrandPrixConstants.GetAgeDivision(gender);
 
                 // Find place within age category
                 var resultsInCategory = results
@@ -190,6 +199,8 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
     {
         _logger.LogInformation("Updating standings for year {Year}", year);
 
+        await EnsureSeasonNotFinalizedAsync(year);
+
         // Delete existing standings for this year
         var existingStandings = await _context.GrandPrixStandings
             .Where(s => s.Year == year)
@@ -202,6 +213,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         // Calculate standings for each division
         standingsCreated += await CalculateDivisionStandings(year, Division.OpenMale, null);
         standingsCreated += await CalculateDivisionStandings(year, Division.OpenFemale, null);
+        standingsCreated += await CalculateDivisionStandings(year, Division.OpenNonbinary, null);
 
         // Calculate standings for each age category
         var ageCategories = GrandPrixConstants.AgeCategories.Select(c => c.Name);
@@ -210,6 +222,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         {
             standingsCreated += await CalculateDivisionStandings(year, Division.AgeMale, category);
             standingsCreated += await CalculateDivisionStandings(year, Division.AgeFemale, category);
+            standingsCreated += await CalculateDivisionStandings(year, Division.AgeNonbinary, category);
         }
 
         await _context.SaveChangesAsync();
@@ -329,6 +342,10 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
             if (race == null)
                 return false;
 
+            // A race that doesn't count and has no leftover points can't change standings
+            if (!await AffectsStandingsAsync(race))
+                return true;
+
             // Recalculate points for this race
             await CalculateRacePointsAsync(raceId);
 
@@ -337,10 +354,27 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
 
             return true;
         }
+        catch (GrandPrixSeasonFinalizedException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error recalculating after results change for race {RaceId}", raceId);
             return false;
         }
+    }
+
+    public Task<bool> IsSeasonFinalizedAsync(int year) =>
+        _context.GrandPrixSeasons.AnyAsync(s => s.Year == year && s.IsFinalized);
+
+    /// <summary>Whether the race counts toward the Grand Prix or still has points from when it did.</summary>
+    private async Task<bool> AffectsStandingsAsync(Race race) =>
+        race.IsGrandPrixRace || await _context.GrandPrixPoints.AnyAsync(p => p.RaceId == race.RaceId);
+
+    private async Task EnsureSeasonNotFinalizedAsync(int year)
+    {
+        if (await IsSeasonFinalizedAsync(year))
+            throw new GrandPrixSeasonFinalizedException(year);
     }
 }

@@ -11,6 +11,13 @@ public interface IResultsProcessingService
     /// </summary>
     Task<List<ResultRow>> ProcessResultsAsync(List<ExtractedSection> sections);
 
+    /// <summary>
+    /// Links each row whose detected course label matches one of the series' variants (by name or
+    /// alias, case-insensitively) to that variant, rewriting the label to the canonical name.
+    /// Rows with no label, or a label that matches no variant, are left unlinked.
+    /// </summary>
+    void AssignVariants(List<ResultRow> rows, IReadOnlyCollection<RaceVariant> seriesVariants);
+
     /// <summary>Parse a time string into a TimeSpan.</summary>
     TimeSpan? ParseTime(string? timeString);
 

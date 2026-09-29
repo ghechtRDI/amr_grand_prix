@@ -5,7 +5,13 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
+import * as raceService from '../../services/raceService';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { cn, formatDateOnly } from '@/lib/utils';
 
 // Row's courseVariant, normalized the same way DataReviewStep groups rows.
 const groupKeyFor = (row) => (row.courseVariant || '').trim();
@@ -23,6 +29,15 @@ const toResultPayload = (row) => ({
   updateRunnerAge: !!row.updateRunnerAge,
 });
 
+function StatBlock({ label, value, className }) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-center">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={cn('mt-1 text-2xl font-semibold tabular-nums', className)}>{value}</div>
+    </div>
+  );
+}
+
 export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -34,7 +49,10 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
   const reviewedData = wizardData.reviewedData || [];
   const uploadBatchId = wizardData.uploadBatchId;
   const groupRaces = wizardData.groupRaces || {};
-  const primaryGroupKey = wizardData.primaryGroupKey ?? '';
+  // null when Data Review detected multiple course variants - in that case every
+  // group (including whichever one is actually the Step 1 race) was explicitly
+  // resolved via groupRaces, and none is auto-matched to the Step 1 selection.
+  const primaryGroupKey = wizardData.primaryGroupKey ?? null;
 
   // Partition reviewed rows by detected course variant, resolving each group to the
   // race it should be saved against (the Step 1 selection for the primary group, or
@@ -46,24 +64,35 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key).push(row);
     }
-    return Array.from(byKey.entries()).map(([key, rows]) => {
-      const isPrimary = key === primaryGroupKey;
+    return Array.from(byKey.entries()).map(([key, rows], index) => {
+      const isPrimary = primaryGroupKey != null && key === primaryGroupKey;
+      // Whichever group's save call carries the real uploadBatchId (marking the
+      // original UploadBatch row Saved) vs. a sourceUploadBatchId (cloning an audit
+      // row for the others) - independent of which race each group maps to. When
+      // there's a primary group it owns the batch; otherwise the first group does,
+      // arbitrarily, since batch ownership doesn't need to track any particular race.
+      const isBatchOwner = primaryGroupKey != null ? isPrimary : index === 0;
       return {
         key,
         rows,
         raceId: isPrimary ? raceSelection.raceId : groupRaces[key]?.raceId,
+        // Multi-variant upload: this variant's race doesn't exist yet - created on save.
+        pendingRace: isPrimary ? null : groupRaces[key]?.pendingRace || null,
         raceName: isPrimary ? raceSelection.raceName : (groupRaces[key]?.raceName || key),
         isGrandPrixRace: isPrimary ? !!raceSelection.isGrandPrixRace : !!groupRaces[key]?.isGrandPrixRace,
-        uploadBatchId: isPrimary ? uploadBatchId : null,
-        sourceUploadBatchId: isPrimary ? null : uploadBatchId,
+        uploadBatchId: isBatchOwner ? uploadBatchId : null,
+        sourceUploadBatchId: isBatchOwner ? null : uploadBatchId,
       };
     });
   })();
 
+  // A multi-variant upload has no Step 1 race, so it lists its groups even if only one came back.
+  const showGroupSummary = saveGroups.length > 1 || !!raceSelection.includedVariantIds?.length;
+
   // Calculate statistics
   const stats = {
     totalResults: reviewedData.length,
-    newRunners: reviewedData.filter(r => r.isNewRunner).length,
+    newRunners: reviewedData.filter(r => r.matchStatus === 'new-runner').length,
     dnfCount: reviewedData.filter(r => r.status === 'DNF').length,
     dnsCount: reviewedData.filter(r => r.status === 'DNS').length,
     dqCount: reviewedData.filter(r => r.status === 'DQ').length,
@@ -76,13 +105,25 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
 
     const token = tokenService.getAccessToken();
     const results = [];
+    // Pending races created so far, by variant - several groups (e.g. a variant's men and women
+    // sections) can map to the same one.
+    const createdRaces = new Map();
 
     // Save sequentially (not in parallel) so a failure on one course-variant group
     // doesn't race with, or get lost alongside, a concurrent write to another race.
     for (const group of saveGroups) {
       try {
+        let raceId = group.raceId;
+        if (!raceId && group.pendingRace) {
+          const { raceVariantId } = group.pendingRace;
+          if (!createdRaces.has(raceVariantId)) {
+            createdRaces.set(raceVariantId, await raceService.createRace(group.pendingRace));
+          }
+          raceId = createdRaces.get(raceVariantId).raceId;
+        }
+
         const payload = {
-          raceId: group.raceId,
+          raceId,
           uploadBatchId: group.uploadBatchId,
           sourceUploadBatchId: group.sourceUploadBatchId,
           results: group.rows.map(toResultPayload),
@@ -138,124 +179,133 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
     const primaryResult = groupResults.find(r => r.group.key === primaryGroupKey);
 
     return (
-      <div className="wizard-step">
-        <div className="step-header">
-          <h2>Success!</h2>
-          <span className="step-indicator">Step 4 of 4</span>
+      <div>
+        <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+          <h2 className="text-xl font-semibold">Success!</h2>
+          <span className="text-sm text-muted-foreground">Step 4 of 4</span>
         </div>
 
-        <div className="success-message">
-          <div className="success-icon">✓</div>
-          <h3>
+        <div className="flex flex-col items-center gap-4 py-8 text-center">
+          <div className="flex size-16 items-center justify-center rounded-full bg-success/15 text-success">
+            <CheckCircle2 className="size-9" />
+          </div>
+          <h3 className="text-lg font-semibold">
             {groupResults.length > 1 ? 'Results saved for all course variants!' : 'Results saved successfully!'}
           </h3>
         </div>
 
-        {groupResults.map(({ group, success: groupSuccess, result, error: groupError }) => (
-          <div key={group.key || '(primary)'} className="summary-section">
-            <h4>{group.raceName}{group.key ? ` (${group.key})` : ''}</h4>
-            {groupSuccess ? (
-              <>
-                <p>{result.resultsSaved} result(s) saved.{group.isGrandPrixRace && (
-                  <span className="gp-notice"> Grand Prix standings have been updated automatically.</span>
-                )}</p>
-                {result.skippedResults?.length > 0 && (
-                  <div className="summary-notice skipped-results-notice">
-                    <strong>{result.skippedResults.length} result(s) were not saved:</strong>
-                    <ul className="skipped-results-list">
-                      {result.skippedResults.map((row) => (
-                        <li key={row.rowNumber}>
-                          Row {row.rowNumber} — {row.name || '(no name)'}: {row.reason}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleViewResults(result.raceId)}
-                  className="btn-secondary"
-                >
-                  View {group.raceName} Results
-                </button>
-              </>
-            ) : (
-              <div className="error-message">
-                <strong>Error saving this group:</strong> {groupError}
-              </div>
-            )}
-          </div>
-        ))}
+        <div className="flex flex-col gap-6">
+          {groupResults.map(({ group, success: groupSuccess, result, error: groupError }) => (
+            <div key={group.key || '(primary)'} className="rounded-xl border border-border p-5">
+              <h4 className="mb-3 font-semibold text-primary">
+                {group.raceName}{group.key ? ` (${group.key})` : ''}
+              </h4>
+              {groupSuccess ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    {result.resultsSaved} result(s) saved.
+                    {group.isGrandPrixRace && (
+                      <span> Grand Prix standings have been updated automatically.</span>
+                    )}
+                  </p>
+                  {result.skippedResults?.length > 0 && (
+                    <Alert className="mt-4 border-amber-500/30 bg-amber-500/10 text-left text-amber-700 dark:text-amber-400">
+                      <AlertCircle />
+                      <AlertDescription className="text-amber-700 dark:text-amber-400">
+                        <strong>{result.skippedResults.length} result(s) were not saved:</strong>
+                        <ul className="mt-1 list-disc pl-5 text-sm">
+                          {result.skippedResults.map((row) => (
+                            <li key={row.rowNumber}>
+                              Row {row.rowNumber} — {row.name || '(no name)'}: {row.reason}
+                            </li>
+                          ))}
+                        </ul>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-4"
+                    onClick={() => handleViewResults(result.raceId)}
+                  >
+                    View {group.raceName} Results
+                  </Button>
+                </>
+              ) : (
+                <Alert variant="destructive">
+                  <AlertCircle />
+                  <AlertDescription>
+                    <strong>Error saving this group:</strong> {groupError}
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          ))}
+        </div>
 
-        <div className="success-actions">
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
           {primaryResult?.success && (
-            <button
-              type="button"
-              onClick={() => handleViewResults(primaryResult.result.raceId)}
-              className="btn-primary"
-            >
+            <Button type="button" onClick={() => handleViewResults(primaryResult.result.raceId)}>
               View Race Results
-            </button>
+            </Button>
           )}
           {anyGpRace && (
-            <button
-              type="button"
-              onClick={handleViewStandings}
-              className="btn-secondary"
-            >
+            <Button type="button" variant="outline" onClick={handleViewStandings}>
               View GP Standings
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            onClick={() => navigate('/admin/results')}
-            className="btn-secondary"
-          >
+          <Button type="button" variant="outline" onClick={() => navigate('/admin/results')}>
             Upload More Results
-          </button>
+          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="wizard-step">
-      <div className="step-header">
-        <h2>Step 5: Confirmation</h2>
-        <span className="step-indicator">Step 4 of 4</span>
+    <div>
+      <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+        <h2 className="text-xl font-semibold">Step 4: Confirmation</h2>
+        <span className="text-sm text-muted-foreground">Step 4 of 4</span>
       </div>
 
-      <div className="confirmation-summary">
-        <h3>Review Summary</h3>
+      <div className="flex flex-col gap-6 rounded-xl border border-border bg-muted/30 p-6">
+        <h3 className="text-lg font-semibold">Review Summary</h3>
 
-        <div className="summary-section">
-          <h4>{saveGroups.length > 1 ? 'Races (by course variant)' : 'Race Information'}</h4>
-          {saveGroups.length > 1 ? (
-            <ul className="skipped-results-list">
+        <div>
+          <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            {showGroupSummary ? 'Races (by course variant)' : 'Race Information'}
+          </h4>
+          {showGroupSummary ? (
+            <ul className="flex flex-col gap-2 text-sm">
               {saveGroups.map(group => (
-                <li key={group.key || '(primary)'}>
-                  {group.key || '(no variant tag)'} → <strong>{group.raceName}</strong>
-                  {' '}({group.rows.length} result{group.rows.length === 1 ? '' : 's'})
-                  {group.isGrandPrixRace && <span className="gp-badge">Grand Prix</span>}
+                <li key={group.key || '(primary)'} className="flex flex-wrap items-center gap-2">
+                  {group.key || '(no variant tag)'} &rarr; <strong>{group.raceName}</strong>
+                  <span className="text-muted-foreground">
+                    ({group.rows.length} result{group.rows.length === 1 ? '' : 's'})
+                  </span>
+                  {group.pendingRace && (
+                    <Badge variant="outline">New {group.pendingRace.date.slice(0, 4)} race</Badge>
+                  )}
+                  {group.isGrandPrixRace && <Badge variant="secondary">Grand Prix</Badge>}
                 </li>
               ))}
             </ul>
           ) : (
-            <dl className="summary-details">
-              <dt>Race:</dt>
-              <dd>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+              <dt className="font-medium text-muted-foreground">Race:</dt>
+              <dd className="flex items-center gap-2">
                 {raceSelection.raceName}
-                {raceSelection.isGrandPrixRace && (
-                  <span className="gp-badge">Grand Prix</span>
-                )}
+                {raceSelection.isGrandPrixRace && <Badge variant="secondary">Grand Prix</Badge>}
               </dd>
 
-              <dt>Date:</dt>
-              <dd>{new Date(raceSelection.raceDate).toLocaleDateString()}</dd>
+              <dt className="font-medium text-muted-foreground">Date:</dt>
+              <dd>{formatDateOnly(raceSelection.raceDate)}</dd>
 
               {raceSelection.courseVariant && (
                 <>
-                  <dt>Course Variant:</dt>
+                  <dt className="font-medium text-muted-foreground">Course Variant:</dt>
                   <dd>{raceSelection.courseVariant}</dd>
                 </>
               )}
@@ -263,91 +313,58 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
           )}
         </div>
 
-        <div className="summary-section">
-          <h4>Results Statistics</h4>
-          <dl className="summary-details">
-            <dt>Total Results:</dt>
-            <dd>{stats.totalResults}</dd>
-
-            <dt>Finishers:</dt>
-            <dd>{stats.finishers}</dd>
-
-            {stats.newRunners > 0 && (
-              <>
-                <dt>New Runners:</dt>
-                <dd className="info">{stats.newRunners}</dd>
-              </>
-            )}
-
+        <div>
+          <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Results Statistics
+          </h4>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
+            <StatBlock label="Total" value={stats.totalResults} />
+            <StatBlock label="Finishers" value={stats.finishers} className="text-success" />
+            {stats.newRunners > 0 && <StatBlock label="New Runners" value={stats.newRunners} />}
             {stats.dnfCount > 0 && (
-              <>
-                <dt>DNF:</dt>
-                <dd>{stats.dnfCount}</dd>
-              </>
+              <StatBlock label="DNF" value={stats.dnfCount} className="text-amber-600 dark:text-amber-400" />
             )}
-
-            {stats.dnsCount > 0 && (
-              <>
-                <dt>DNS:</dt>
-                <dd>{stats.dnsCount}</dd>
-              </>
-            )}
-
-            {stats.dqCount > 0 && (
-              <>
-                <dt>DQ:</dt>
-                <dd>{stats.dqCount}</dd>
-              </>
-            )}
-          </dl>
+            {stats.dnsCount > 0 && <StatBlock label="DNS" value={stats.dnsCount} className="text-muted-foreground" />}
+            {stats.dqCount > 0 && <StatBlock label="DQ" value={stats.dqCount} className="text-destructive" />}
+          </div>
         </div>
 
-        {raceSelection.isGrandPrixRace && (
-          <div className="summary-notice gp-notice">
-            <strong>Note:</strong> Grand Prix points and standings will be
-            calculated automatically after saving.
-          </div>
+        {saveGroups.some(group => group.isGrandPrixRace) && (
+          <Alert>
+            <AlertDescription>
+              <strong>Note:</strong> Grand Prix points and standings will be
+              calculated automatically after saving.
+            </AlertDescription>
+          </Alert>
         )}
       </div>
 
       {error && (
-        <div className="error-message">
-          <strong>Error saving results:</strong> {error}
-        </div>
+        <Alert variant="destructive" className="mt-6">
+          <AlertCircle />
+          <AlertDescription>
+            <strong>Error saving results:</strong> {error}
+          </AlertDescription>
+        </Alert>
       )}
 
-      <div className="form-actions">
-        <button
-          type="button"
-          onClick={onBack}
-          className="btn-secondary"
-          disabled={saving}
-        >
-          ← Back
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="btn-secondary"
-          disabled={saving}
-        >
+      <div className="mt-8 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={onBack} disabled={saving}>
+          &larr; Back
+        </Button>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
           Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          className="btn-primary btn-large"
-          disabled={saving}
-        >
+        </Button>
+        <Button type="button" size="lg" onClick={handleSave} disabled={saving}>
           {saving ? (
             <>
-              <span className="spinner"></span>
+              <Loader2 className="animate-spin" />
               Saving...
             </>
           ) : (
             'Save Results'
           )}
-        </button>
+        </Button>
       </div>
     </div>
   );

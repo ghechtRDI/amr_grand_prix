@@ -20,5 +20,19 @@ public class RegisterRequest
 
     public string? LastName { get; set; }
 
+    public string? PreferredName { get; set; }
+
+    public string? Hometown { get; set; }
+
+    [MaxLength(3, ErrorMessage = "Up to 3 alternate names are allowed")]
+    public List<string> AlternateNames { get; set; } = new();
+
     public DateOnly? DateOfBirth { get; set; }
+
+    /// <summary>
+    /// Cloudflare Turnstile response token from the client widget, verified server-side before
+    /// the account is created.
+    /// </summary>
+    [Required]
+    public string CaptchaToken { get; set; } = string.Empty;
 }

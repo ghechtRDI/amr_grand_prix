@@ -10,14 +10,122 @@ import {
   flexRender,
   createColumnHelper,
 } from '@tanstack/react-table';
-import * as tokenService from '../../services/tokenService';
+import { AlertTriangle, ArrowLeftRight, CheckCircle2, Sparkles, UserCheck, UserPlus, UserSearch, Trash2 } from 'lucide-react';
+import * as raceService from '../../services/raceService';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { cn } from '@/lib/utils';
+import { AGE_CATEGORIES } from '@/lib/ageCategories';
 
 const columnHelper = createColumnHelper();
 
-// Must match AmrGrandPrix.API.Models.GrandPrixConstants.AgeCategories
-const AGE_CATEGORIES = [
-  '17 and Under', '18-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89',
-];
+// Columns whose values are numbers/times - right-aligned with tabular figures
+// for scannability, matching the rest of the app's data tables.
+const NUMERIC_COLUMN_IDS = new Set(['place', 'bib', 'age', 'time']);
+
+// Must match AmrGrandPrix.API.Models.GrandPrixConstants.MaxPlausibleRaceHours. Longer than
+// this, a parsed H:MM:SS time is more likely an LLM misread of a MM:SS time (e.g. "30:21"
+// read as 30h21m instead of 30m21s) than a real AMR race result.
+const MAX_PLAUSIBLE_RACE_HOURS = 10;
+
+// Splits a "H:MM" or "H:MM:SS" time string into its fields, or null if it isn't in
+// one of those shapes.
+function parseTimeParts(value) {
+  const parts = String(value ?? '').trim().split(':');
+  if (parts.length < 2 || parts.length > 3 || parts.some(p => !/^\d+$/.test(p))) return null;
+  return parts;
+}
+
+// True when a time looks like a misread MM:SS. The LLM extracts the raw source string
+// as-is (e.g. "34:21"), but the backend's time parser reads a bare 2-field string as
+// H:MM before it ever tries MM:SS, so a MM:SS race time silently becomes "34 hours
+// 21 minutes". A first field over MAX_PLAUSIBLE_RACE_HOURS is the tell.
+function looksShifted(value) {
+  const parts = parseTimeParts(value);
+  return !!parts && Number(parts[0]) > MAX_PLAUSIBLE_RACE_HOURS;
+}
+
+// Makes an ambiguous time string unambiguous as MM:SS.
+function shiftTimeFields(value) {
+  const parts = parseTimeParts(value);
+  if (!parts) return value;
+  // 2-field "H:MM" - add an explicit "0" hours field so the backend's H:MM:SS parser
+  // reads it correctly instead of misreading it as hours:minutes.
+  if (parts.length === 2) return `0:${parts[0]}:${parts[1]}`;
+  // 3-field "H:MM:SS" where the LLM fabricated a spurious seconds field - drop it.
+  return `${parts[0]}:${parts[1]}`;
+}
+
+const STATUS_BADGE_CLASSES = {
+  Finished: 'bg-success/10 text-success dark:bg-success/20',
+  DNF: 'bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
+  DNS: 'bg-muted text-muted-foreground',
+  DQ: 'bg-destructive/10 text-destructive dark:bg-destructive/20',
+};
+
+// Per-row runner-match state, derived in the `data` state below from the backend's
+// suggested matches / auto-match, and updated live as the admin uses the dropdown.
+const MATCH_STATUS = {
+  'auto-matched': {
+    label: 'Auto-matched',
+    icon: Sparkles,
+    cls: 'bg-indigo-500/10 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400',
+  },
+  'needs-confirmation': {
+    label: 'Confirm match',
+    icon: UserSearch,
+    cls: 'bg-purple-500/10 text-purple-700 dark:bg-purple-500/15 dark:text-purple-400',
+  },
+  confirmed: {
+    label: 'Confirmed',
+    icon: UserCheck,
+    cls: 'bg-success/10 text-success dark:bg-success/20',
+  },
+  'new-runner': {
+    label: 'New runner',
+    icon: UserPlus,
+    cls: 'bg-sky-500/10 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400',
+  },
+};
+
+// Shared styling for the native <select> elements used for inline table-cell
+// editing. These stay native <select>s (rather than the shadcn Select popover)
+// because their autoFocus-on-open / blur-to-save behavior is load-bearing for
+// the click-to-edit table UX and shouldn't change during a restyle.
+const SELECT_CLASS =
+  'h-7 w-full rounded-md border border-input bg-transparent px-1.5 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50';
+
+function StatusBadge({ status }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn('border-transparent font-medium', STATUS_BADGE_CLASSES[status] || 'bg-muted text-muted-foreground')}
+    >
+      {status}
+    </Badge>
+  );
+}
 
 // Defined at module scope so it never changes reference between renders.
 // Reads editingCell / setEditingCell / updateData from table.options.meta.
@@ -25,6 +133,16 @@ function EditableCell({ getValue, row, column, table }) {
   const { editingCell, setEditingCell, updateData } = table.options.meta;
   const initialValue = getValue();
   const [value, setValue] = useState(initialValue);
+  const isEditing = editingCell === `${row.index}-${column.id}`;
+
+  // Bulk actions (e.g. "Shift All") write the row's value directly via updateData,
+  // bypassing this cell's own onBlur, so the displayed value must be resynced whenever
+  // it changes underneath us. Skipped while this cell is being actively edited so it
+  // doesn't clobber in-progress input.
+  useEffect(() => {
+    if (!isEditing) setValue(initialValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialValue]);
 
   const onBlur = () => {
     updateData(row.index, column.id, value);
@@ -40,7 +158,7 @@ function EditableCell({ getValue, row, column, table }) {
     }
   };
 
-  if (editingCell === `${row.index}-${column.id}`) {
+  if (isEditing) {
     if (column.id === 'gender') {
       return (
         <select
@@ -48,7 +166,7 @@ function EditableCell({ getValue, row, column, table }) {
           onChange={(e) => setValue(e.target.value)}
           onBlur={onBlur}
           autoFocus
-          className="cell-input"
+          className={SELECT_CLASS}
         >
           <option value="">-- Select --</option>
           <option value="Male">Male</option>
@@ -65,7 +183,7 @@ function EditableCell({ getValue, row, column, table }) {
           onChange={(e) => setValue(e.target.value)}
           onBlur={onBlur}
           autoFocus
-          className="cell-input"
+          className={SELECT_CLASS}
         >
           <option value="Finished">Finished</option>
           <option value="DNF">DNF</option>
@@ -82,7 +200,7 @@ function EditableCell({ getValue, row, column, table }) {
           onChange={(e) => setValue(e.target.value)}
           onBlur={onBlur}
           autoFocus
-          className="cell-input"
+          className={SELECT_CLASS}
         >
           <option value="">-- Unknown --</option>
           {AGE_CATEGORIES.map(cat => (
@@ -93,14 +211,14 @@ function EditableCell({ getValue, row, column, table }) {
     }
 
     return (
-      <input
+      <Input
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onBlur={onBlur}
         onKeyDown={onKeyDown}
         autoFocus
-        className="cell-input"
+        className={cn('h-7 px-1.5 text-sm', NUMERIC_COLUMN_IDS.has(column.id) && 'text-right')}
       />
     );
   }
@@ -108,11 +226,64 @@ function EditableCell({ getValue, row, column, table }) {
   return (
     <div
       onClick={() => setEditingCell(`${row.index}-${column.id}`)}
-      className="cell-value"
+      className={cn(
+        'flex min-h-7 cursor-pointer items-center rounded px-1.5 py-1 transition-colors hover:bg-muted/60',
+        NUMERIC_COLUMN_IDS.has(column.id) && 'justify-end tabular-nums'
+      )}
     >
-      {value || '-'}
+      {column.id === 'status' && value ? <StatusBadge status={value} /> : (value || '-')}
     </div>
   );
+}
+
+// Time column cell: wraps EditableCell with a "Shift Fields" button that appears when the
+// value looks like a MM:SS time that will be misread as H:MM (e.g. "30:21" instead of "0:30:21").
+function TimeCell(props) {
+  const { row, table } = props;
+  const { editingCell, updateData } = table.options.meta;
+  const value = props.getValue();
+  const isEditing = editingCell === `${row.index}-time`;
+  const shiftedValue = shiftTimeFields(value);
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      {!isEditing && looksShifted(value) && (
+        <button
+          type="button"
+          title={`This looks like a misread MM:SS time. Shift fields: "${value}" → "${shiftedValue}"`}
+          onClick={() => updateData(row.index, 'time', shiftedValue)}
+          className="flex size-5 shrink-0 items-center justify-center rounded text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
+        >
+          <ArrowLeftRight className="size-3.5" />
+        </button>
+      )}
+      <div className="min-w-0 flex-1">
+        <EditableCell {...props} />
+      </div>
+    </div>
+  );
+}
+
+// Short, concrete explanation of *why* a row has the match status it does -
+// shown as the pill's tooltip so the admin doesn't have to guess.
+function matchStatusTooltip(matchStatus, matches, selectedMatch) {
+  switch (matchStatus) {
+    case 'auto-matched':
+      return selectedMatch
+        ? `Auto-matched to ${selectedMatch.firstName} ${selectedMatch.lastName} (${Math.round(selectedMatch.confidence * 100)}% confidence) — review or change below`
+        : 'Auto-matched — review or change below';
+    case 'needs-confirmation':
+      return `${matches.length} possible match${matches.length === 1 ? '' : 'es'} found (≥70% confidence) — none selected yet`;
+    case 'confirmed':
+      return selectedMatch
+        ? `Confirmed match to ${selectedMatch.firstName} ${selectedMatch.lastName}`
+        : 'Confirmed match';
+    case 'new-runner':
+    default:
+      return matches.length > 0
+        ? 'Marked as a new runner instead of the suggested match(es) below'
+        : 'No matching runner found — a new runner record will be created';
+  }
 }
 
 // Dropdown for confirming/selecting which existing runner a row matches.
@@ -121,22 +292,41 @@ function RunnerMatchCell({ row, table }) {
   const { updateRunnerMatch, updateData } = table.options.meta;
   const matches = row.original.runnerMatches || [];
   const selected = row.original.matchedRunnerId || '';
-
-  if (matches.length === 0) {
-    return <span className="cell-value muted-text">New runner</span>;
-  }
+  const matchStatus = row.original.matchStatus;
+  const statusInfo = MATCH_STATUS[matchStatus];
+  const StatusIcon = statusInfo?.icon;
 
   const selectedMatch = matches.find(m => m.runnerId === selected);
   const uploadedAge = row.original.age === '' ? null : Number(row.original.age);
   const hasAgeDiscrepancy =
     !!selectedMatch && uploadedAge != null && selectedMatch.age != null && uploadedAge !== selectedMatch.age;
 
+  const statusPill = statusInfo && (
+    <span
+      title={matchStatusTooltip(matchStatus, matches, selectedMatch)}
+      className={cn('inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', statusInfo.cls)}
+    >
+      {StatusIcon && <StatusIcon className="size-3" />}
+      {statusInfo.label}
+    </span>
+  );
+
+  if (matches.length === 0) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        {statusPill}
+        <span className="text-sm text-muted-foreground">Will be created as a new runner</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="runner-match-cell">
+    <div className="flex flex-col gap-1.5">
+      {statusPill}
       <select
         value={selected}
         onChange={(e) => updateRunnerMatch(row.index, e.target.value || null)}
-        className="cell-input runner-match-select"
+        className={SELECT_CLASS}
       >
         <option value="">+ New Runner</option>
         {matches.map(m => (
@@ -148,22 +338,23 @@ function RunnerMatchCell({ row, table }) {
       {hasAgeDiscrepancy && (
         selectedMatch.hasVerifiedDateOfBirth ? (
           <span
-            className="age-discrepancy-toggle age-discrepancy-locked"
+            className="text-xs text-muted-foreground"
             title="This runner has a verified date of birth and can't be overwritten here"
           >
-            Verified age on file ({selectedMatch.age}) — uploaded age {uploadedAge} won't change it
+            Verified age on file ({selectedMatch.age}) — uploaded age {uploadedAge} won&apos;t change it
           </span>
         ) : (
           <label
-            className="age-discrepancy-toggle"
+            className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400"
             title="The uploaded age differs from this runner's estimated age"
           >
             <input
               type="checkbox"
+              className="size-3.5 rounded border-input accent-primary"
               checked={!!row.original.updateRunnerAge}
               onChange={(e) => updateData(row.index, 'updateRunnerAge', e.target.checked)}
             />
-            Update estimated age ({selectedMatch.age} → {uploadedAge})
+            Update estimated age ({selectedMatch.age} &rarr; {uploadedAge})
           </label>
         )
       )}
@@ -171,77 +362,124 @@ function RunnerMatchCell({ row, table }) {
   );
 }
 
-// Race resolver shown for each course-variant group that isn't the primary
-// (pre-selected in Step 1) race — pick an existing race or create a new one.
+// Race resolver shown for each course-variant group when an upload covers several variants.
+// The group's label is matched to one of the series' variants (by name or alias); if that
+// variant already has a race in the Step 1 race's year it's auto-selected, otherwise the admin
+// can create it in one click. An unrecognized label can be mapped to an existing variant or
+// saved as a new one. For a multi-variant upload a missing race isn't created here: the group
+// resolves to a pending race ({ raceId: null, pendingRace }) that Confirmation creates on save,
+// so only variants that end up with results get a race; the dropdown is limited to the variants
+// ticked in Step 1.
+const NEW_VARIANT = '__new_variant__';
+
 function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve }) {
-  const [races, setRaces] = useState([]);
+  const raceSeriesId = primaryRaceSelection.raceSeriesId;
+  const year = raceService.yearOf(primaryRaceSelection.raceDate);
+  const includedVariantIds = primaryRaceSelection.includedVariantIds || [];
+  const deferCreate = includedVariantIds.length > 0;
+
+  const [series, setSeries] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState('select');
-  const [newRace, setNewRace] = useState({
-    name: primaryRaceSelection.raceName ? `${primaryRaceSelection.raceName} - ${groupKey}` : groupKey,
-    date: primaryRaceSelection.raceDate || new Date().toISOString().split('T')[0],
-    isGrandPrixRace: false,
-    courseVariant: groupKey,
-  });
+  const [variantChoice, setVariantChoice] = useState('');
+  const [newVariantName, setNewVariantName] = useState(groupKey);
+  const [date, setDate] = useState(primaryRaceSelection.raceDate || new Date().toISOString().split('T')[0]);
+  const [isGrandPrixRace, setIsGrandPrixRace] = useState(false);
+  const [autoMatched, setAutoMatched] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
+
+  const variantById = (id) => series?.variants.find(v => v.raceVariantId === id);
+  // A multi-variant upload's sections can only go to the variants ticked in Step 1.
+  const selectableVariants = (s) =>
+    s.variants.filter(v => !deferCreate || includedVariantIds.includes(v.raceVariantId));
+  const raceFor = (s, variantId) => s?.races.find(r => r.raceVariantId === variantId && r.year === year);
+
+  const resolveTo = (s, variant, race) => onResolve({
+    raceId: race.raceId,
+    raceName: raceService.raceLabel(s, variant),
+    isGrandPrixRace: !!race.isGrandPrixRace,
+  });
+
+  const resolvePending = (s, variant, raceDate, gp) => onResolve({
+    raceId: null,
+    pendingRace: { raceVariantId: variant.raceVariantId, date: raceDate, isGrandPrixRace: gp },
+    raceName: raceService.raceLabel(s, variant),
+    isGrandPrixRace: gp,
+  });
+
+  const chooseVariant = (s, value) => {
+    setVariantChoice(value);
+    const variant = s.variants.find(v => v.raceVariantId === value);
+    // Step 1's per-variant Grand Prix choices (multi-variant upload) win over the variant default.
+    const gp = primaryRaceSelection.variantGrandPrix?.[value] ?? !!variant?.isGrandPrixByDefault;
+    setIsGrandPrixRace(gp);
+    const race = variant && raceFor(s, variant.raceVariantId);
+    if (race) resolveTo(s, variant, race);
+    else if (variant && deferCreate) resolvePending(s, variant, date, gp);
+    else onResolve(null);
+  };
+
+  const pendingVariant = deferCreate && !raceFor(series, variantChoice) ? variantById(variantChoice) : null;
+
+  const handleDateChange = (value) => {
+    setDate(value);
+    if (pendingVariant) resolvePending(series, pendingVariant, value, isGrandPrixRace);
+  };
+
+  const handleGrandPrixChange = (value) => {
+    setIsGrandPrixRace(value);
+    if (pendingVariant) resolvePending(series, pendingVariant, date, value);
+  };
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const token = tokenService.getAccessToken();
-        const year = primaryRaceSelection.raceDate
-          ? new Date(primaryRaceSelection.raceDate).getFullYear()
-          : new Date().getFullYear();
-        const res = await fetch(`/api/races/${year}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const list = await res.json();
-          if (!cancelled) setRaces(list);
+        setLoading(true);
+        const s = await raceService.getSeriesDetail(raceSeriesId);
+        if (cancelled) return;
+        setSeries(s);
+
+        // Untagged rows belong to the Step 1 race's variant.
+        const variant = groupKey
+          ? raceService.findVariant(selectableVariants(s), groupKey)
+          : s.variants.find(v => v.raceVariantId === primaryRaceSelection.raceVariantId);
+        if (!variant) {
+          setVariantChoice(NEW_VARIANT);
+          return;
         }
+        chooseVariant(s, variant.raceVariantId);
+        setAutoMatched(!!raceFor(s, variant.raceVariantId));
+      } catch (err) {
+        if (!cancelled) setError(err.message);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [primaryRaceSelection.raceDate]);
-
-  const handleSelect = (e) => {
-    const value = e.target.value;
-    if (value === 'new') {
-      setMode('new');
-      onResolve(null);
-    } else if (value) {
-      setMode('select');
-      const race = races.find(r => r.raceId === value);
-      onResolve({ raceId: value, raceName: race?.name || value, isGrandPrixRace: !!race?.isGrandPrixRace });
-    } else {
-      setMode('select');
-      onResolve(null);
-    }
-  };
+    // Runs once per group when its series context is known; onResolve is intentionally
+    // excluded (a fresh function identity every parent render would otherwise re-fire this).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raceSeriesId, groupKey]);
 
   const handleCreate = async () => {
     try {
       setCreating(true);
       setError(null);
-      const token = tokenService.getAccessToken();
-      const res = await fetch('/api/races', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          name: newRace.name,
-          date: newRace.date,
-          isGrandPrixRace: newRace.isGrandPrixRace,
-          courseVariant: newRace.courseVariant || null,
-          location: null,
-        }),
-      });
-      if (!res.ok) throw new Error('Failed to create race');
-      const created = await res.json();
-      onResolve({ raceId: created.raceId, raceName: created.name, isGrandPrixRace: !!created.isGrandPrixRace });
+      let s = series;
+      let variant = variantById(variantChoice);
+      if (variantChoice === NEW_VARIANT) {
+        variant = await raceService.createVariant(raceSeriesId, {
+          name: newVariantName.trim(),
+          isGrandPrixByDefault: isGrandPrixRace,
+        });
+        s = { ...s, variants: [...s.variants, variant] };
+      }
+      const race = await raceService.createRace({ raceVariantId: variant.raceVariantId, date, isGrandPrixRace });
+      s = { ...s, races: [...s.races, { ...race, resultsCount: 0 }] };
+      setSeries(s);
+      setVariantChoice(variant.raceVariantId);
+      resolveTo(s, variant, race);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -249,69 +487,97 @@ function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve
     }
   };
 
+  // base-ui's Select doesn't resolve a selected item's label from its children the
+  // way Radix does - it needs an explicit lookup to render anything but the raw value.
+  const variantOptionLabel = (value) => {
+    if (!value) return null;
+    if (value === NEW_VARIANT) return `+ New variant`;
+    return variantById(value)?.name ?? value;
+  };
+
+  const existingRace = variantChoice && variantChoice !== NEW_VARIANT ? raceFor(series, variantChoice) : null;
+  const needsCreate = !loading && variantChoice && !existingRace && !resolved;
+  const isPending = !loading && !!resolved?.pendingRace;
+
   return (
-    <div className="group-race-resolver">
-      <label>Race for &ldquo;{groupKey}&rdquo;:</label>
+    <div className="flex flex-wrap items-center gap-2">
+      <Label className="text-sm font-normal text-muted-foreground">
+        Variant for &ldquo;{groupKey || 'untagged rows'}&rdquo;:
+      </Label>
       {loading ? (
-        <span className="muted-text">Loading races…</span>
-      ) : (
-        <select
-          value={mode === 'new' ? 'new' : (resolved?.raceId || '')}
-          onChange={handleSelect}
-          className="cell-input"
+        <Skeleton className="h-8 w-56" />
+      ) : series && (
+        <Select
+          value={variantChoice || undefined}
+          onValueChange={(value) => { setAutoMatched(false); chooseVariant(series, value); }}
         >
-          <option value="">-- Select a race --</option>
-          {races.map(r => (
-            <option key={r.raceId} value={r.raceId}>
-              {r.name} - {new Date(r.date).toLocaleDateString()}
-              {r.courseVariant ? ` (${r.courseVariant})` : ''}
-            </option>
-          ))}
-          <option value="new">+ Create New Race</option>
-        </select>
+          <SelectTrigger className="min-w-56">
+            <SelectValue placeholder="-- Select a variant --">
+              {(value) => variantOptionLabel(value) || '-- Select a variant --'}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {selectableVariants(series).map(v => {
+              const race = raceFor(series, v.raceVariantId);
+              return (
+                <SelectItem key={v.raceVariantId} value={v.raceVariantId}>
+                  {v.name}{race ? ` (${year}: ${race.resultsCount} results)` : ` (no ${year} race yet)`}
+                </SelectItem>
+              );
+            })}
+            <SelectItem value={NEW_VARIANT}>+ New variant</SelectItem>
+          </SelectContent>
+        </Select>
       )}
-      {mode === 'new' && (
-        <div className="group-race-new-fields">
-          <input
-            type="text"
-            value={newRace.name}
-            onChange={(e) => setNewRace({ ...newRace, name: e.target.value })}
-            placeholder="Race name"
-            disabled={!!resolved}
-          />
-          <input
+      {autoMatched && resolved && (
+        <span className="text-xs text-success">Matched {year} race</span>
+      )}
+      {resolved && !autoMatched && existingRace && (
+        <span className="text-xs text-muted-foreground">&rarr; {existingRace.date}</span>
+      )}
+      {isPending && (
+        <span className="text-xs text-muted-foreground">New race &mdash; created when saved</span>
+      )}
+      {(needsCreate || isPending) && (
+        <div className="mt-2 flex w-full flex-wrap items-center gap-2">
+          {variantChoice === NEW_VARIANT && (
+            <Input
+              type="text"
+              value={newVariantName}
+              onChange={(e) => setNewVariantName(e.target.value)}
+              placeholder="Variant name"
+              className="w-56"
+            />
+          )}
+          <Input
             type="date"
-            value={newRace.date}
-            onChange={(e) => setNewRace({ ...newRace, date: e.target.value })}
-            disabled={!!resolved}
+            value={date}
+            onChange={(e) => handleDateChange(e.target.value)}
+            className="w-40"
           />
-          <label>
+          <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <input
               type="checkbox"
-              checked={newRace.isGrandPrixRace}
-              onChange={(e) => setNewRace({ ...newRace, isGrandPrixRace: e.target.checked })}
-              disabled={!!resolved}
+              className="size-4 rounded border-input accent-primary"
+              checked={isGrandPrixRace}
+              onChange={(e) => handleGrandPrixChange(e.target.checked)}
             />
             Grand Prix race
           </label>
-          <input
-            type="text"
-            value={newRace.courseVariant}
-            onChange={(e) => setNewRace({ ...newRace, courseVariant: e.target.value })}
-            placeholder="Course variant"
-            disabled={!!resolved}
-          />
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={creating || !!resolved}
-            className="btn-secondary"
-          >
-            {resolved ? 'Race Created ✓' : (creating ? 'Creating…' : 'Create Race')}
-          </button>
-          {error && <span className="field-error">{error}</span>}
+          {needsCreate && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleCreate}
+              disabled={creating || (variantChoice === NEW_VARIANT && !newVariantName.trim())}
+            >
+              {creating ? 'Creating…' : `Create ${raceService.yearOf(date)} race`}
+            </Button>
+          )}
         </div>
       )}
+      {error && <span className="text-sm text-destructive">{error}</span>}
     </div>
   );
 }
@@ -323,7 +589,7 @@ const COLUMNS = [
   columnHelper.accessor('age',    { header: 'Age',    cell: EditableCell, size: 80 }),
   columnHelper.accessor('ageCategory', { header: 'Age Category', cell: EditableCell, size: 120 }),
   columnHelper.accessor('gender', { header: 'Gender', cell: EditableCell, size: 100 }),
-  columnHelper.accessor('time',   { header: 'Time',   cell: EditableCell, size: 120 }),
+  columnHelper.accessor('time',   { header: 'Time',   cell: TimeCell, size: 120 }),
   columnHelper.accessor('status', { header: 'Status', cell: EditableCell, size: 100 }),
   columnHelper.accessor('courseVariant', { header: 'Course Variant', cell: EditableCell, size: 140 }),
   columnHelper.display({
@@ -333,42 +599,57 @@ const COLUMNS = [
     size: 220,
   }),
   columnHelper.display({
-    id: 'issues',
-    header: 'Issues',
+    id: 'validation',
+    header: 'Validation',
     cell: ({ row }) => {
       const issues = row.original.validationIssues || [];
-      const isNewRunner = row.original.isNewRunner;
-      const needsReview = isNewRunner && (row.original.runnerMatches || []).length > 0;
 
-      if (issues.length === 0 && !isNewRunner) {
-        return <span className="status-ok">✓</span>;
+      if (issues.length === 0) {
+        return <CheckCircle2 className="mx-auto size-4 text-success" />;
       }
 
       return (
-        <div className="issue-indicators">
-          {issues.map((issue, idx) => (
-            <span
-              key={idx}
-              className={`issue-badge ${issue.severity}`}
-              title={issue.message}
-            >
-              ⚠
-            </span>
-          ))}
-          {needsReview && (
-            <span className="issue-badge review" title="Possible match found — confirm in Runner Match column">
-              ❓
-            </span>
-          )}
-          {isNewRunner && !needsReview && (
-            <span className="issue-badge info" title="New runner">
-              ℹ
-            </span>
-          )}
+        <div className="flex items-center justify-center gap-1">
+          {issues.map((issue, idx) => {
+            const severity = (issue.severity || '').toLowerCase();
+            return (
+              <span
+                key={idx}
+                title={issue.message}
+                className={cn(
+                  'flex size-5 items-center justify-center rounded',
+                  severity === 'error' && 'bg-destructive/15 text-destructive',
+                  severity === 'warning' && 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+                  severity === 'info' && 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+                  !['error', 'warning', 'info'].includes(severity) && 'bg-muted text-muted-foreground'
+                )}
+              >
+                <AlertTriangle className="size-3.5" />
+              </span>
+            );
+          })}
         </div>
       );
     },
-    size: 80,
+    size: 90,
+  }),
+  columnHelper.display({
+    id: 'actions',
+    header: '',
+    cell: ({ row, table }) => {
+      const { requestDeleteRow } = table.options.meta;
+      return (
+        <button
+          type="button"
+          title="Remove this row"
+          onClick={() => requestDeleteRow(row.index, row.original.name)}
+          className="mx-auto flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      );
+    },
+    size: 48,
   }),
 ];
 
@@ -390,8 +671,15 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
       courseVariant: row.courseVariant || '',
       validationIssues: row.validationIssues || [],
       runnerMatches: row.runnerMatches || [],
-      // No matched runner → will be created as new
-      isNewRunner: (row.runnerMatches || []).length === 0 && !row.matchedRunnerId,
+      // 'auto-matched': backend pre-selected via ≥95% confidence, unconfirmed by the admin.
+      // 'needs-confirmation': candidate matches (≥70%) exist, none selected yet.
+      // 'new-runner': no candidates - will be created as new.
+      matchStatus: (() => {
+        const matches = row.runnerMatches || [];
+        if (matches.length === 0) return 'new-runner';
+        if (row.matchedRunnerId) return 'auto-matched';
+        return 'needs-confirmation';
+      })(),
       matchedRunnerId: row.matchedRunnerId || null,
       updateRunnerAge: false,
     }));
@@ -410,36 +698,69 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     );
   }, []);
 
+  // Applies shiftTimeFields to every row whose time looks misread, in one update.
+  const shiftAllTimes = useCallback(() => {
+    setData(old =>
+      old.map(row => (looksShifted(row.time) ? { ...row, time: shiftTimeFields(row.time) } : row))
+    );
+  }, []);
+
   // Called when the user picks a suggested runner (or "+ New Runner") from the dropdown.
   const updateRunnerMatch = useCallback((rowIndex, runnerId) => {
     setData(old =>
       old.map((row, index) =>
         index === rowIndex
-          ? { ...row, matchedRunnerId: runnerId, isNewRunner: !runnerId, updateRunnerAge: false }
+          ? { ...row, matchedRunnerId: runnerId, matchStatus: runnerId ? 'confirmed' : 'new-runner', updateRunnerAge: false }
           : row
       )
     );
   }, []);
 
+  const [deleteTarget, setDeleteTarget] = useState(null); // { rowIndex, name }
+  // A whole course-variant section to drop, e.g. one the extractor duplicated: { key, count }.
+  const [sectionDeleteTarget, setSectionDeleteTarget] = useState(null);
+
+  const confirmDeleteSection = () => {
+    const { key } = sectionDeleteTarget;
+    setData(old => old.filter(row => (row.courseVariant || '').trim() !== key));
+    setGroupRaces(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setSectionDeleteTarget(null);
+  };
+
+  const requestDeleteRow = useCallback((rowIndex, name) => {
+    setDeleteTarget({ rowIndex, name });
+  }, []);
+
+  const confirmDeleteRow = useCallback(() => {
+    setData(old => old.filter((_, i) => i !== deleteTarget.rowIndex));
+    // Row indices shift after a delete - drop any in-progress edit rather than risk
+    // it landing on the wrong (reindexed) row.
+    setEditingCell(null);
+    setDeleteTarget(null);
+  }, [deleteTarget]);
+
   const table = useReactTable({
     data,
     columns: COLUMNS,
     getCoreRowModel: getCoreRowModel(),
-    meta: { editingCell, setEditingCell, updateData, updateRunnerMatch },
+    meta: { editingCell, setEditingCell, updateData, updateRunnerMatch, requestDeleteRow },
   });
 
   const stats = useMemo(() => ({
     totalResults: data.length,
     warnings: data.filter(row => row.validationIssues?.length > 0).length,
-    newRunners: data.filter(row => row.isNewRunner).length,
-    needsReview: data.filter(row => row.isNewRunner && (row.runnerMatches || []).length > 0).length,
+    newRunners: data.filter(row => row.matchStatus === 'new-runner').length,
+    needsReview: data.filter(row => row.matchStatus === 'needs-confirmation').length,
+    shiftableTimes: data.filter(row => looksShifted(row.time)).length,
   }), [data]);
 
   const primaryRaceSelection = wizardData.raceSelection || {};
 
-  // Group rows by detected course variant. A blank/untagged variant belongs to the
-  // primary race pre-selected in Step 1; any other distinct variant is a separate
-  // group the admin must route to its own race (existing or new) below.
+  // Group rows by detected course variant.
   const rowGroupsMap = new Map();
   for (const row of table.getRowModel().rows) {
     const key = (row.original.courseVariant || '').trim();
@@ -447,61 +768,107 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     rowGroupsMap.get(key).push(row);
   }
   const rowGroups = Array.from(rowGroupsMap.entries());
-  const primaryKey = rowGroups.some(([key]) => key === '') ? '' : (rowGroups[0]?.[0] ?? '');
   const hasMultipleGroups = rowGroups.length > 1;
-
-  const renderTableBody = (rows) => (
-    <tbody>
-      {rows.map(row => (
-        <tr
-          key={row.id}
-          className={
-            row.original.validationIssues?.length > 0
-              ? 'row-warning'
-              : row.original.isNewRunner
-                ? 'row-info'
-                : ''
-          }
-        >
-          {row.getVisibleCells().map(cell => (
-            <td key={cell.id}>
-              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-            </td>
-          ))}
-        </tr>
-      ))}
-    </tbody>
-  );
+  // Only a single detected group (no variant ambiguity) is automatically the Step 1
+  // selection. When multiple variants are detected, none of them can be assumed to
+  // match Step 1's race - which variant is which isn't derivable from upload order
+  // (e.g. a junior race section can appear before the main race in the source file),
+  // so the admin must explicitly resolve every group below, including whichever one
+  // is actually the Step 1 race.
+  // A multi-variant upload has no Step 1 race, so it's resolved per group even if only one
+  // variant came back.
+  const includedVariantNames = primaryRaceSelection.includedVariantIds?.length
+    ? primaryRaceSelection.knownVariants || []
+    : null;
+  const showGroups = hasMultipleGroups || !!includedVariantNames;
+  const primaryKey = showGroups ? null : (rowGroups[0]?.[0] ?? '');
 
   const tableHead = (
-    <thead>
+    <TableHeader>
       {table.getHeaderGroups().map(headerGroup => (
-        <tr key={headerGroup.id}>
+        <TableRow key={headerGroup.id} className="hover:bg-transparent">
           {headerGroup.headers.map(header => (
-            <th key={header.id} style={{ width: header.getSize() }}>
+            <TableHead
+              key={header.id}
+              style={{ width: header.getSize() }}
+              className={cn(
+                'sticky top-0 z-10 h-9 whitespace-nowrap bg-zinc-900 text-[11px] font-semibold uppercase tracking-wider text-zinc-300 dark:bg-black',
+                NUMERIC_COLUMN_IDS.has(header.column.id) && 'text-right'
+              )}
+            >
               {flexRender(header.column.columnDef.header, header.getContext())}
-            </th>
+            </TableHead>
           ))}
-        </tr>
+        </TableRow>
       ))}
-    </thead>
+    </TableHeader>
+  );
+
+  const renderTableBody = (rows) => (
+    <TableBody>
+      {rows.map(row => {
+        const rowState = row.original.validationIssues?.length > 0
+          ? 'warning'
+          : row.original.matchStatus === 'needs-confirmation'
+            ? 'needs-confirmation'
+            : row.original.matchStatus === 'new-runner'
+              ? 'new-runner'
+              : null;
+        return (
+          <TableRow
+            key={row.id}
+            className={cn(
+              row.index % 2 === 1 && !rowState && 'bg-muted/20',
+              rowState === 'warning' && 'bg-amber-500/10 hover:bg-amber-500/15',
+              rowState === 'needs-confirmation' && 'bg-purple-500/10 hover:bg-purple-500/15',
+              rowState === 'new-runner' && 'bg-sky-500/10 hover:bg-sky-500/15'
+            )}
+          >
+            {row.getVisibleCells().map(cell => (
+              <TableCell
+                key={cell.id}
+                className={cn(NUMERIC_COLUMN_IDS.has(cell.column.id) && 'text-right tabular-nums')}
+              >
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+              </TableCell>
+            ))}
+          </TableRow>
+        );
+      })}
+    </TableBody>
+  );
+
+  const renderTable = (rows) => (
+    <div className="overflow-hidden rounded-xl border border-border">
+      <div className="max-h-[32rem] overflow-y-auto">
+        <Table>
+          {tableHead}
+          {renderTableBody(rows)}
+        </Table>
+      </div>
+    </div>
   );
 
   const handleSubmit = () => {
-    const invalidRows = data.filter(
-      row => !row.name || (!row.age && !row.ageCategory) || !row.place || !row.time
-    );
+    // Place/Time are only required for Finished results - DNF/DNS/DQ rows legitimately
+    // have neither, mirroring the backend's ValidateRow().
+    const invalidRows = data.filter(row => {
+      if (!row.name) return true;
+      if (!row.age && !row.ageCategory) return true;
+      if (row.status === 'Finished' && (!row.place || !row.time)) return true;
+      return false;
+    });
 
     if (invalidRows.length > 0) {
       alert(
-        `${invalidRows.length} row(s) are missing required fields (Name, Age or Age Category, Place, Time). Please fix these issues before continuing.`
+        `${invalidRows.length} row(s) are missing required fields (Name, Age or Age Category, and — for Finished results — Place and Time). Please fix these issues before continuing.`
       );
       return;
     }
 
     const unresolvedGroups = rowGroups
       .map(([key]) => key)
-      .filter(key => key !== primaryKey && !groupRaces[key]?.raceId);
+      .filter(key => key !== primaryKey && !groupRaces[key]?.raceId && !groupRaces[key]?.pendingRace);
 
     if (unresolvedGroups.length > 0) {
       alert(
@@ -514,59 +881,84 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
   };
 
   return (
-    <div className="wizard-step">
-      <div className="step-header">
-        <h2>Step 3: Data Review</h2>
-        <span className="step-indicator">Step 3 of {wizardData.totalSteps || 4}</span>
+    <div>
+      <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+        <h2 className="text-xl font-semibold">Step 3: Data Review</h2>
+        <span className="text-sm text-muted-foreground">Step 3 of {wizardData.totalSteps || 4}</span>
       </div>
 
-      <div className="review-summary">
-        <div className="summary-stats">
-          <div className="stat">
-            <span className="stat-label">Total Results:</span>
-            <span className="stat-value">{stats.totalResults}</span>
+      <div className="mb-6">
+        <div className="mb-3 flex flex-wrap gap-3">
+          <div className="rounded-lg border border-border bg-muted/30 px-4 py-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total Results</div>
+            <div className="text-xl font-semibold tabular-nums">{stats.totalResults}</div>
           </div>
           {stats.warnings > 0 && (
-            <div className="stat">
-              <span className="stat-label">Warnings:</span>
-              <span className="stat-value warning">{stats.warnings}</span>
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">Warnings</div>
+              <div className="text-xl font-semibold tabular-nums text-amber-700 dark:text-amber-400">{stats.warnings}</div>
             </div>
           )}
           {stats.newRunners > 0 && (
-            <div className="stat">
-              <span className="stat-label">New Runners:</span>
-              <span className="stat-value info">{stats.newRunners}</span>
+            <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-4 py-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-sky-700 dark:text-sky-400">New Runners</div>
+              <div className="text-xl font-semibold tabular-nums text-sky-700 dark:text-sky-400">{stats.newRunners}</div>
             </div>
           )}
           {stats.needsReview > 0 && (
-            <div className="stat">
-              <span className="stat-label">Possible Matches to Confirm:</span>
-              <span className="stat-value review">{stats.needsReview}</span>
+            <div className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-4 py-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-purple-700 dark:text-purple-400">
+                Possible Matches to Confirm
+              </div>
+              <div className="text-xl font-semibold tabular-nums text-purple-700 dark:text-purple-400">{stats.needsReview}</div>
             </div>
           )}
         </div>
-        <p className="review-hint">
+        <p className="text-sm text-muted-foreground">
           Click any cell to edit. Press Enter to save, Escape to cancel.
           {stats.needsReview > 0 && ' Use the Runner Match column to confirm or reject suggested matches.'}
         </p>
+        {stats.shiftableTimes > 0 && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2">
+            <span className="text-sm text-amber-700 dark:text-amber-400">
+              {stats.shiftableTimes} time{stats.shiftableTimes === 1 ? '' : 's'} look{stats.shiftableTimes === 1 ? 's' : ''} like a misread MM:SS.
+            </span>
+            <Button type="button" variant="outline" size="sm" onClick={shiftAllTimes} className="gap-1.5 border-amber-500/40">
+              <ArrowLeftRight className="size-3.5" />
+              Shift All
+            </Button>
+          </div>
+        )}
       </div>
 
-      {!hasMultipleGroups && (
-        <div className="table-container">
-          <table className="data-review-table">
-            {tableHead}
-            {renderTableBody(rowGroups[0]?.[1] || [])}
-          </table>
-        </div>
-      )}
+      {!showGroups && renderTable(rowGroups[0]?.[1] || [])}
 
-      {hasMultipleGroups && rowGroups.map(([key, rows]) => (
-        <div className="course-group" key={key || '(primary)'}>
-          <div className="course-group-header">
-            <h3>{key || primaryRaceSelection.raceName || 'Primary race'}</h3>
+      {showGroups && rowGroups.map(([key, rows]) => (
+        <div className="mb-8 rounded-xl border border-border bg-muted/20 p-4" key={key || '(primary)'}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-semibold">{key || primaryRaceSelection.raceName || 'Primary race'}</h3>
+              <span className="text-sm text-muted-foreground">
+                ({rows.length} result{rows.length === 1 ? '' : 's'})
+              </span>
+              {includedVariantNames && !includedVariantNames.some(n => n.toLowerCase() === key.toLowerCase()) && (
+                <Badge variant="outline" className="border-amber-500/50 text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="size-3" /> Not one of the selected variants
+                </Badge>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => setSectionDeleteTarget({ key, count: rows.length })}
+              >
+                <Trash2 className="size-3.5" /> Remove section
+              </Button>
+            </div>
             {key === primaryKey ? (
-              <span className="group-resolved-badge">
-                → {primaryRaceSelection.raceName} (Step 1 selection)
+              <span className="text-sm text-success">
+                &rarr; {primaryRaceSelection.raceName} (Step 1 selection)
               </span>
             ) : (
               <GroupRaceSelector
@@ -584,20 +976,48 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
               />
             )}
           </div>
-          <div className="table-container">
-            <table className="data-review-table">
-              {tableHead}
-              {renderTableBody(rows)}
-            </table>
-          </div>
+          {renderTable(rows)}
         </div>
       ))}
 
-      <div className="form-actions">
-        <button type="button" onClick={onBack} className="btn-secondary">← Back</button>
-        <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>
-        <button type="button" onClick={handleSubmit} className="btn-primary">Next →</button>
+      <div className="mt-8 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={onBack}>&larr; Back</Button>
+        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button type="button" onClick={handleSubmit}>Next &rarr;</Button>
       </div>
+
+      <AlertDialog open={!!sectionDeleteTarget} onOpenChange={(open) => !open && setSectionDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this whole section?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove all {sectionDeleteTarget?.count} result{sectionDeleteTarget?.count === 1 ? '' : 's'} in
+              &ldquo;{sectionDeleteTarget?.key || 'untagged rows'}&rdquo; from this upload? Use this when the
+              extractor duplicated results under the wrong variant. They won&rsquo;t be saved, and this
+              can&rsquo;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDeleteSection}>Remove section</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this row?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove {deleteTarget?.name || 'this'}&rsquo;s row from this upload? It won&rsquo;t be saved. This can&rsquo;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDeleteRow}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

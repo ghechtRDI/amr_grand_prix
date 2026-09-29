@@ -6,7 +6,15 @@
 
 import { useState } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { AlertCircle, FileText, Loader2, UploadCloud, X } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import { cn } from '@/lib/utils';
 
 export default function FileUploadStep({ wizardData, onNext, onBack, onCancel }) {
   const totalSteps = wizardData.totalSteps || 4;
@@ -14,6 +22,12 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
+  // Multi-variant upload: the variants ticked in Step 1 (no race exists yet).
+  const includedVariantIds = wizardData.raceSelection?.includedVariantIds || [];
+  const isMultiVariant = includedVariantIds.length > 0;
+  const [knownVariants, setKnownVariants] = useState(
+    (wizardData.raceSelection?.knownVariants || []).join(', ')
+  );
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
     accept: {
@@ -43,8 +57,8 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
 
   const handleSubmit = async () => {
     if (!file) { setError('Please select a file'); return; }
-    const raceId = wizardData.raceSelection?.raceId;
-    if (!raceId) { setError('Please select a race first'); return; }
+    const { raceId, raceSeriesId, raceDate } = wizardData.raceSelection || {};
+    if (!raceId && !isMultiVariant) { setError('Please select a race first'); return; }
 
     try {
       setProcessing(true);
@@ -52,7 +66,15 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
 
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('raceId', raceId);
+      // A multi-variant upload has no race yet - just the series, date and ticked variants.
+      if (raceId) {
+        formData.append('raceId', raceId);
+        if (knownVariants.trim()) formData.append('knownVariants', knownVariants.trim());
+      } else {
+        formData.append('raceSeriesId', raceSeriesId);
+        formData.append('raceDate', raceDate);
+        includedVariantIds.forEach((id) => formData.append('includedVariantIds', id));
+      }
 
       // Fake progress while LLM processes (can take 10–30 s)
       let fakeProgress = 0;
@@ -98,61 +120,71 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
   };
 
   return (
-    <div className="wizard-step">
-      <div className="step-header">
-        <h2>Step 2: Upload Results File</h2>
-        <span className="step-indicator">Step 2 of {totalSteps}</span>
+    <div>
+      <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+        <h2 className="text-xl font-semibold">Step 2: Upload Results File</h2>
+        <span className="text-sm text-muted-foreground">Step 2 of {totalSteps}</span>
       </div>
 
-      {error && <div className="error-message">{error}</div>}
+      {error && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
-      <div className="method-panel">
+      <div className="mb-4">
         {!file ? (
           <div
             {...getRootProps()}
-            className={`dropzone ${isDragActive ? 'active' : ''} ${isDragReject ? 'reject' : ''}`}
+            className={cn(
+              'flex min-h-[280px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-muted/30 p-10 text-center transition-colors',
+              'hover:border-primary/60 hover:bg-primary/5',
+              isDragActive && !isDragReject && 'border-primary bg-primary/10',
+              isDragReject && 'border-destructive bg-destructive/5'
+            )}
           >
             <input {...getInputProps()} />
             {isDragActive ? (
               isDragReject ? (
-                <p>Invalid file type. Please upload a PDF, CSV, or Excel file.</p>
+                <p className="text-destructive">Invalid file type. Please upload a PDF, CSV, or Excel file.</p>
               ) : (
-                <p>Drop the file here&hellip;</p>
+                <p className="text-foreground">Drop the file here&hellip;</p>
               )
             ) : (
-              <div className="dropzone-content">
-                <div className="dropzone-icon">📁</div>
-                <p>Drag and drop a race results file here, or click to browse</p>
-                <p className="dropzone-hint">Accepted formats: PDF, CSV, Excel (.xlsx, .xls)</p>
-                <p className="dropzone-hint">Maximum file size: 10MB</p>
+              <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                <UploadCloud className="mb-2 size-10 text-muted-foreground/70" />
+                <p className="text-foreground">Drag and drop a race results file here, or click to browse</p>
+                <p className="text-sm">Accepted formats: PDF, CSV, Excel (.xlsx, .xls)</p>
+                <p className="text-sm">Maximum file size: 10MB</p>
               </div>
             )}
           </div>
         ) : (
-          <div className="file-preview">
-            <div className="file-info">
-              <div className="file-icon">📄</div>
-              <div className="file-details">
-                <div className="file-name">{file.name}</div>
-                <div className="file-size">{(file.size / 1024).toFixed(1)} KB</div>
+          <div className="rounded-xl border border-border bg-muted/30 p-6">
+            <div className="mb-3 flex items-center gap-3">
+              <FileText className="size-8 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{file.name}</div>
+                <div className="text-sm text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</div>
               </div>
               {!processing && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={() => { setFile(null); setUploadProgress(0); }}
-                  className="btn-icon"
                   title="Remove file"
+                  aria-label="Remove file"
                 >
-                  ✕
-                </button>
+                  <X className="size-4" />
+                </Button>
               )}
             </div>
             {processing && (
-              <div className="upload-progress">
-                <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${uploadProgress}%` }} />
-                </div>
-                <div className="progress-text">
+              <div className="mt-2 flex flex-col gap-2">
+                <Progress value={uploadProgress} />
+                <div className="text-center text-sm text-muted-foreground">
                   {uploadProgress < 100
                     ? `Extracting results with AI… ${uploadProgress}%`
                     : 'Processing complete!'}
@@ -163,30 +195,65 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
         )}
       </div>
 
-      <p className="field-hint" style={{ marginTop: '1rem' }}>
+      <p className="mt-4 text-xs text-muted-foreground">
         Results are extracted automatically — no column mapping needed.
         PDF, CSV, and Excel files are all supported.
       </p>
 
-      <div className="form-actions">
-        <button type="button" onClick={onBack} className="btn-secondary">
-          ← Back
-        </button>
-        <button type="button" onClick={onCancel} className="btn-secondary">
+      {isMultiVariant ? (
+        <div className="mt-6 flex flex-col gap-2 border-t border-border pt-6">
+          <Label>Variants in this file</Label>
+          <div className="flex flex-wrap gap-2">
+            {wizardData.raceSelection.knownVariants.map((name) => (
+              <Badge key={name} variant="secondary">{name}</Badge>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The AI extractor is told the file contains only these variants and labels each section
+            with one of them. To change the list, go back to Race Selection.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-6 flex flex-col gap-2 border-t border-border pt-6">
+          <Label htmlFor="knownVariants">Known course/variant names (optional)</Label>
+          <Input
+            id="knownVariants"
+            type="text"
+            value={knownVariants}
+            onChange={(e) => setKnownVariants(e.target.value)}
+            placeholder="e.g. Junior - Blueberry Knoll, Adult - Young at Heart Blueberry Knoll"
+            disabled={processing}
+          />
+          <p className="text-xs text-muted-foreground">
+            If this file's results cover more than one course or division at once, list the known
+            names here, comma-separated. The AI extractor will reuse these exact labels instead of
+            inventing its own when it splits the file into sections.
+            {wizardData.raceSelection?.knownVariants?.length > 0 &&
+              ' Pre-filled from this series’ other race instances — edit as needed.'}
+          </p>
+        </div>
+      )}
+
+      <div className="mt-8 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={onBack}>
+          &larr; Back
+        </Button>
+        <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={handleSubmit}
-          className="btn-primary"
           disabled={processing || !file}
         >
           {processing ? (
-            <><span className="spinner" /> Extracting&hellip;</>
+            <>
+              <Loader2 className="animate-spin" /> Extracting&hellip;
+            </>
           ) : (
-            'Next →'
+            <>Next &rarr;</>
           )}
-        </button>
+        </Button>
       </div>
     </div>
   );
