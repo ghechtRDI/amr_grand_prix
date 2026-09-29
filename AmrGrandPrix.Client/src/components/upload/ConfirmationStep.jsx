@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
+import * as raceService from '../../services/raceService';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -75,6 +76,8 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
         key,
         rows,
         raceId: isPrimary ? raceSelection.raceId : groupRaces[key]?.raceId,
+        // Multi-variant upload: this variant's race doesn't exist yet - created on save.
+        pendingRace: isPrimary ? null : groupRaces[key]?.pendingRace || null,
         raceName: isPrimary ? raceSelection.raceName : (groupRaces[key]?.raceName || key),
         isGrandPrixRace: isPrimary ? !!raceSelection.isGrandPrixRace : !!groupRaces[key]?.isGrandPrixRace,
         uploadBatchId: isBatchOwner ? uploadBatchId : null,
@@ -82,6 +85,9 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
       };
     });
   })();
+
+  // A multi-variant upload has no Step 1 race, so it lists its groups even if only one came back.
+  const showGroupSummary = saveGroups.length > 1 || !!raceSelection.includedVariantIds?.length;
 
   // Calculate statistics
   const stats = {
@@ -99,13 +105,25 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
 
     const token = tokenService.getAccessToken();
     const results = [];
+    // Pending races created so far, by variant - several groups (e.g. a variant's men and women
+    // sections) can map to the same one.
+    const createdRaces = new Map();
 
     // Save sequentially (not in parallel) so a failure on one course-variant group
     // doesn't race with, or get lost alongside, a concurrent write to another race.
     for (const group of saveGroups) {
       try {
+        let raceId = group.raceId;
+        if (!raceId && group.pendingRace) {
+          const { raceVariantId } = group.pendingRace;
+          if (!createdRaces.has(raceVariantId)) {
+            createdRaces.set(raceVariantId, await raceService.createRace(group.pendingRace));
+          }
+          raceId = createdRaces.get(raceVariantId).raceId;
+        }
+
         const payload = {
-          raceId: group.raceId,
+          raceId,
           uploadBatchId: group.uploadBatchId,
           sourceUploadBatchId: group.sourceUploadBatchId,
           results: group.rows.map(toResultPayload),
@@ -257,9 +275,9 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
 
         <div>
           <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            {saveGroups.length > 1 ? 'Races (by course variant)' : 'Race Information'}
+            {showGroupSummary ? 'Races (by course variant)' : 'Race Information'}
           </h4>
-          {saveGroups.length > 1 ? (
+          {showGroupSummary ? (
             <ul className="flex flex-col gap-2 text-sm">
               {saveGroups.map(group => (
                 <li key={group.key || '(primary)'} className="flex flex-wrap items-center gap-2">
@@ -267,6 +285,9 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
                   <span className="text-muted-foreground">
                     ({group.rows.length} result{group.rows.length === 1 ? '' : 's'})
                   </span>
+                  {group.pendingRace && (
+                    <Badge variant="outline">New {group.pendingRace.date.slice(0, 4)} race</Badge>
+                  )}
                   {group.isGrandPrixRace && <Badge variant="secondary">Grand Prix</Badge>}
                 </li>
               ))}
@@ -308,7 +329,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
           </div>
         </div>
 
-        {raceSelection.isGrandPrixRace && (
+        {saveGroups.some(group => group.isGrandPrixRace) && (
           <Alert>
             <AlertDescription>
               <strong>Note:</strong> Grand Prix points and standings will be

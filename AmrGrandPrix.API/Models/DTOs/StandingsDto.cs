@@ -55,3 +55,17 @@ public class StandingsLeaderboardResponse
     public List<StandingDetailDto> Standings { get; set; } = new();
     public int TotalRunners { get; set; }
 }
+
+/// <summary>
+/// Finalization status of one year's Grand Prix
+/// </summary>
+public class GrandPrixSeasonDto
+{
+    public int Year { get; set; }
+    public bool IsFinalized { get; set; }
+    public DateTime? FinalizedAt { get; set; }
+    public int GrandPrixRaceCount { get; set; }
+
+    /// <summary>GP races this year with no results yet — worth a second look before finalizing.</summary>
+    public List<string> GrandPrixRacesWithoutResults { get; set; } = new();
+}

@@ -1,14 +1,19 @@
 /**
  * Step 1: Race Selection
- * Series-first: pick a race series, then either add results to an existing race instance in that
- * series (e.g. one that's missing finishers) or create a new instance on a new date (race name is
- * inherited from the series). "+ Create New Race" covers an event that isn't in any series yet.
+ * Series-first: pick a race series, then either add results to an existing race (one year's
+ * running of one of the series' course variants, e.g. one that's missing finishers) or record a
+ * new race by choosing the variant and date. Variants are reused year over year so results stay
+ * comparable; "+ New variant" and "+ New Series" cover a course or event not seen before.
+ * For a series with several variants the admin ticks which ones the results file contains. Ticking
+ * more than one makes a multi-variant upload: the extractor is told exactly which variants to
+ * expect, and each variant's race is created (or an existing one for the year reused) only when
+ * results for it are saved in Confirmation.
  */
 
 import { useState, useEffect } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import * as tokenService from '../../services/tokenService';
+import * as raceService from '../../services/raceService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,14 +27,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-const NEW_RACE = '__new_race__';   // top-level: an event with no series yet
-const NEW_DATE = '__new_date__';   // within an existing series: a new instance
-const NEW_SERIES = '__new_series__'; // nested, within NEW_RACE: create a matching series too
+const NEW_SERIES = '__new_series__';   // top-level: an event with no series yet
+const NEW_RACE = '__new_race__';       // within an existing series: a new year/variant
+const NEW_VARIANT = '__new_variant__'; // within NEW_RACE: a course not run before
 
-const authHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${tokenService.getAccessToken()}`,
-});
+const today = () => new Date().toISOString().split('T')[0];
+
+const pluralResults = (n) => `${n} result${n === 1 ? '' : 's'}`;
 
 export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
   const [raceSeriesList, setRaceSeriesList] = useState([]);
@@ -50,162 +54,225 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
     defaultValues: wizardData.raceSelection || {
       seriesSelection: '',
       raceInstanceId: '',
-      raceId: '',
-      raceName: '',
-      raceDate: new Date().toISOString().split('T')[0],
+      raceVariantId: '',
+      newVariantName: '',
+      newSeriesName: '',
+      raceDate: today(),
       isGrandPrixRace: false,
-      courseVariant: '',
-      newRaceSeriesId: NEW_SERIES,
-      newRaceSeriesName: '',
+      // Multi-variant series: the variants ticked as in the file, and which count toward the GP.
+      selectedVariantIds: [],
+      variantGrandPrix: {},
     },
   });
 
   const seriesSelection = watch('seriesSelection');
   const raceInstanceId = watch('raceInstanceId');
-  const newRaceSeriesId = watch('newRaceSeriesId');
+  const raceVariantId = watch('raceVariantId');
+  const raceDate = watch('raceDate');
+  const selectedVariantIds = watch('selectedVariantIds') || [];
 
-  const isNewRaceMode = seriesSelection === NEW_RACE;
-  const isExistingSeriesMode = !!seriesSelection && !isNewRaceMode;
-  const isNewDateMode = isExistingSeriesMode && raceInstanceId === NEW_DATE;
-  const isExistingRaceMode = isExistingSeriesMode && !!raceInstanceId && raceInstanceId !== NEW_DATE;
-  const showRaceDateAndDetails = isNewRaceMode || isNewDateMode;
+  const isNewSeriesMode = seriesSelection === NEW_SERIES;
+  const isExistingSeriesMode = !!seriesSelection && !isNewSeriesMode;
+  const isNewRaceMode = isExistingSeriesMode && raceInstanceId === NEW_RACE;
+  const isExistingRaceMode = isExistingSeriesMode && !!raceInstanceId && raceInstanceId !== NEW_RACE;
+  const variants = seriesDetail?.variants || [];
+  const hasMultipleVariants = variants.length > 1;
+
+  const isNewVariantMode = isNewRaceMode && (raceVariantId === NEW_VARIANT || variants.length === 0);
+  // Variant checklist (series with several variants): 2+ ticked = one file, several races.
+  const isChecklistMode = isNewRaceMode && hasMultipleVariants && !isNewVariantMode;
+  const isMultiVariantMode = isChecklistMode && selectedVariantIds.length > 1;
+  // The single variant a new race is being created for, if not a new variant.
+  const singleVariantId = isChecklistMode
+    ? (selectedVariantIds.length === 1 ? selectedVariantIds[0] : null)
+    : (isNewRaceMode && !isNewVariantMode ? raceVariantId : null);
+  const variantById = (id) => variants.find((v) => v.raceVariantId === id);
+  const selectedRace = seriesDetail?.races.find((r) => r.raceId === raceInstanceId);
+
+  const existingRaceFor = (variantId) =>
+    seriesDetail?.races.find(
+      (r) => r.raceVariantId === variantId && r.year === raceService.yearOf(raceDate)
+    );
+
+  // A new race must not duplicate an existing variant + year. (A multi-variant upload reuses them.)
+  const duplicateRace = singleVariantId ? existingRaceFor(singleVariantId) : null;
 
   useEffect(() => {
-    fetch('/api/race-series')
-      .then((r) => (r.ok ? r.json() : []))
+    raceService
+      .getSeriesList()
       .then(setRaceSeriesList)
       .catch(() => setRaceSeriesList([]))
       .finally(() => setLoading(false));
   }, []);
 
-  // When an existing series is picked, load its race instances.
+  // When an existing series is picked, load its variants and race instances.
   useEffect(() => {
     if (!isExistingSeriesMode) {
       setSeriesDetail(null);
       return;
     }
     setSeriesDetailLoading(true);
-    fetch(`/api/race-series/${seriesSelection}`)
-      .then((r) => (r.ok ? r.json() : null))
+    raceService
+      .getSeriesDetail(seriesSelection)
       .then(setSeriesDetail)
       .catch(() => setSeriesDetail(null))
       .finally(() => setSeriesDetailLoading(false));
   }, [seriesSelection, isExistingSeriesMode]);
 
   const seriesOptionLabel = (value) => {
-    if (value === NEW_RACE) return '+ Create New Race';
+    if (value === NEW_SERIES) return '+ New Series';
     return raceSeriesList.find((s) => s.raceSeriesId === value)?.name || null;
   };
 
+  const raceInstanceLabel = (race) =>
+    `${race.date}${hasMultipleVariants ? ` — ${variantById(race.raceVariantId)?.name}` : ''} (${pluralResults(race.resultsCount)})`;
+
   const raceInstanceOptionLabel = (value) => {
-    if (value === NEW_DATE) return '+ New Date';
+    if (value === NEW_RACE) return '+ New race';
     const race = seriesDetail?.races.find((r) => r.raceId === value);
-    if (!race) return null;
-    return `${race.date} — ${race.courseVariant || 'Standard'} (${race.resultsCount} result${race.resultsCount === 1 ? '' : 's'})`;
+    return race ? raceInstanceLabel(race) : null;
   };
 
   const handleSeriesChange = (value) => {
     setValue('seriesSelection', value);
     setValue('raceInstanceId', '');
-    setValue('raceId', '');
-    setValue('raceDate', new Date().toISOString().split('T')[0]);
+    setValue('raceVariantId', '');
+    setValue('newVariantName', '');
+    setValue('newSeriesName', '');
+    setValue('raceDate', today());
     setValue('isGrandPrixRace', false);
-    setValue('courseVariant', '');
+    setValue('selectedVariantIds', []);
+    setValue('variantGrandPrix', {});
+  };
 
-    if (value === NEW_RACE) {
-      setValue('raceName', '');
-      setValue('newRaceSeriesId', NEW_SERIES);
-      setValue('newRaceSeriesName', '');
-    }
+  const handleVariantChange = (value) => {
+    setValue('raceVariantId', value);
+    setValue('isGrandPrixRace', value === NEW_VARIANT ? false : !!variantById(value)?.isGrandPrixByDefault);
+  };
+
+  const toggleVariant = (variantId, included) => {
+    setValue(
+      'selectedVariantIds',
+      included
+        ? variants.map((v) => v.raceVariantId).filter((id) => id === variantId || selectedVariantIds.includes(id))
+        : selectedVariantIds.filter((id) => id !== variantId),
+      { shouldValidate: true }
+    );
   };
 
   const handleRaceInstanceChange = (value) => {
     setValue('raceInstanceId', value);
+    if (value !== NEW_RACE) return;
 
-    if (value === NEW_DATE) {
-      setValue('raceId', '');
-      setValue('raceName', seriesDetail?.name || '');
-      setValue('raceDate', new Date().toISOString().split('T')[0]);
-      setValue('isGrandPrixRace', false);
-      setValue('courseVariant', '');
+    setValue('raceDate', today());
+
+    // Several variants: the admin ticks which ones the file contains.
+    if (hasMultipleVariants) {
+      setValue('raceVariantId', '');
+      setValue('selectedVariantIds', []);
+      setValue(
+        'variantGrandPrix',
+        Object.fromEntries(variants.map((v) => [v.raceVariantId, !!v.isGrandPrixByDefault]))
+      );
       return;
     }
 
-    const race = seriesDetail?.races.find((r) => r.raceId === value);
-    if (race) {
-      setValue('raceId', race.raceId);
-      setValue('raceName', seriesDetail.name);
-      setValue('raceDate', race.date);
-      setValue('isGrandPrixRace', race.isGrandPrixRace);
-      setValue('courseVariant', race.courseVariant || '');
-    }
+    // Default to the variant that counts toward the GP (or the first one).
+    const defaultVariant = variants.find((v) => v.isGrandPrixByDefault) || variants[0];
+    setValue('raceVariantId', defaultVariant?.raceVariantId || NEW_VARIANT);
+    setValue('isGrandPrixRace', !!defaultVariant?.isGrandPrixByDefault);
   };
 
-  // Course/variant names already on record for this series' other race instances - passed
-  // through as an LLM hint in Step 2 so a multi-variant file gets labeled consistently.
-  const knownVariants = isExistingSeriesMode
-    ? [...new Set((seriesDetail?.races || []).map((r) => r.courseVariant).filter(Boolean))]
-    : [];
-
   const onSubmit = async (data) => {
-    // Existing race instance selected - nothing to create, just proceed.
-    if (isExistingRaceMode) {
-      onNext({ raceSelection: { ...data, knownVariants, raceSeriesId: seriesSelection } });
-      return;
-    }
-
     try {
       setSubmitting(true);
       setError(null);
 
-      let raceSeriesId = null;
-      if (isNewDateMode) {
-        raceSeriesId = seriesSelection;
-      } else if (isNewRaceMode) {
-        if (data.newRaceSeriesId === NEW_SERIES && data.newRaceSeriesName?.trim()) {
-          const seriesResponse = await fetch('/api/race-series', {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ name: data.newRaceSeriesName.trim() }),
-          });
-          if (seriesResponse.ok) {
-            const createdSeries = await seriesResponse.json();
-            raceSeriesId = createdSeries.raceSeriesId;
-          }
-        } else if (data.newRaceSeriesId && data.newRaceSeriesId !== NEW_SERIES) {
-          raceSeriesId = data.newRaceSeriesId;
-        }
+      // Existing race selected - nothing to create.
+      if (isExistingRaceMode) {
+        const variant = variantById(selectedRace.raceVariantId);
+        onNext({
+          raceSelection: {
+            ...data,
+            includedVariantIds: null,
+            raceId: selectedRace.raceId,
+            raceName: seriesDetail.name,
+            raceDate: selectedRace.date,
+            isGrandPrixRace: selectedRace.isGrandPrixRace,
+            courseVariant: hasMultipleVariants ? variant?.name : '',
+            raceSeriesId: seriesDetail.raceSeriesId,
+            raceVariantId: selectedRace.raceVariantId,
+            knownVariants: hasMultipleVariants ? variants.map((v) => v.name) : [],
+          },
+        });
+        return;
       }
 
-      const response = await fetch('/api/races', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          name: data.raceName,
-          date: data.raceDate,
-          isGrandPrixRace: data.isGrandPrixRace,
-          courseVariant: data.courseVariant || null,
-          location: null,
-          raceSeriesId,
-        }),
+      // Multi-variant upload: nothing to create yet - Data Review matches each section of the file
+      // to one of the ticked variants, and races are created on save only for variants with results.
+      if (isMultiVariantMode) {
+        const included = variants.filter((v) => data.selectedVariantIds.includes(v.raceVariantId));
+        onNext({
+          raceSelection: {
+            ...data,
+            includedVariantIds: included.map((v) => v.raceVariantId),
+            raceId: null,
+            raceName: seriesDetail.name,
+            raceDate: data.raceDate,
+            isGrandPrixRace: false,
+            courseVariant: '',
+            raceSeriesId: seriesDetail.raceSeriesId,
+            raceVariantId: null,
+            knownVariants: included.map((v) => v.name),
+          },
+        });
+        return;
+      }
+
+      let series = seriesDetail;
+      let variant = null;
+
+      if (isNewSeriesMode) {
+        const created = await raceService.createSeries({
+          name: data.newSeriesName.trim(),
+          isGrandPrix: data.isGrandPrixRace,
+        });
+        series = await raceService.getSeriesDetail(created.raceSeriesId);
+        variant = series.variants[0];
+      } else if (isNewVariantMode) {
+        variant = await raceService.createVariant(series.raceSeriesId, {
+          name: data.newVariantName.trim(),
+          isGrandPrixByDefault: data.isGrandPrixRace,
+        });
+        series = { ...series, variants: [...series.variants, variant] };
+      } else {
+        variant = variantById(singleVariantId);
+      }
+
+      const race = await raceService.createRace({
+        raceVariantId: variant.raceVariantId,
+        date: data.raceDate,
+        // A ticked variant carries its own Grand Prix checkbox.
+        isGrandPrixRace: isChecklistMode
+          ? !!data.variantGrandPrix?.[variant.raceVariantId]
+          : data.isGrandPrixRace,
       });
 
-      if (!response.ok) {
-        const responseText = await response.text().catch(() => '');
-        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-        if (responseText) {
-          try {
-            const errorData = JSON.parse(responseText);
-            errorMessage = errorData.message || errorData.title || responseText;
-          } catch {
-            errorMessage = responseText;
-          }
-        }
-        throw new Error(errorMessage);
-      }
-
-      const createdRace = await response.json();
-      onNext({ raceSelection: { ...data, raceId: createdRace.raceId, knownVariants, raceSeriesId } });
+      const multi = series.variants.length > 1;
+      onNext({
+        raceSelection: {
+          ...data,
+          includedVariantIds: null,
+          raceId: race.raceId,
+          raceName: series.name,
+          raceDate: race.date,
+          isGrandPrixRace: race.isGrandPrixRace,
+          courseVariant: multi ? variant.name : '',
+          raceSeriesId: series.raceSeriesId,
+          raceVariantId: variant.raceVariantId,
+          knownVariants: multi ? series.variants.map((v) => v.name) : [],
+        },
+      });
     } catch (err) {
       setError(err.message);
       console.error('Error creating race:', err);
@@ -214,13 +281,17 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
     }
   };
 
+  const header = (
+    <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+      <h2 className="text-xl font-semibold">Step 1: Race Selection</h2>
+      <span className="text-sm text-muted-foreground">Step 1 of 4</span>
+    </div>
+  );
+
   if (loading) {
     return (
       <div>
-        <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
-          <h2 className="text-xl font-semibold">Step 1: Race Selection</h2>
-          <span className="text-sm text-muted-foreground">Step 1 of 4</span>
-        </div>
+        {header}
         <div className="flex flex-col gap-4">
           <Skeleton className="h-4 w-32" />
           <Skeleton className="h-8 w-full" />
@@ -231,12 +302,33 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
     );
   }
 
+  const grandPrixCheckbox = (label) => (
+    <label className="flex items-center gap-2 text-sm font-medium">
+      <input
+        type="checkbox"
+        className="size-4 rounded border-input accent-primary"
+        {...register('isGrandPrixRace')}
+      />
+      {label}
+    </label>
+  );
+
+  const dateField = (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="raceDate">Race Date</Label>
+      <Input
+        type="date"
+        id="raceDate"
+        aria-invalid={!!errors.raceDate}
+        {...register('raceDate', { required: 'Race date is required' })}
+      />
+      {errors.raceDate && <p className="text-sm text-destructive">{errors.raceDate.message}</p>}
+    </div>
+  );
+
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
-        <h2 className="text-xl font-semibold">Step 1: Race Selection</h2>
-        <span className="text-sm text-muted-foreground">Step 1 of 4</span>
-      </div>
+      {header}
 
       {error && (
         <Alert variant="destructive" className="mb-6">
@@ -251,7 +343,7 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
           <Controller
             name="seriesSelection"
             control={control}
-            rules={{ required: 'Please select a race series or create a new race' }}
+            rules={{ required: 'Please select a race series or create a new one' }}
             render={({ field }) => (
               <Select
                 value={field.value || undefined}
@@ -269,7 +361,7 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
                   {raceSeriesList.map((s) => (
                     <SelectItem key={s.raceSeriesId} value={s.raceSeriesId}>{s.name}</SelectItem>
                   ))}
-                  <SelectItem value={NEW_RACE}>+ Create New Race</SelectItem>
+                  <SelectItem value={NEW_SERIES}>+ New Series</SelectItem>
                 </SelectContent>
               </Select>
             )}
@@ -279,16 +371,42 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
           )}
         </div>
 
+        {isNewSeriesMode && (
+          <>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="newSeriesName">Series Name</Label>
+              <Input
+                type="text"
+                id="newSeriesName"
+                aria-invalid={!!errors.newSeriesName}
+                {...register('newSeriesName', {
+                  validate: (v) => !isNewSeriesMode || !!v?.trim() || 'Series name is required',
+                })}
+                placeholder="e.g., Mount Marathon Race"
+              />
+              {errors.newSeriesName && (
+                <p className="text-sm text-destructive">{errors.newSeriesName.message}</p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Created with a single course. Add more course variants (e.g. a junior race) from the
+                series later, or with &ldquo;+ New variant&rdquo; next time.
+              </p>
+            </div>
+            {dateField}
+            {grandPrixCheckbox('This is a Grand Prix race')}
+          </>
+        )}
+
         {isExistingSeriesMode && (
           seriesDetailLoading ? (
             <Skeleton className="h-8 w-full" />
           ) : (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="raceInstanceId">Race Instance</Label>
+              <Label htmlFor="raceInstanceId">Race</Label>
               <Controller
                 name="raceInstanceId"
                 control={control}
-                rules={{ required: 'Please select a race instance or a new date' }}
+                rules={{ required: 'Please select a race or "+ New race"' }}
                 render={({ field }) => (
                   <Select
                     value={field.value || undefined}
@@ -298,17 +416,15 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
                     }}
                   >
                     <SelectTrigger id="raceInstanceId" className="w-full" aria-invalid={!!errors.raceInstanceId}>
-                      <SelectValue placeholder="-- Select a race instance --">
-                        {(value) => raceInstanceOptionLabel(value) || '-- Select a race instance --'}
+                      <SelectValue placeholder="-- Select a race --">
+                        {(value) => raceInstanceOptionLabel(value) || '-- Select a race --'}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value={NEW_RACE}>+ New race</SelectItem>
                       {seriesDetail?.races.map((r) => (
-                        <SelectItem key={r.raceId} value={r.raceId}>
-                          {r.date} — {r.courseVariant || 'Standard'} ({r.resultsCount} result{r.resultsCount === 1 ? '' : 's'})
-                        </SelectItem>
+                        <SelectItem key={r.raceId} value={r.raceId}>{raceInstanceLabel(r)}</SelectItem>
                       ))}
-                      <SelectItem value={NEW_DATE}>+ New Date</SelectItem>
                     </SelectContent>
                   </Select>
                 )}
@@ -317,114 +433,155 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
                 <p className="text-sm text-destructive">{errors.raceInstanceId.message}</p>
               )}
               <p className="text-xs text-muted-foreground">
-                Pick an existing date to add more results to it (e.g. one that's missing
-                finishers), or "+ New Date" to record a new running of this race.
+                Pick an existing race to add more results to it (e.g. one that&rsquo;s missing
+                finishers), or &ldquo;+ New race&rdquo; to record a new year.
+                {hasMultipleVariants &&
+                  ' If the file covers several variants, choose “+ New race” and tick each one.'}
               </p>
             </div>
           )
         )}
 
-        {isExistingRaceMode && (
+        {isExistingRaceMode && selectedRace && (
           <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm">
             <dl className="grid grid-cols-2 gap-2">
-              <dt className="text-muted-foreground">Race Name</dt>
-              <dd className="font-medium">{seriesDetail?.name}</dd>
-              <dt className="text-muted-foreground">Grand Prix Race</dt>
-              <dd className="font-medium">{watch('isGrandPrixRace') ? 'Yes' : 'No'}</dd>
-              {watch('courseVariant') && (
+              <dt className="text-muted-foreground">Race</dt>
+              <dd className="font-medium">{seriesDetail.name}</dd>
+              {hasMultipleVariants && (
                 <>
-                  <dt className="text-muted-foreground">Course Variant</dt>
-                  <dd className="font-medium">{watch('courseVariant')}</dd>
+                  <dt className="text-muted-foreground">Variant</dt>
+                  <dd className="font-medium">{variantById(selectedRace.raceVariantId)?.name}</dd>
                 </>
               )}
+              <dt className="text-muted-foreground">Grand Prix Race</dt>
+              <dd className="font-medium">{selectedRace.isGrandPrixRace ? 'Yes' : 'No'}</dd>
             </dl>
             <p className="mt-2 text-xs text-muted-foreground">
-              These are fixed for an existing race and can't be changed here.
+              To change these, edit the race from Results Management.
             </p>
           </div>
         )}
 
         {isNewRaceMode && (
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="raceName">Race Name</Label>
-            <Input
-              type="text"
-              id="raceName"
-              aria-invalid={!!errors.raceName}
-              {...register('raceName', { required: 'Race name is required' })}
-              placeholder="e.g., Mount Marathon Race"
-            />
-            {errors.raceName && (
-              <p className="text-sm text-destructive">{errors.raceName.message}</p>
-            )}
-          </div>
-        )}
-
-        {isNewDateMode && (
-          <p className="text-sm text-muted-foreground">
-            Race name: <span className="font-medium text-foreground">{seriesDetail?.name}</span>
-          </p>
-        )}
-
-        {showRaceDateAndDetails && (
           <>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="raceDate">Race Date</Label>
-              <Input
-                type="date"
-                id="raceDate"
-                aria-invalid={!!errors.raceDate}
-                {...register('raceDate', { required: 'Race date is required' })}
-              />
-              {errors.raceDate && (
-                <p className="text-sm text-destructive">{errors.raceDate.message}</p>
-              )}
-            </div>
-
-            {isNewRaceMode && (
+            {isChecklistMode ? (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="newRaceSeriesId">Race Series (optional)</Label>
+                <Label>Variants in this results file</Label>
                 <Controller
-                  name="newRaceSeriesId"
+                  name="selectedVariantIds"
                   control={control}
-                  render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
-                      <SelectTrigger id="newRaceSeriesId" className="w-full">
-                        <SelectValue placeholder="-- No series --">
-                          {(value) =>
-                            value === NEW_SERIES
-                              ? '+ Create New Series'
-                              : raceSeriesList.find((s) => s.raceSeriesId === value)?.name || '-- No series --'
-                          }
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {raceSeriesList.map((s) => (
-                          <SelectItem key={s.raceSeriesId} value={s.raceSeriesId}>{s.name}</SelectItem>
-                        ))}
-                        <SelectItem value={NEW_SERIES}>+ Create New Series</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  rules={{
+                    validate: (v) => !isChecklistMode || v?.length > 0 || 'Tick at least one variant',
+                  }}
+                  render={() => (
+                    <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
+                      {variants.map((v) => {
+                        const checked = selectedVariantIds.includes(v.raceVariantId);
+                        const existing = existingRaceFor(v.raceVariantId);
+                        return (
+                          <div
+                            key={v.raceVariantId}
+                            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                          >
+                            <label className="flex items-center gap-2 text-sm font-medium">
+                              <input
+                                type="checkbox"
+                                className="size-4 rounded border-input accent-primary"
+                                checked={checked}
+                                onChange={(e) => toggleVariant(v.raceVariantId, e.target.checked)}
+                              />
+                              {v.name}
+                            </label>
+                            {checked && isMultiVariantMode && existing && (
+                              <span className="text-xs text-muted-foreground">
+                                {existing.year} race exists ({pluralResults(existing.resultsCount)})
+                                &mdash; results are added to it
+                              </span>
+                            )}
+                            {checked && !existing && (
+                              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <input
+                                  type="checkbox"
+                                  className="size-4 rounded border-input accent-primary"
+                                  {...register(`variantGrandPrix.${v.raceVariantId}`)}
+                                />
+                                Counts toward the Grand Prix this year
+                              </label>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 />
-                {newRaceSeriesId === NEW_SERIES && (
-                  <Input
-                    type="text"
-                    placeholder="New series name, e.g. Mount Marathon Race"
-                    {...register('newRaceSeriesName')}
-                  />
+                {errors.selectedVariantIds && (
+                  <p className="text-sm text-destructive">{errors.selectedVariantIds.message}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Tick every course this results file contains. With more than one, the AI extractor
+                  only looks for those, each section is matched to its variant in Data Review, and a
+                  race is recorded on save only for variants that had results.
+                </p>
+                <button
+                  type="button"
+                  className="self-start text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  onClick={() => handleVariantChange(NEW_VARIANT)}
+                >
+                  A course that isn&rsquo;t listed? Add a variant
+                </button>
+              </div>
+            ) : isNewVariantMode ? (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="newVariantName">New Course Variant</Label>
+                <Input
+                  id="newVariantName"
+                  type="text"
+                  placeholder="Variant name, e.g. Junior Race"
+                  aria-invalid={!!errors.newVariantName}
+                  {...register('newVariantName', {
+                    validate: (v) => !isNewVariantMode || !!v?.trim() || 'Variant name is required',
+                  })}
+                />
+                {errors.newVariantName && (
+                  <p className="text-sm text-destructive">{errors.newVariantName.message}</p>
+                )}
+                {variants.length > 0 && (
+                  <button
+                    type="button"
+                    className="self-start text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    onClick={() => handleVariantChange(hasMultipleVariants ? '' : variants[0].raceVariantId)}
+                  >
+                    &larr; Choose an existing variant instead
+                  </button>
                 )}
               </div>
+            ) : (
+              <button
+                type="button"
+                className="self-start text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                onClick={() => handleVariantChange(NEW_VARIANT)}
+              >
+                This is a different course (add a variant)
+              </button>
             )}
 
-            <label className="flex items-center gap-2 text-sm font-medium">
-              <input
-                type="checkbox"
-                className="size-4 rounded border-input accent-primary"
-                {...register('isGrandPrixRace')}
-              />
-              This is a Grand Prix race
-            </label>
+            {dateField}
+
+            {!isChecklistMode &&
+              grandPrixCheckbox(
+                isNewVariantMode ? 'Counts toward the Grand Prix' : 'Counts toward the Grand Prix this year'
+              )}
+
+            {duplicateRace && (
+              <Alert variant="destructive">
+                <AlertCircle />
+                <AlertDescription>
+                  There&rsquo;s already a {duplicateRace.year}
+                  {hasMultipleVariants ? ` ${variantById(duplicateRace.raceVariantId)?.name}` : ''} race
+                  ({duplicateRace.date}). Select it above to add results to it.
+                </AlertDescription>
+              </Alert>
+            )}
           </>
         )}
 
@@ -432,7 +589,7 @@ export default function RaceSelectionStep({ wizardData, onNext, onCancel }) {
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting || !!duplicateRace}>
             {submitting ? <Loader2 className="animate-spin" /> : null}
             Next &rarr;
           </Button>

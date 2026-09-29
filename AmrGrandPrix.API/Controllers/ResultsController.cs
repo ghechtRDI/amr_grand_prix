@@ -54,9 +54,43 @@ public class ResultsController : ControllerBase
     {
         try
         {
-            var race = await _context.Races.FindAsync([request.RaceId], ct);
-            if (race == null)
-                return NotFound($"Race with ID {request.RaceId} not found");
+            // A normal upload targets one race. A multi-variant upload instead targets the series +
+            // date and the variants the admin says the file contains: their races are created when
+            // the reviewed results are saved, and only for variants that actually had results.
+            Race? race = null;
+            ICollection<RaceVariant> seriesVariants;
+            var includedVariants = new List<RaceVariant>();
+            DateOnly raceDate;
+            if (request.RaceId.HasValue)
+            {
+                race = await _context.Races
+                    .Include(r => r.RaceVariant).ThenInclude(v => v.RaceSeries).ThenInclude(s => s.Variants)
+                    .FirstOrDefaultAsync(r => r.RaceId == request.RaceId, ct);
+                if (race == null)
+                    return NotFound($"Race with ID {request.RaceId} not found");
+                seriesVariants = race.RaceVariant.RaceSeries.Variants;
+                raceDate = race.Date;
+            }
+            else if (request.IncludedVariantIds.Count > 0 && request.RaceSeriesId.HasValue && request.RaceDate.HasValue)
+            {
+                var series = await _context.RaceSeries
+                    .Include(s => s.Variants)
+                    .FirstOrDefaultAsync(s => s.RaceSeriesId == request.RaceSeriesId, ct);
+                if (series == null)
+                    return NotFound($"Race series with ID {request.RaceSeriesId} not found");
+                seriesVariants = series.Variants;
+                includedVariants = series.Variants
+                    .Where(v => request.IncludedVariantIds.Contains(v.RaceVariantId))
+                    .OrderBy(v => v.DisplayOrder).ThenBy(v => v.Name)
+                    .ToList();
+                if (includedVariants.Count != request.IncludedVariantIds.Distinct().Count())
+                    return BadRequest("Every included variant must belong to the race series");
+                raceDate = request.RaceDate.Value;
+            }
+            else
+            {
+                return BadRequest("RaceId is required (or RaceSeriesId, RaceDate and IncludedVariantIds for a multi-variant upload)");
+            }
 
             if (request.File == null || request.File.Length == 0)
                 return BadRequest("No file uploaded");
@@ -66,24 +100,47 @@ public class ResultsController : ControllerBase
 
             var ext = Path.GetExtension(request.File.FileName).ToLowerInvariant();
 
-            var knownVariants = (request.KnownVariants ?? string.Empty)
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Distinct()
-                .ToList();
+            // A multi-variant upload tells the LLM exactly which variants the file contains.
+            // Otherwise hint it with the series' canonical variant names (plus any extra typed in
+            // the wizard) so a multi-variant file gets labeled consistently.
+            var onlyTheseVariants = includedVariants.Count > 0;
+            List<string> knownVariants;
+            if (onlyTheseVariants)
+            {
+                knownVariants = includedVariants.Select(v => v.Name).ToList();
+            }
+            else
+            {
+                knownVariants = (seriesVariants.Count > 1
+                        ? seriesVariants.OrderBy(v => v.DisplayOrder).Select(v => v.Name)
+                        : Enumerable.Empty<string>())
+                    .Concat((request.KnownVariants ?? string.Empty)
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
 
             // LLM extraction
             ExtractionResult extraction;
             using (var stream = request.File.OpenReadStream())
-                extraction = await _llmExtractionService.ExtractAsync(stream, request.File.FileName, knownVariants, ct);
+                extraction = await _llmExtractionService.ExtractAsync(
+                    stream, request.File.FileName, knownVariants, onlyTheseVariants, ct);
 
             var processedResults = await _resultsProcessingService.ProcessResultsAsync(extraction.Sections);
-            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults, race.Date);
+            // Only route to the selected variants - a section the LLM labeled with any other course
+            // stays unmatched so it stands out in Data Review.
+            _resultsProcessingService.AssignVariants(
+                processedResults, onlyTheseVariants ? includedVariants : seriesVariants.ToList());
+            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults, raceDate);
 
             var user = await _userManager.GetUserAsync(User);
             var uploadBatch = new UploadBatch
             {
                 UploadBatchId    = Guid.NewGuid(),
-                RaceId           = request.RaceId,
+                RaceId           = race?.RaceId,
+                RaceSeriesId     = race == null ? request.RaceSeriesId : null,
+                RaceDate         = race == null ? raceDate : null,
+                IncludedVariantIds = includedVariants.Select(v => v.RaceVariantId).ToList(),
                 FileName         = request.File.FileName,
                 FileType         = ext switch
                 {
@@ -106,8 +163,8 @@ public class ResultsController : ControllerBase
             await _context.SaveChangesAsync(ct);
 
             _logger.LogInformation(
-                "File {FileName} uploaded for race {RaceId} by {UserId}. Extracted {Sections} section(s), {Rows} rows. Tokens: {In}in/{Out}out",
-                request.File.FileName, request.RaceId, user?.Id,
+                "File {FileName} uploaded for race {RaceId} (series {RaceSeriesId}) by {UserId}. Extracted {Sections} section(s), {Rows} rows. Tokens: {In}in/{Out}out",
+                request.File.FileName, race?.RaceId, request.RaceSeriesId, user?.Id,
                 extraction.Sections.Count, processedResults.Count,
                 extraction.InputTokens, extraction.OutputTokens);
 
@@ -166,6 +223,8 @@ public class ResultsController : ControllerBase
             var race = await _context.Races.FindAsync(request.RaceId);
             if (race == null)
                 return NotFound($"Race {request.RaceId} not found");
+            if (await RejectIfSeasonFinalizedAsync(race) is { } finalized)
+                return finalized;
 
             var user = await _userManager.GetUserAsync(User);
 
@@ -175,6 +234,12 @@ public class ResultsController : ControllerBase
                 uploadBatch = await _context.UploadBatches.FindAsync(request.UploadBatchId.Value);
                 if (uploadBatch == null)
                     return NotFound($"Upload batch {request.UploadBatchId} not found");
+
+                // The batch was created against the race picked in Step 1, but its rows may have
+                // been routed to another variant's race during review.
+                uploadBatch.RaceId = request.RaceId;
+                uploadBatch.RaceSeriesId = null;
+                uploadBatch.RaceDate = null;
             }
             else if (request.SourceUploadBatchId.HasValue)
             {
@@ -348,7 +413,7 @@ public class ResultsController : ControllerBase
             {
                 ResultId         = r.ResultId,
                 RaceId           = r.RaceId,
-                RaceName         = r.Race.Name,
+                RaceName         = RaceProjections.DisplayName(r.Race.RaceVariant.RaceSeries.Name, r.Race.RaceVariant.Name, r.Race.RaceVariant.RaceSeries.Variants.Count),
                 RaceDate         = r.Race.Date,
                 RunnerId         = r.RunnerId,
                 RunnerName       = r.Runner.FirstName + " " + r.Runner.LastName,
@@ -382,11 +447,13 @@ public class ResultsController : ControllerBase
         {
             var result = await _context.RaceResults
                 .Include(r => r.Runner)
-                .Include(r => r.Race)
+                .Include(r => r.Race).ThenInclude(r => r.RaceVariant).ThenInclude(v => v.RaceSeries).ThenInclude(s => s.Variants)
                 .FirstOrDefaultAsync(r => r.ResultId == resultId);
 
             if (result == null)
                 return NotFound($"Result {resultId} not found");
+            if (await RejectIfSeasonFinalizedAsync(result.Race) is { } finalized)
+                return finalized;
 
             result.Bib = request.Bib;
             result.Place = request.Place;
@@ -408,7 +475,7 @@ public class ResultsController : ControllerBase
             {
                 ResultId         = result.ResultId,
                 RaceId           = result.RaceId,
-                RaceName         = result.Race.Name,
+                RaceName         = RaceProjections.DisplayName(result.Race),
                 RaceDate         = result.Race.Date,
                 RunnerId         = result.RunnerId,
                 RunnerName       = result.Runner.FirstName + " " + result.Runner.LastName,
@@ -442,9 +509,11 @@ public class ResultsController : ControllerBase
     {
         try
         {
-            var result = await _context.RaceResults.FindAsync(resultId);
+            var result = await _context.RaceResults.Include(r => r.Race).FirstOrDefaultAsync(r => r.ResultId == resultId);
             if (result == null)
                 return NotFound($"Result {resultId} not found");
+            if (await RejectIfSeasonFinalizedAsync(result.Race) is { } finalized)
+                return finalized;
 
             var raceId = result.RaceId;
 
@@ -477,7 +546,8 @@ public class ResultsController : ControllerBase
     public async Task<ActionResult<ResumeBatchResponse>> ResumeBatch(Guid batchId)
     {
         var uploadBatch = await _context.UploadBatches
-            .Include(b => b.Race)
+            .Include(b => b.Race!).ThenInclude(r => r.RaceVariant).ThenInclude(v => v.RaceSeries).ThenInclude(s => s.Variants)
+            .Include(b => b.RaceSeries!).ThenInclude(s => s.Variants)
             .FirstOrDefaultAsync(b => b.UploadBatchId == batchId);
 
         if (uploadBatch == null)
@@ -491,18 +561,41 @@ public class ResultsController : ControllerBase
 
         try
         {
+            var race = uploadBatch.Race;
+            var series = race?.RaceVariant.RaceSeries ?? uploadBatch.RaceSeries;
+            var raceDate = race?.Date ?? uploadBatch.RaceDate;
+            if (series == null || raceDate == null)
+                return BadRequest("This upload batch isn't linked to a race or race series");
+
+            // A pending multi-variant batch routes to the variants picked at upload (all of the
+            // series' if none were recorded, or they've since been merged away).
+            var includedVariants = race == null
+                ? series.Variants.Where(v => uploadBatch.IncludedVariantIds.Contains(v.RaceVariantId)).ToList()
+                : new List<RaceVariant>();
+            if (includedVariants.Count == 0)
+                includedVariants = series.Variants.ToList();
+
             var sections = _llmExtractionService.RehydrateSections(uploadBatch.RawLlmJson, uploadBatch.FileName);
             var processedResults = await _resultsProcessingService.ProcessResultsAsync(sections);
-            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults, uploadBatch.Race.Date);
+            _resultsProcessingService.AssignVariants(processedResults, includedVariants);
+            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults, raceDate.Value);
 
             return Ok(new ResumeBatchResponse
             {
                 UploadBatchId   = uploadBatch.UploadBatchId,
-                RaceId          = uploadBatch.RaceId,
-                RaceName        = uploadBatch.Race.Name,
-                RaceDate        = uploadBatch.Race.Date,
-                IsGrandPrixRace = uploadBatch.Race.IsGrandPrixRace,
-                CourseVariant   = uploadBatch.Race.CourseVariant,
+                RaceId          = race?.RaceId,
+                RaceName        = series.Name,
+                RaceDate        = raceDate.Value,
+                IsGrandPrixRace = race?.IsGrandPrixRace ?? false,
+                RaceSeriesId    = series.RaceSeriesId,
+                RaceVariantId   = race?.RaceVariantId,
+                CourseVariant   = race != null && series.Variants.Count > 1 ? race.RaceVariant.Name : null,
+                IncludedVariantIds = race == null
+                    ? includedVariants.OrderBy(v => v.DisplayOrder).Select(v => v.RaceVariantId).ToList()
+                    : new List<Guid>(),
+                IncludedVariantNames = race == null
+                    ? includedVariants.OrderBy(v => v.DisplayOrder).Select(v => v.Name).ToList()
+                    : new List<string>(),
                 FileName        = uploadBatch.FileName,
                 ParsedResults   = processedResults,
                 TotalRows       = processedResults.Count,
@@ -522,9 +615,11 @@ public class ResultsController : ControllerBase
     [ProducesResponseType(typeof(List<UploadBatchDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<UploadBatchDto>>> GetBatches([FromQuery] int? year)
     {
-        var query = _context.UploadBatches.Include(b => b.Race).AsQueryable();
+        var query = _context.UploadBatches.AsQueryable();
         if (year.HasValue)
-            query = query.Where(b => b.Race.Year == year.Value);
+            query = query.Where(b => b.Race != null
+                ? b.Race.Year == year.Value
+                : b.RaceDate!.Value.Year == year.Value);
 
         var batches = await query
             .OrderByDescending(b => b.UploadedAt)
@@ -532,11 +627,13 @@ public class ResultsController : ControllerBase
             {
                 UploadBatchId   = b.UploadBatchId,
                 RaceId          = b.RaceId,
-                RaceName        = b.Race.Name,
-                RaceDate        = b.Race.Date,
-                IsGrandPrixRace = b.Race.IsGrandPrixRace,
-                RaceSeriesId    = b.Race.RaceSeriesId,
-                RaceSeriesName  = b.Race.RaceSeries != null ? b.Race.RaceSeries.Name : null,
+                RaceName        = b.Race != null
+                    ? RaceProjections.DisplayName(b.Race.RaceVariant.RaceSeries.Name, b.Race.RaceVariant.Name, b.Race.RaceVariant.RaceSeries.Variants.Count)
+                    : b.RaceSeries!.Name + " (multiple variants)",
+                RaceDate        = b.Race != null ? b.Race.Date : b.RaceDate!.Value,
+                IsGrandPrixRace = b.Race != null && b.Race.IsGrandPrixRace,
+                RaceSeriesId    = b.Race != null ? b.Race.RaceVariant.RaceSeriesId : b.RaceSeriesId!.Value,
+                RaceSeriesName  = b.Race != null ? b.Race.RaceVariant.RaceSeries.Name : b.RaceSeries!.Name,
                 FileName        = b.FileName,
                 FileType        = b.FileType,
                 RecordsUploaded = b.RecordsUploaded,
@@ -564,6 +661,8 @@ public class ResultsController : ControllerBase
 
             if (uploadBatch == null)
                 return NotFound($"Upload batch {batchId} not found");
+            if (uploadBatch.Race != null && await RejectIfSeasonFinalizedAsync(uploadBatch.Race) is { } finalized)
+                return finalized;
 
             var results = await _context.RaceResults
                 .Where(r => r.UploadBatchId == batchId)
@@ -576,8 +675,12 @@ public class ResultsController : ControllerBase
             // Recompute gender places and GP points/standings from whatever results remain
             // for this race (a race can have results from more than one upload batch, e.g.
             // corrections or course-variant splits), not just this batch's own results.
-            await CalculateGenderPlacesAsync(uploadBatch.RaceId);
-            await _grandPrixCalculationService.RecalculateAfterResultsChangeAsync(uploadBatch.RaceId);
+            // A pending multi-variant batch has no race (or results) yet - nothing to recompute.
+            if (uploadBatch.RaceId is { } raceId)
+            {
+                await CalculateGenderPlacesAsync(raceId);
+                await _grandPrixCalculationService.RecalculateAfterResultsChangeAsync(raceId);
+            }
 
             await transaction.CommitAsync();
 
@@ -605,6 +708,15 @@ public class ResultsController : ControllerBase
             ValidRows      = results.Count(r => r.ValidationIssues.Count == 0),
             RowsWithIssues = results.Count(r => r.ValidationIssues.Count > 0)
         };
+
+    /// <summary>
+    /// A 409 response when the race counts toward a finalized Grand Prix season (changing its
+    /// results would change locked standings), otherwise null.
+    /// </summary>
+    private async Task<ObjectResult?> RejectIfSeasonFinalizedAsync(Race race) =>
+        race.IsGrandPrixRace && await _grandPrixCalculationService.IsSeasonFinalizedAsync(race.Year)
+            ? Conflict(new { message = GrandPrixSeasonFinalizedException.MessageFor(race.Year) })
+            : null;
 
     private async Task CalculateGenderPlacesAsync(Guid raceId)
     {

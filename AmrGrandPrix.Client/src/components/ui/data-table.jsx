@@ -17,7 +17,14 @@ import { cn } from '@/lib/utils';
  * `createColumnHelper()` and `data`; sorting and the search box are wired up here so callers don't
  * each hand-roll their own sort state (see the pre-existing pattern in pages/RaceResults.jsx).
  */
-export function DataTable({ columns, data, searchPlaceholder = 'Search…', emptyMessage = 'No results.', className }) {
+export function DataTable({
+  columns,
+  data,
+  searchable = true,
+  searchPlaceholder = 'Search…',
+  emptyMessage = 'No results.',
+  className,
+}) {
   const [sorting, setSorting] = useState([]);
   const [globalFilter, setGlobalFilter] = useState('');
 
@@ -34,7 +41,9 @@ export function DataTable({ columns, data, searchPlaceholder = 'Search…', empt
 
   return (
     <div className={cn('flex flex-col gap-3', className)}>
-      <SearchInput value={globalFilter} onChange={setGlobalFilter} placeholder={searchPlaceholder} className="max-w-sm" />
+      {searchable && (
+        <SearchInput value={globalFilter} onChange={setGlobalFilter} placeholder={searchPlaceholder} className="max-w-sm" />
+      )}
 
       <Table>
         <TableHeader>

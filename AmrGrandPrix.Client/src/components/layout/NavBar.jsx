@@ -142,6 +142,9 @@ export default function NavBar() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
                 <DropdownMenuItem className={dropdownItemClass} render={<NavLink to="/profile">Profile</NavLink>} />
+                {user?.runnerId && (
+                  <DropdownMenuItem className={dropdownItemClass} render={<NavLink to={`/runners/${user.runnerId}`}>My Results</NavLink>} />
+                )}
                 <DropdownMenuItem className={dropdownItemClass} onClick={handleLogout}>
                   Logout
                 </DropdownMenuItem>
@@ -207,6 +210,11 @@ export default function NavBar() {
                 <NavLink to="/profile" className={navLinkClass}>
                   Profile
                 </NavLink>
+                {user?.runnerId && (
+                  <NavLink to={`/runners/${user.runnerId}`} className={navLinkClass}>
+                    My Results
+                  </NavLink>
+                )}
                 <Button
                   type="button"
                   variant="outline"

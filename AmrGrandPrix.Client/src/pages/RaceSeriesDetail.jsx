@@ -1,16 +1,14 @@
 /**
  * Race Series Detail
- * Every running of one event across years/variants, plus an all-time statistics view and (for a
- * logged-in user linked to a runner with results in this series) a personal performance chart.
+ * Every running of one event across years/variants, plus an all-time statistics view. A
+ * logged-in user linked to a runner gets a link to their own results in this series.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { createColumnHelper } from '@tanstack/react-table';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Trophy } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-import * as tokenService from '../services/tokenService';
 import { DataTable } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,7 +16,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { formatTime, parseTimeSpanToSeconds } from '@/lib/time';
+import { formatTime } from '@/lib/time';
 
 const columnHelper = createColumnHelper();
 
@@ -28,16 +26,6 @@ function GrandPrixBadge() {
       <Trophy className="size-3" /> Grand Prix
     </Badge>
   );
-}
-
-function formatSecondsAsClock(totalSeconds) {
-  if (totalSeconds == null) return '';
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = Math.round(totalSeconds % 60);
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`;
 }
 
 const RACE_COLUMNS = [
@@ -93,40 +81,40 @@ const AGE_GROUP_COLUMNS = [
   columnHelper.accessor('raceDate', { header: 'Date Set' }),
 ];
 
-const STANDARD_VARIANT = '__standard__';
-
-function StatisticsTab({ seriesId, races }) {
-  const variants = useMemo(
-    () => [...new Set(races.map((r) => r.courseVariant || STANDARD_VARIANT))],
-    [races]
-  );
-  const [variant, setVariant] = useState(variants[0] ?? STANDARD_VARIANT);
+function StatisticsTab({ seriesId, variants }) {
+  // Variants with at least one race, in the series' display order.
+  const racedVariants = useMemo(() => variants.filter((v) => v.raceCount > 0), [variants]);
+  const [variantId, setVariantId] = useState(racedVariants[0]?.raceVariantId ?? null);
   const [gender, setGender] = useState('Male');
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!variantId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    const params = new URLSearchParams({ gender });
-    if (variant && variant !== STANDARD_VARIANT) params.set('variant', variant);
-
+    const params = new URLSearchParams({ gender, variantId });
     fetch(`/api/race-series/${seriesId}/statistics?${params}`)
       .then((r) => (r.ok ? r.json() : null))
       .then(setStats)
       .finally(() => setLoading(false));
-  }, [seriesId, variant, gender]);
+  }, [seriesId, variantId, gender]);
+
+  if (!variantId) return <p className="text-muted-foreground">No results recorded yet.</p>;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-4">
-        {variants.length > 1 && (
-          <Select value={variant} onValueChange={setVariant}>
-            <SelectTrigger className="w-48">
-              <SelectValue>{(value) => (value === STANDARD_VARIANT ? 'Standard' : value)}</SelectValue>
+        {racedVariants.length > 1 && (
+          <Select value={variantId} onValueChange={setVariantId}>
+            <SelectTrigger className="w-56">
+              <SelectValue>{(value) => racedVariants.find((v) => v.raceVariantId === value)?.name}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {variants.map((v) => (
-                <SelectItem key={v} value={v}>{v === STANDARD_VARIANT ? 'Standard' : v}</SelectItem>
+              {racedVariants.map((v) => (
+                <SelectItem key={v.raceVariantId} value={v.raceVariantId}>{v.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -163,66 +151,7 @@ function StatisticsTab({ seriesId, races }) {
   );
 }
 
-const HISTORY_COLUMNS = [
-  columnHelper.accessor('year', { header: 'Year' }),
-  columnHelper.accessor('courseVariant', { header: 'Course Variant', cell: (info) => info.getValue() || '—' }),
-  columnHelper.accessor('time', { header: 'Time', cell: (info) => formatTime(info.getValue()) }),
-  columnHelper.accessor('place', { header: 'Place', cell: (info) => info.getValue() ?? '—' }),
-  columnHelper.accessor('status', { header: 'Status' }),
-];
-
-function MyHistoryTab({ runnerId, seriesId }) {
-  const [history, setHistory] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch(`/api/runners/${runnerId}/series/${seriesId}/history`, {
-      headers: { Authorization: `Bearer ${tokenService.getAccessToken()}` },
-    })
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setHistory)
-      .finally(() => setLoading(false));
-  }, [runnerId, seriesId]);
-
-  const chartData = useMemo(
-    () =>
-      (history || [])
-        .filter((h) => h.status === 'Finished' && h.time)
-        .map((h) => ({ year: h.year, seconds: parseTimeSpanToSeconds(h.time) }))
-        .sort((a, b) => a.year - b.year),
-    [history]
-  );
-
-  if (loading) return <Skeleton className="h-64 w-full" />;
-  if (!history || history.length === 0) {
-    return <p className="py-8 text-center text-sm text-muted-foreground">You don't have any results in this series yet.</p>;
-  }
-
-  return (
-    <div className="flex flex-col gap-6">
-      {chartData.length > 1 && (
-        <Card>
-          <CardHeader><CardTitle>Your Finish Time Over the Years</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={chartData} margin={{ left: 8, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                <XAxis dataKey="year" tick={{ fontSize: 12 }} />
-                <YAxis tickFormatter={formatSecondsAsClock} tick={{ fontSize: 12 }} width={60} />
-                <Tooltip formatter={(value) => [formatSecondsAsClock(value), 'Time']} labelFormatter={(year) => `Year ${year}`} />
-                <Line type="monotone" dataKey="seconds" stroke="var(--color-primary)" strokeWidth={2} dot={{ r: 4 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
-
-      <DataTable columns={HISTORY_COLUMNS} data={history} searchPlaceholder="Search…" />
-    </div>
-  );
-}
-
-const VALID_TABS = new Set(['races', 'stats', 'mine']);
+const VALID_TABS = new Set(['races', 'stats']);
 
 export default function RaceSeriesDetail() {
   const { seriesId } = useParams();
@@ -247,7 +176,7 @@ export default function RaceSeriesDetail() {
       .finally(() => setLoading(false));
   }, [seriesId]);
 
-  const showMyHistory = isAuthenticated() && !!user?.runnerId;
+  const myRunnerId = isAuthenticated() ? user?.runnerId : null;
 
   return (
     <div className="min-h-svh bg-background px-4 py-8 md:py-12">
@@ -268,8 +197,16 @@ export default function RaceSeriesDetail() {
               {series.isGrandPrixSeries && <GrandPrixBadge />}
             </div>
             {series.description && <p className="mb-6 text-muted-foreground">{series.description}</p>}
+            {myRunnerId && (
+              <Link
+                to={`/runners/${myRunnerId}/series/${seriesId}`}
+                className="mb-6 inline-block text-sm font-medium text-primary hover:underline"
+              >
+                My results in this series →
+              </Link>
+            )}
 
-            <Tabs defaultValue={initialTab === 'mine' && !showMyHistory ? 'races' : initialTab}>
+            <Tabs defaultValue={initialTab}>
               <TabsList variant="line" className="mb-6 h-auto gap-4 border-b border-border p-0">
                 <TabsTrigger value="races" className="rounded-none px-1 py-2 text-base data-active:font-semibold">
                   Races
@@ -277,20 +214,10 @@ export default function RaceSeriesDetail() {
                 <TabsTrigger value="stats" className="rounded-none px-1 py-2 text-base data-active:font-semibold">
                   Statistics
                 </TabsTrigger>
-                {showMyHistory && (
-                  <TabsTrigger value="mine" className="rounded-none px-1 py-2 text-base data-active:font-semibold">
-                    My History
-                  </TabsTrigger>
-                )}
               </TabsList>
 
               <TabsContent value="races"><RacesTab races={series.races} /></TabsContent>
-              <TabsContent value="stats"><StatisticsTab seriesId={seriesId} races={series.races} /></TabsContent>
-              {showMyHistory && (
-                <TabsContent value="mine">
-                  <MyHistoryTab runnerId={user.runnerId} seriesId={seriesId} />
-                </TabsContent>
-              )}
+              <TabsContent value="stats"><StatisticsTab seriesId={seriesId} variants={series.variants} /></TabsContent>
             </Tabs>
           </>
         )}

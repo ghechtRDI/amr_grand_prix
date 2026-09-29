@@ -1,12 +1,16 @@
 /**
  * Admin Results Management
- * Lists upload batches, allows deletion and GP recalculation.
+ * Lists upload batches, allows deletion and GP recalculation, and finalizes (locks) a year's
+ * Grand Prix standings once the season is over.
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertCircle, CheckCircle2, Pencil, Trophy, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle2, Lock, LockOpen, Pencil, Trophy, X } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
+import * as raceService from '../../services/raceService';
+import * as standingsService from '../../services/standingsService';
+import { readError } from '../../services/api';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -36,13 +40,7 @@ import { cn, formatDateOnly } from '@/lib/utils';
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
-const NO_SERIES = '__no_series__';
 const UNGROUPED = '__ungrouped__';
-
-const authHeaders = () => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${tokenService.getAccessToken()}`,
-});
 
 const BATCH_STATUS_BADGE_CLASSES = {
   Saved: 'bg-success/10 text-success dark:bg-success/20',
@@ -87,9 +85,15 @@ export default function ResultsManagement() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
 
+  // Finalization status of the selected year's Grand Prix
+  const [season, setSeason] = useState(null);
+  const [seasonDialog, setSeasonDialog] = useState(null); // 'finalize' | 'unfinalize' | null
+  const [seasonBusy, setSeasonBusy] = useState(false);
+
   const [raceSeriesList, setRaceSeriesList] = useState([]);
   const [editTarget, setEditTarget] = useState(null);
-  const [editForm, setEditForm] = useState({ name: '', date: '', raceSeriesId: NO_SERIES });
+  const [editForm, setEditForm] = useState({ raceSeriesId: '', raceVariantId: '', date: '', isGrandPrixRace: false });
+  const [editVariants, setEditVariants] = useState([]);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState(null);
@@ -115,36 +119,53 @@ export default function ResultsManagement() {
   }, [loadBatches]);
 
   useEffect(() => {
+    setSeason(null);
+    standingsService.getSeason(year).then(setSeason).catch(() => setSeason(null));
+  }, [year]);
+
+  useEffect(() => {
     fetch('/api/race-series')
       .then((r) => (r.ok ? r.json() : []))
       .then(setRaceSeriesList)
       .catch(() => setRaceSeriesList([]));
   }, []);
 
+  const loadEditVariants = async (seriesId) => {
+    const series = await raceService.getSeriesDetail(seriesId);
+    setEditVariants(series.variants);
+    return series.variants;
+  };
+
   const openEdit = async (race) => {
     setEditTarget(race);
     setEditError(null);
     setEditLoading(true);
     try {
-      const res = await fetch(`/api/races/detail/${race.raceId}`, { headers: authHeaders() });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const full = await res.json();
+      const full = await raceService.getRace(race.raceId);
+      await loadEditVariants(full.raceSeriesId);
       setEditForm({
-        name: full.name,
+        raceSeriesId: full.raceSeriesId,
+        raceVariantId: full.raceVariantId,
         date: full.date,
-        raceSeriesId: full.raceSeriesId || NO_SERIES,
+        isGrandPrixRace: full.isGrandPrixRace,
         // Carried through untouched so saving doesn't wipe fields this dialog doesn't edit.
-        courseVariant: full.courseVariant,
         location: full.location,
-        recordTimeMale: full.recordTimeMale,
-        recordTimeFemale: full.recordTimeFemale,
-        recordHolderMale: full.recordHolderMale,
-        recordHolderFemale: full.recordHolderFemale,
       });
     } catch (e) {
       setEditError(e.message);
     } finally {
       setEditLoading(false);
+    }
+  };
+
+  // Moving a race to another series means picking one of that series' variants.
+  const handleEditSeriesChange = async (seriesId) => {
+    setEditForm((f) => ({ ...f, raceSeriesId: seriesId, raceVariantId: '' }));
+    try {
+      const variants = await loadEditVariants(seriesId);
+      if (variants.length === 1) setEditForm((f) => ({ ...f, raceVariantId: variants[0].raceVariantId }));
+    } catch (e) {
+      setEditError(e.message);
     }
   };
 
@@ -154,29 +175,15 @@ export default function ResultsManagement() {
   };
 
   const handleEditSave = async () => {
+    if (!editForm.raceVariantId) {
+      setEditError('Please select a course variant');
+      return;
+    }
     setEditSaving(true);
     setEditError(null);
     try {
-      const res = await fetch(`/api/races/${editTarget.raceId}`, {
-        method: 'PUT',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          name: editForm.name,
-          date: editForm.date,
-          courseVariant: editForm.courseVariant,
-          location: editForm.location,
-          raceSeriesId: editForm.raceSeriesId === NO_SERIES ? null : editForm.raceSeriesId,
-          recordTimeMale: editForm.recordTimeMale,
-          recordTimeFemale: editForm.recordTimeFemale,
-          recordHolderMale: editForm.recordHolderMale,
-          recordHolderFemale: editForm.recordHolderFemale,
-        }),
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || `HTTP ${res.status}`);
-      }
-      setMessage({ type: 'success', text: `Updated ${editForm.name}.` });
+      const updated = await raceService.updateRace(editTarget.raceId, editForm);
+      setMessage({ type: 'success', text: `Updated ${updated.name}${updated.courseVariant ? ` – ${updated.courseVariant}` : ''} ${updated.year}.` });
       closeEdit();
       await loadBatches();
     } catch (e) {
@@ -194,10 +201,7 @@ export default function ResultsManagement() {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${tokenService.getAccessToken()}` },
       });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || `HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(await readError(res));
       setMessage({ type: 'success', text: `Deleted ${batch.recordsUploaded} results from ${batch.raceName}.` });
       await loadBatches();
     } catch (e) {
@@ -229,6 +233,10 @@ export default function ResultsManagement() {
               raceDate: data.raceDate,
               isGrandPrixRace: data.isGrandPrixRace,
               courseVariant: data.courseVariant || '',
+              raceSeriesId: data.raceSeriesId,
+              raceVariantId: data.raceVariantId,
+              includedVariantIds: data.includedVariantIds,
+              knownVariants: data.includedVariantNames,
             },
             uploadBatchId: data.uploadBatchId,
             parsedResults: data.parsedResults,
@@ -249,15 +257,7 @@ export default function ResultsManagement() {
     setRecalculating(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/standings/${year}/recalculate`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${tokenService.getAccessToken()}` },
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
+      const data = await standingsService.recalculateStandings(year);
       setMessage({ type: 'success', text: data.message || 'Standings recalculated.' });
     } catch (e) {
       setMessage({ type: 'error', text: `Recalculation failed: ${e.message}` });
@@ -267,11 +267,36 @@ export default function ResultsManagement() {
     }
   };
 
+  const handleSeasonChange = async () => {
+    const finalizing = seasonDialog === 'finalize';
+    setSeasonBusy(true);
+    setMessage(null);
+    try {
+      const updated = finalizing
+        ? await standingsService.finalizeSeason(year)
+        : await standingsService.unfinalizeSeason(year);
+      setSeason(updated);
+      setMessage({
+        type: 'success',
+        text: finalizing
+          ? `The ${year} Grand Prix is finalized. Its standings are now locked.`
+          : `The ${year} Grand Prix is un-finalized. Make your corrections, then finalize it again.`,
+      });
+    } catch (e) {
+      setMessage({ type: 'error', text: `${finalizing ? 'Finalize' : 'Un-finalize'} failed: ${e.message}` });
+    } finally {
+      setSeasonBusy(false);
+      setSeasonDialog(null);
+    }
+  };
+
   // Group batches by race for easier reading
+  // A pending multi-variant upload has no race until it's saved, so it gets a card of its own.
   const raceGroups = batches.reduce((acc, b) => {
-    const key = b.raceId;
+    const key = b.raceId ?? `pending:${b.uploadBatchId}`;
     if (!acc[key]) {
       acc[key] = {
+        key,
         raceId: b.raceId,
         raceName: b.raceName,
         raceDate: b.raceDate,
@@ -329,7 +354,8 @@ export default function ResultsManagement() {
             <Button
               variant="outline"
               onClick={() => setRecalculateDialogOpen(true)}
-              disabled={recalculating}
+              disabled={recalculating || !!season?.isFinalized}
+              title={season?.isFinalized ? `The ${year} Grand Prix is finalized` : undefined}
             >
               {recalculating ? 'Recalculating...' : 'Recalculate GP Standings'}
             </Button>
@@ -338,6 +364,50 @@ export default function ResultsManagement() {
             </Button>
           </div>
         </div>
+
+        {season && (
+          <div
+            className={cn(
+              'mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm',
+              season.isFinalized
+                ? 'border-success/30 bg-success/10'
+                : 'border-amber-500/30 bg-amber-500/10'
+            )}
+          >
+            <div className="flex items-center gap-2">
+              {season.isFinalized ? (
+                <>
+                  <Lock className="size-4 text-success" aria-hidden="true" />
+                  <span>
+                    <span className="font-semibold">{year} Grand Prix finalized</span>
+                    {season.finalizedAt && (
+                      <span className="text-muted-foreground">
+                        {' '}on {new Date(season.finalizedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                      </span>
+                    )}
+                    <span className="text-muted-foreground"> · Standings are locked.</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <LockOpen className="size-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                  <span>
+                    <span className="font-semibold">{year} Grand Prix in progress</span>
+                    <span className="text-muted-foreground"> · Standings are shown as tentative until finalized.</span>
+                  </span>
+                </>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant={season.isFinalized ? 'outline' : 'default'}
+              onClick={() => setSeasonDialog(season.isFinalized ? 'unfinalize' : 'finalize')}
+              disabled={seasonBusy}
+            >
+              {season.isFinalized ? 'Un-finalize' : `Finalize ${year} Grand Prix`}
+            </Button>
+          </div>
+        )}
 
         {message && (
           <Alert variant={message.type === 'success' ? 'success' : 'destructive'} className="mb-4">
@@ -392,13 +462,17 @@ export default function ResultsManagement() {
             </div>
 
             {section.races.map((race) => (
-              <Card key={race.raceId} className="mb-6">
+              <Card key={race.key} className="mb-6">
                 <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 border-b border-border pb-4">
                   <div className="flex flex-wrap items-center gap-3">
                     <h3 className="text-base font-semibold">
-                      <Link to={`/races/${race.raceId}/results`} className="text-foreground hover:text-primary">
-                        {race.raceName}
-                      </Link>
+                      {race.raceId ? (
+                        <Link to={`/races/${race.raceId}/results`} className="text-foreground hover:text-primary">
+                          {race.raceName}
+                        </Link>
+                      ) : (
+                        race.raceName
+                      )}
                     </h3>
                     <span className="text-sm text-muted-foreground">
                       {formatDateOnly(race.raceDate, { year: 'numeric', month: 'short', day: 'numeric' })}
@@ -407,21 +481,23 @@ export default function ResultsManagement() {
                       <Badge variant="secondary" className="text-[10px] font-bold tracking-wide uppercase">Grand Prix</Badge>
                     )}
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => openEdit(race)}
-                    >
-                      <Pencil className="size-3.5" /> Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      nativeButton={false}
-                      render={<Link to={`/races/${race.raceId}/results`}>View Results</Link>}
-                    />
-                  </div>
+                  {race.raceId && (
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openEdit(race)}
+                      >
+                        <Pencil className="size-3.5" /> Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        nativeButton={false}
+                        render={<Link to={`/races/${race.raceId}/results`}>View Results</Link>}
+                      />
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent className="px-0 pb-0">
               <Table>
@@ -519,6 +595,42 @@ export default function ResultsManagement() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={!!seasonDialog} onOpenChange={(open) => !open && !seasonBusy && setSeasonDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {seasonDialog === 'finalize' ? `Finalize the ${year} Grand Prix?` : `Un-finalize the ${year} Grand Prix?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {seasonDialog === 'finalize'
+                ? `Standings will be recalculated one last time and then locked. While the ${year} Grand Prix is finalized, standings can't be recalculated, and results for its Grand Prix races can't be added, edited, or deleted. Runner pages will show ${year} as final instead of tentative. You can un-finalize later if results need correcting.`
+                : `The ${year} standings will unlock and show as tentative again, so results can be corrected and standings recalculated. Remember to finalize the ${year} Grand Prix again once the corrections are done.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {seasonDialog === 'finalize' && season?.grandPrixRacesWithoutResults?.length > 0 && (
+            <Alert variant="destructive">
+              <AlertTriangle />
+              <AlertDescription>
+                {season.grandPrixRacesWithoutResults.length} of {season.grandPrixRaceCount} Grand Prix races in {year} have no results yet:{' '}
+                {season.grandPrixRacesWithoutResults.join(', ')}.
+              </AlertDescription>
+            </Alert>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={seasonBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant={seasonDialog === 'finalize' ? 'default' : 'destructive'}
+              onClick={handleSeasonChange}
+              disabled={seasonBusy}
+            >
+              {seasonBusy
+                ? (seasonDialog === 'finalize' ? 'Finalizing…' : 'Un-finalizing…')
+                : (seasonDialog === 'finalize' ? 'Finalize' : 'Un-finalize')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={!!editTarget} onOpenChange={(open) => !open && closeEdit()}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -540,13 +652,40 @@ export default function ResultsManagement() {
                 </Alert>
               )}
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="editName">Race Name</Label>
-                <Input
-                  id="editName"
-                  value={editForm.name}
-                  onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
-                />
+                <Label htmlFor="editSeries">Race Series</Label>
+                <Select value={editForm.raceSeriesId || undefined} onValueChange={handleEditSeriesChange}>
+                  <SelectTrigger id="editSeries" className="w-full">
+                    <SelectValue placeholder="-- Select a series --">
+                      {(value) => raceSeriesList.find((s) => s.raceSeriesId === value)?.name || '-- Select a series --'}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {raceSeriesList.map((s) => (
+                      <SelectItem key={s.raceSeriesId} value={s.raceSeriesId}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+              {editVariants.length > 1 && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="editVariant">Course Variant</Label>
+                  <Select
+                    value={editForm.raceVariantId || undefined}
+                    onValueChange={(v) => setEditForm((f) => ({ ...f, raceVariantId: v }))}
+                  >
+                    <SelectTrigger id="editVariant" className="w-full">
+                      <SelectValue placeholder="-- Select a variant --">
+                        {(value) => editVariants.find((v) => v.raceVariantId === value)?.name || '-- Select a variant --'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editVariants.map((v) => (
+                        <SelectItem key={v.raceVariantId} value={v.raceVariantId}>{v.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="editDate">Race Date</Label>
                 <Input
@@ -556,29 +695,18 @@ export default function ResultsManagement() {
                   onChange={(e) => setEditForm((f) => ({ ...f, date: e.target.value }))}
                 />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="editSeries">Race Series</Label>
-                <Select
-                  value={editForm.raceSeriesId || NO_SERIES}
-                  onValueChange={(v) => setEditForm((f) => ({ ...f, raceSeriesId: v }))}
-                >
-                  <SelectTrigger id="editSeries" className="w-full">
-                    <SelectValue placeholder="No series">
-                      {(value) =>
-                        value === NO_SERIES
-                          ? 'No series'
-                          : raceSeriesList.find((s) => s.raceSeriesId === value)?.name || 'No series'
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_SERIES}>No series</SelectItem>
-                    {raceSeriesList.map((s) => (
-                      <SelectItem key={s.raceSeriesId} value={s.raceSeriesId}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  className="size-4 rounded border-input accent-primary"
+                  checked={!!editForm.isGrandPrixRace}
+                  onChange={(e) => setEditForm((f) => ({ ...f, isGrandPrixRace: e.target.checked }))}
+                />
+                Counts toward the Grand Prix this year
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Changing the Grand Prix flag recalculates points and standings for the year.
+              </p>
             </div>
           )}
 

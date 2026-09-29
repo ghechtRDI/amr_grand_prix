@@ -13,13 +13,12 @@ public class RaceStatisticsService : IRaceStatisticsService
         _context = context;
     }
 
-    public async Task<RaceSeriesStatisticsDto> GetStatisticsAsync(Guid raceSeriesId, string? courseVariant, Gender gender)
+    public async Task<RaceSeriesStatisticsDto> GetStatisticsAsync(Guid raceVariantId, Gender gender)
     {
         var results = await _context.RaceResults
             .Include(r => r.Race)
             .Include(r => r.Runner)
-            .Where(r => r.Race.RaceSeriesId == raceSeriesId &&
-                        r.Race.CourseVariant == courseVariant &&
+            .Where(r => r.Race.RaceVariantId == raceVariantId &&
                         r.Gender == gender &&
                         r.Status == ResultStatus.Finished &&
                         r.Time != null)
@@ -27,7 +26,7 @@ public class RaceStatisticsService : IRaceStatisticsService
 
         var dto = new RaceSeriesStatisticsDto
         {
-            CourseVariant = courseVariant,
+            RaceVariantId = raceVariantId,
             Gender = gender,
             Top20AllTime = results
                 .OrderBy(r => r.Time)

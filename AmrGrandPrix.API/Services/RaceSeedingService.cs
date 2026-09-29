@@ -4,6 +4,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AmrGrandPrix.API.Services;
 
+/// <summary>
+/// Seeds the catalog of known race series and their course variants. Idempotent: series are
+/// matched by name and variants by name/alias, so existing rows are never duplicated or
+/// overwritten. Races (yearly runnings) are not seeded — they're created when results are uploaded.
+/// </summary>
 public class RaceSeedingService
 {
     private readonly ApplicationDbContext _context;
@@ -15,133 +20,78 @@ public class RaceSeedingService
         _logger = logger;
     }
 
-    /// <summary>
-    /// Seeds the database with the 9 Grand Prix races for a given year
-    /// </summary>
-    public async Task SeedGrandPrixRacesAsync(int year)
+    private record VariantTemplate(string Name, bool IsGrandPrix, params string[] Aliases);
+
+    private record SeriesTemplate(string Name, params VariantTemplate[] Variants);
+
+    private static readonly SeriesTemplate[] Catalog =
+    [
+        new("Crazy Lazy", new VariantTemplate(RaceVariant.StandardName, true)),
+        new("Kal's Knoya Ridge Run",
+            // Full Monty is the GP race unless snow forces the Dome to be the GP race that year
+            new VariantTemplate("Full Monty", true),
+            new VariantTemplate("Dome", false, "Original", "Dome Finish"),
+            new VariantTemplate("Happy Trails", false, "Happy Trail")),
+        new("Government Peak Climb",
+            new VariantTemplate("Round Trip", true, "Up-and-Down", "Up and Down"),
+            new VariantTemplate("Uphill Only", false, "Up Hill Only")),
+        new("Blueberry Rampage",
+            new VariantTemplate("Full Mountain", true, "Adult - Full Mountain"),
+            new VariantTemplate("Junior Blueberry Knoll", true, "Junior - Blueberry Knoll"),
+            new VariantTemplate("Young at Heart Blueberry Knoll", false, "Adult - Young at Heart Blueberry Knoll")),
+        new("Bird Ridge",
+            new VariantTemplate("Hill Climb", true, "Robert Spurr Memorial Hill Climb"),
+            new VariantTemplate("Jack's Run", true)),
+        new("Juneau Ridge Race", new VariantTemplate(RaceVariant.StandardName, true)),
+        new("Mount Marathon Race",
+            new VariantTemplate("Adult", true),
+            new VariantTemplate("Junior", true, "Juniors")),
+        new("Crow Pass Crossing", new VariantTemplate(RaceVariant.StandardName, false)),
+        new("Alyeska Cirque Series", new VariantTemplate(RaceVariant.StandardName, true)),
+        new("Matanuska Peak Challenge", new VariantTemplate(RaceVariant.StandardName, true)),
+        new("Veins of Gold", new VariantTemplate(RaceVariant.StandardName, true)),
+    ];
+
+    public async Task SeedRaceCatalogAsync()
     {
-        _logger.LogInformation("Seeding Grand Prix races for year {Year}", year);
+        var existing = await _context.RaceSeries.Include(s => s.Variants).ToListAsync();
+        var seriesCreated = 0;
+        var variantsCreated = 0;
 
-        // Check if races for this year already exist
-        var existingRaces = await _context.Races
-            .Where(r => r.Year == year && r.IsGrandPrixRace)
-            .CountAsync();
-
-        if (existingRaces > 0)
+        foreach (var template in Catalog)
         {
-            _logger.LogInformation("Grand Prix races for year {Year} already exist. Skipping seed.", year);
-            return;
+            var series = existing.FirstOrDefault(s => string.Equals(s.Name, template.Name, StringComparison.OrdinalIgnoreCase));
+            if (series == null)
+            {
+                series = new RaceSeries { RaceSeriesId = Guid.NewGuid(), Name = template.Name, CreatedAt = DateTime.UtcNow };
+                _context.RaceSeries.Add(series);
+                seriesCreated++;
+            }
+
+            for (var i = 0; i < template.Variants.Length; i++)
+            {
+                var v = template.Variants[i];
+                if (series.Variants.Any(existingVariant => existingVariant.Matches(v.Name)))
+                    continue;
+
+                series.Variants.Add(new RaceVariant
+                {
+                    RaceVariantId = Guid.NewGuid(),
+                    RaceSeriesId = series.RaceSeriesId,
+                    Name = v.Name,
+                    Aliases = v.Aliases.ToList(),
+                    IsGrandPrixByDefault = v.IsGrandPrix,
+                    DisplayOrder = i,
+                    CreatedAt = DateTime.UtcNow
+                });
+                variantsCreated++;
+            }
         }
 
-        var races = GetGrandPrixRaceTemplates(year);
+        if (seriesCreated + variantsCreated == 0)
+            return;
 
-        await _context.Races.AddRangeAsync(races);
         await _context.SaveChangesAsync();
-
-        _logger.LogInformation("Successfully seeded {Count} Grand Prix races for year {Year}", races.Count, year);
-    }
-
-    /// <summary>
-    /// Gets the template for all 9 Grand Prix races for a given year
-    /// </summary>
-    private List<Race> GetGrandPrixRaceTemplates(int year)
-    {
-        var races = new List<Race>
-        {
-            new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = "Crazy Lazy",
-                IsGrandPrixRace = true,
-                Date = new DateOnly(year, 4, 15), // Approximate - usually mid-April
-                Year = year,
-                Location = "Anchorage, AK",
-                CreatedAt = DateTime.UtcNow
-            },
-            new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = "Kal's Knoya Ridge Run",
-                IsGrandPrixRace = true,
-                Date = new DateOnly(year, 5, 1), // Approximate - usually early May
-                Year = year,
-                CourseVariant = "Full Monty",
-                Location = "Girdwood, AK",
-                CreatedAt = DateTime.UtcNow
-            },
-            new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = "Government Peak Climb",
-                IsGrandPrixRace = true,
-                Date = new DateOnly(year, 5, 20), // Approximate - usually late May
-                Year = year,
-                CourseVariant = "Up-and-Down",
-                Location = "Hatcher Pass, AK",
-                CreatedAt = DateTime.UtcNow
-            },
-            new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = "Robert Spurr Memorial Hill Climb (Bird Ridge)",
-                IsGrandPrixRace = true,
-                Date = new DateOnly(year, 6, 1), // Approximate - usually early June
-                Year = year,
-                Location = "Bird Creek, AK",
-                CreatedAt = DateTime.UtcNow
-            },
-            new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = "Juneau Ridge Race",
-                IsGrandPrixRace = true,
-                Date = new DateOnly(year, 6, 15), // Approximate - usually mid-June
-                Year = year,
-                Location = "Juneau, AK",
-                CreatedAt = DateTime.UtcNow
-            },
-            new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = "Mount Marathon Race",
-                IsGrandPrixRace = true,
-                Date = new DateOnly(year, 7, 4), // Always July 4th
-                Year = year,
-                Location = "Seward, AK",
-                CreatedAt = DateTime.UtcNow
-            },
-            new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = "Cirque Series Alyeska",
-                IsGrandPrixRace = true,
-                Date = new DateOnly(year, 7, 20), // Approximate - usually late July
-                Year = year,
-                Location = "Girdwood, AK",
-                CreatedAt = DateTime.UtcNow
-            },
-            new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = "Matanuska Peak Challenge",
-                IsGrandPrixRace = true,
-                Date = new DateOnly(year, 8, 1), // Approximate - usually early August
-                Year = year,
-                Location = "Palmer, AK",
-                CreatedAt = DateTime.UtcNow
-            },
-            new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = "Veins of Gold",
-                IsGrandPrixRace = true,
-                Date = new DateOnly(year, 9, 1), // Approximate - usually early September
-                Year = year,
-                Location = "Juneau, AK",
-                CreatedAt = DateTime.UtcNow
-            }
-        };
-
-        return races;
+        _logger.LogInformation("Seeded {SeriesCount} race series and {VariantCount} variants", seriesCreated, variantsCreated);
     }
 }

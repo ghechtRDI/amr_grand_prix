@@ -34,4 +34,23 @@ public class KnownVariantsHintTests
 
         prefix.TrimEnd().Should().EndWith("---");
     }
+
+    [Fact]
+    public void BuildPrefix_OnlyTheseVariants_SaysListIsComplete()
+    {
+        var prefix = KnownVariantsHint.BuildPrefix(new[] { "Adult", "Junior" }, onlyTheseVariants: true);
+
+        prefix.Should().Contain("- Adult");
+        prefix.Should().Contain("- Junior");
+        prefix.Should().Contain("ONLY the following course variants");
+        prefix.Should().Contain("never repeat the same set of results");
+        prefix.Should().NotContain("reuse one of these exact names");
+        prefix.TrimEnd().Should().EndWith("---");
+    }
+
+    [Fact]
+    public void BuildPrefix_OnlyTheseVariantsButNoVariants_ReturnsEmptyString()
+    {
+        KnownVariantsHint.BuildPrefix(new List<string>(), onlyTheseVariants: true).Should().BeEmpty();
+    }
 }

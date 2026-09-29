@@ -64,19 +64,25 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
             return 0;
         }
 
-        if (!race.IsGrandPrixRace)
-        {
-            _logger.LogInformation("Race {RaceId} is not a Grand Prix race, skipping points calculation", raceId);
+        if (!await AffectsStandingsAsync(race))
             return 0;
-        }
 
-        // Delete existing points for this race
+        await EnsureSeasonNotFinalizedAsync(race.Year);
+
+        // Delete existing points for this race (also clears stale points if the race was
+        // un-flagged as a Grand Prix race)
         var existingPoints = await _context.GrandPrixPoints
             .Where(p => p.RaceId == raceId)
             .ToListAsync();
 
         _context.GrandPrixPoints.RemoveRange(existingPoints);
         await _context.SaveChangesAsync();
+
+        if (!race.IsGrandPrixRace)
+        {
+            _logger.LogInformation("Race {RaceId} is not a Grand Prix race, skipping points calculation", raceId);
+            return 0;
+        }
 
         // Get finished results only
         var results = race.Results
@@ -192,6 +198,8 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
     public async Task<int> UpdateStandingsAsync(int year)
     {
         _logger.LogInformation("Updating standings for year {Year}", year);
+
+        await EnsureSeasonNotFinalizedAsync(year);
 
         // Delete existing standings for this year
         var existingStandings = await _context.GrandPrixStandings
@@ -334,6 +342,10 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
             if (race == null)
                 return false;
 
+            // A race that doesn't count and has no leftover points can't change standings
+            if (!await AffectsStandingsAsync(race))
+                return true;
+
             // Recalculate points for this race
             await CalculateRacePointsAsync(raceId);
 
@@ -342,10 +354,27 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
 
             return true;
         }
+        catch (GrandPrixSeasonFinalizedException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error recalculating after results change for race {RaceId}", raceId);
             return false;
         }
+    }
+
+    public Task<bool> IsSeasonFinalizedAsync(int year) =>
+        _context.GrandPrixSeasons.AnyAsync(s => s.Year == year && s.IsFinalized);
+
+    /// <summary>Whether the race counts toward the Grand Prix or still has points from when it did.</summary>
+    private async Task<bool> AffectsStandingsAsync(Race race) =>
+        race.IsGrandPrixRace || await _context.GrandPrixPoints.AnyAsync(p => p.RaceId == race.RaceId);
+
+    private async Task EnsureSeasonNotFinalizedAsync(int year)
+    {
+        if (await IsSeasonFinalizedAsync(year))
+            throw new GrandPrixSeasonFinalizedException(year);
     }
 }

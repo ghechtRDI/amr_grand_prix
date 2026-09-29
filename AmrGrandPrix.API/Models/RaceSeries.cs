@@ -3,8 +3,8 @@ using System.ComponentModel.DataAnnotations;
 namespace AmrGrandPrix.API.Models;
 
 /// <summary>
-/// Groups every running of the same physical event across years and course variants
-/// (e.g. all "Mount Marathon Race" instances) so they can be browsed and compared together.
+/// A recurring event (e.g. "Mount Marathon Race"). It owns the <see cref="RaceVariant"/>s
+/// (courses) that are run each year; every <see cref="Race"/> is one year's running of one variant.
 /// </summary>
 public class RaceSeries
 {
@@ -20,5 +20,5 @@ public class RaceSeries
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    public virtual ICollection<Race> Races { get; set; } = new List<Race>();
+    public virtual ICollection<RaceVariant> Variants { get; set; } = new List<RaceVariant>();
 }

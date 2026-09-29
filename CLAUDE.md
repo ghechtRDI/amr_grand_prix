@@ -56,12 +56,15 @@ dotnet ef database update
 ### Backend (`AmrGrandPrix.API/`)
 
 **Data model** (`Models/`):
-- `Race` — race event with `IsGrandPrixRace`, `Year`, `Date`
+- `RaceSeries` — a recurring event (e.g. "Mount Marathon Race"); owns its `RaceVariant`s
+- `RaceVariant` — a course run year after year within a series (e.g. Knoya's "Full Monty"/"Dome"/"Happy Trails", MMR's "Adult"/"Junior"); has `Aliases` (alternate names, used to match LLM section labels), `IsGrandPrixByDefault`, `DisplayOrder`, and course records. Single-course series have one variant named "Standard" (APIs return `courseVariant: null` for these)
+- `Race` — one year's running of one variant (unique per `RaceVariantId` + `Year`) with `IsGrandPrixRace` (defaults from the variant but can be overridden per year, e.g. Knoya moves the GP to the Dome in snowy years), `Year`, `Date`. Name/series come from the variant — use `RaceProjections.ToDto` / `RaceProjections.DisplayName`
 - `Runner` — person with gender, DOB, name
 - `RaceResult` — links Runner to Race with time, place, age, gender, status (Finished/DNF/DNS/DQ)
 - `GrandPrixPoints` — computed points per runner per race, split by Division (OpenMale/OpenFemale/OpenNonbinary/AgeMale/AgeFemale/AgeNonbinary); Nonbinary runners score in their own division, ranked only against other nonbinary finishers
 - `GrandPrixStanding` — season standings per runner per division, best-4-races logic
-- `UploadBatch` — tracks file uploads; includes LLM audit fields (RawLlmJson, LlmModel, LlmInputTokens, LlmOutputTokens)
+- `GrandPrixSeason` — per-year finalization (`IsFinalized`, `FinalizedAt`, `FinalizedBy`). While a year is finalized its points/standings are locked: recalculation and result save/edit/delete on its GP races return 409 (`GrandPrixSeasonFinalizedException` backstop in `GrandPrixCalculationService`). Admins finalize/un-finalize from Results Management (`POST /api/standings/{year}/finalize|unfinalize`); unfinalized years show as tentative on runner pages
+- `UploadBatch` — tracks file uploads; includes LLM audit fields (RawLlmJson, LlmModel, LlmInputTokens, LlmOutputTokens). `RaceId` is null while a multi-variant upload is pending (held against `RaceSeriesId` + `RaceDate` + `IncludedVariantIds` instead); it's set on save
 
 **Scoring rules** (`Models/GrandPrixConstants.cs`, `Services/GrandPrix/GrandPrixCalculationService.cs`):
 - Open Division: top 20 finishers per gender score points (100/90/85…1); +10 bonus for course record
@@ -72,10 +75,10 @@ dotnet ef database update
 **Results upload pipeline** (`Services/`):
 1. `ResultsController.UploadResults` receives file upload
 2. `ILlmExtractionService` extracts text (PdfPig / plain text / ClosedXML) then calls the configured `ILlmProvider`
-3. LLM returns structured JSON: `sections[].{name, gender, rows[].{place, name, age, gender, time_string, status, notes}}`
-4. `ResultsProcessingService` converts `List<ExtractedSection>` → `List<ResultRow>` (validates, parses times, resolves gender from section header)
+3. LLM returns structured JSON: `sections[].{name, gender, course, rows[].{place, name, age, gender, time_string, status, notes}}` (hinted with the series' variant names)
+4. `ResultsProcessingService` converts `List<ExtractedSection>` → `List<ResultRow>` (validates, parses times, resolves gender from section header), then `AssignVariants` maps each section's course label to a `RaceVariant` by name/alias
 5. `RunnerMatchingService` fuzzy-matches names to existing `Runner` records
-6. User reviews in the wizard and saves via `ResultsController.SaveResults`
+6. User reviews in the wizard (rows for other variants are routed to that variant's race for the year, created on demand) and saves via `ResultsController.SaveResults`. When Step 1 has 2+ variants ticked (multi-variant upload) no race is created up front: the LLM is told the file contains only those variants, sections are routed only to them, and each variant's race is created at save time only if it had results. Whole sections can be removed in Data Review (e.g. ones the LLM duplicated)
 7. `GrandPrixCalculationService` recalculates standings for Grand Prix races
 
 **LLM services** (`Services/LlmExtraction/`):
@@ -84,7 +87,7 @@ dotnet ef database update
 - Text extractors: `PdfTextExtractor` (PdfPig), `CsvTextExtractor`, `XlsxTextExtractor` (ClosedXML)
 - Config keys: `Llm:Provider`, `Llm:Anthropic:ApiKey`/`Model`, `Llm:Ollama:BaseUrl`/`Model`
 
-**Controllers**: `AuthController`, `RacesController`, `ResultsController`, `RunnersController`, `StandingsController`, `UserManagementController`
+**Controllers**: `AuthController`, `RacesController`, `RaceSeriesController` (series + variant CRUD, series/variant merge, per-variant statistics), `ResultsController`, `RunnersController`, `StandingsController`, `UserManagementController`
 
 **Auth**: JWT bearer tokens, ASP.NET Identity, email confirmation via MailHog in dev. `ResultsController` requires `Admin`/`Manager` role; standings/results reads are `[AllowAnonymous]`.
 
@@ -103,5 +106,5 @@ dotnet ef database update
 - `GrandPrixCalculationService` has its own local scoring table that duplicates `GrandPrixConstants` — the constants file is the source of truth
 - `Runner.FullName` is a computed property; `entity.Ignore(r => r.FullName)` in `ApplicationDbContext`
 - New runners created during save use a birth year estimate from age; update once real DOB is known
-- `RaceSeedingService` seeds initial race data on startup in development
+- `RaceSeedingService` seeds the known series/variant catalog (idempotent, no races) on startup in development
 - LLM audit data (raw JSON, model name, token counts) is stored on `UploadBatch` for every upload

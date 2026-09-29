@@ -314,12 +314,12 @@ export default function Profile() {
             <CardHeader>
               <CardTitle>Your Results</CardTitle>
               <CardDescription>
-                Your account is linked to a runner profile. Pick a race series to see your personal
-                race records, including your finish-time trend across the years.
+                Your account is linked to a runner profile. See every race you&rsquo;ve run, your
+                personal records, and your finish-time trend across the years.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={() => navigate('/race-results')}>My Race Records</Button>
+              <Button onClick={() => navigate(`/runners/${user.runnerId}`)}>My Race Results</Button>
             </CardContent>
           </Card>
         ) : (

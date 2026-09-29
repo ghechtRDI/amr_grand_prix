@@ -174,6 +174,13 @@ if (!app.Environment.IsEnvironment("Testing"))
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
         var logger      = scope.ServiceProvider.GetRequiredService<ILogger<RoleSeedingService>>();
         await new RoleSeedingService(roleManager, logger).SeedRolesAsync();
+
+        if (app.Environment.IsDevelopment())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var raceLogger = scope.ServiceProvider.GetRequiredService<ILogger<RaceSeedingService>>();
+            await new RaceSeedingService(context, raceLogger).SeedRaceCatalogAsync();
+        }
     }
     catch (Exception ex)
     {

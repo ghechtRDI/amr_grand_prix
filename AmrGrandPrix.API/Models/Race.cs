@@ -2,15 +2,22 @@ using System.ComponentModel.DataAnnotations;
 
 namespace AmrGrandPrix.API.Models;
 
+/// <summary>
+/// One year's running of a <see cref="RaceVariant"/>. The race's name and series come from its
+/// variant (<c>RaceVariant.RaceSeries.Name</c>, <c>RaceVariant.Name</c>).
+/// </summary>
 public class Race
 {
     [Key]
     public Guid RaceId { get; set; }
 
     [Required]
-    [MaxLength(200)]
-    public string Name { get; set; } = string.Empty;
+    public Guid RaceVariantId { get; set; }
 
+    /// <summary>
+    /// Whether this running counts toward the Grand Prix. Defaults from
+    /// <see cref="RaceVariant.IsGrandPrixByDefault"/> but can differ in a given year.
+    /// </summary>
     public bool IsGrandPrixRace { get; set; }
 
     [Required]
@@ -19,37 +26,8 @@ public class Race
     [Required]
     public int Year { get; set; }
 
-    /// <summary>
-    /// Course variant (e.g., "Full Monty", "Uphill Only", "Dome/Original")
-    /// </summary>
-    [MaxLength(100)]
-    public string? CourseVariant { get; set; }
-
     [MaxLength(200)]
     public string? Location { get; set; }
-
-    /// <summary>
-    /// The <see cref="RaceSeries"/> this instance of the race belongs to, if it has been grouped
-    /// with other years/variants of the same event. Nullable so ungrouped races don't block
-    /// existing workflows.
-    /// </summary>
-    public Guid? RaceSeriesId { get; set; }
-
-    /// <summary>
-    /// Record time for male division
-    /// </summary>
-    public TimeSpan? RecordTimeMale { get; set; }
-
-    /// <summary>
-    /// Record time for female division
-    /// </summary>
-    public TimeSpan? RecordTimeFemale { get; set; }
-
-    [MaxLength(200)]
-    public string? RecordHolderMale { get; set; }
-
-    [MaxLength(200)]
-    public string? RecordHolderFemale { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -59,7 +37,7 @@ public class Race
     public string? CreatedBy { get; set; }
 
     // Navigation properties
+    public virtual RaceVariant RaceVariant { get; set; } = null!;
     public virtual ICollection<RaceResult> Results { get; set; } = new List<RaceResult>();
     public virtual ICollection<UploadBatch> UploadBatches { get; set; } = new List<UploadBatch>();
-    public virtual RaceSeries? RaceSeries { get; set; }
 }

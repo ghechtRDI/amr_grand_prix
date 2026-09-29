@@ -1,6 +1,7 @@
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Services.RaceStatistics;
+using AmrGrandPrix.API.Tests.Infrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,7 +11,7 @@ public class RaceStatisticsServiceTests : IDisposable
 {
     private readonly ApplicationDbContext _context;
     private readonly RaceStatisticsService _service;
-    private readonly Guid _seriesId = Guid.NewGuid();
+    private readonly RaceVariant _variant = TestData.Variant("Test Race");
 
     public RaceStatisticsServiceTests()
     {
@@ -29,16 +30,14 @@ public class RaceStatisticsServiceTests : IDisposable
         return runner;
     }
 
-    private Race AddRace(int year, DateOnly date)
+    private Race AddRace(int year, DateOnly date, RaceVariant? variant = null)
     {
         var race = new Race
         {
             RaceId = Guid.NewGuid(),
-            Name = "Test Race",
+            RaceVariant = variant ?? _variant,
             Date = date,
-            Year = year,
-            RaceSeriesId = _seriesId,
-            CourseVariant = "Standard"
+            Year = year
         };
         _context.Races.Add(race);
         return race;
@@ -79,7 +78,7 @@ public class RaceStatisticsServiceTests : IDisposable
         await _context.SaveChangesAsync();
 
         // Act
-        var stats = await _service.GetStatisticsAsync(_seriesId, "Standard", Gender.Male);
+        var stats = await _service.GetStatisticsAsync(_variant.RaceVariantId, Gender.Male);
 
         // Assert
         stats.CourseRecordHistory.Should().HaveCount(2);
@@ -98,7 +97,7 @@ public class RaceStatisticsServiceTests : IDisposable
         AddResult(race, runnerB, TimeSpan.FromMinutes(45));
         await _context.SaveChangesAsync();
 
-        var stats = await _service.GetStatisticsAsync(_seriesId, "Standard", Gender.Male);
+        var stats = await _service.GetStatisticsAsync(_variant.RaceVariantId, Gender.Male);
 
         stats.Top20AllTime.Should().HaveCount(2);
         stats.Top20AllTime[0].RunnerName.Should().Be("Bob Baker");
@@ -116,7 +115,7 @@ public class RaceStatisticsServiceTests : IDisposable
         AddResult(race, runnerB, TimeSpan.FromMinutes(45), ageCategory: "30-39");
         await _context.SaveChangesAsync();
 
-        var stats = await _service.GetStatisticsAsync(_seriesId, "Standard", Gender.Male);
+        var stats = await _service.GetStatisticsAsync(_variant.RaceVariantId, Gender.Male);
 
         stats.AgeGroupRecords.Should().ContainSingle(r => r.AgeCategory == "30-39" && r.RunnerName == "Bob Baker");
     }
@@ -125,12 +124,11 @@ public class RaceStatisticsServiceTests : IDisposable
     public async Task GetStatisticsAsync_DifferentCourseVariant_IsExcluded()
     {
         var runner = AddRunner("Alice", "Anders");
-        var race = AddRace(2020, new DateOnly(2020, 7, 4));
-        race.CourseVariant = "Uphill Only";
+        var race = AddRace(2020, new DateOnly(2020, 7, 4), TestData.AddVariant(_variant.RaceSeries, "Uphill Only"));
         AddResult(race, runner, TimeSpan.FromMinutes(30));
         await _context.SaveChangesAsync();
 
-        var stats = await _service.GetStatisticsAsync(_seriesId, "Standard", Gender.Male);
+        var stats = await _service.GetStatisticsAsync(_variant.RaceVariantId, Gender.Male);
 
         stats.Top20AllTime.Should().BeEmpty();
     }

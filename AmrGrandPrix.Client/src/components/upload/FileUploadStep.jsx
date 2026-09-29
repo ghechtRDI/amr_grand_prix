@@ -11,6 +11,7 @@ import * as tokenService from '../../services/tokenService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
@@ -21,6 +22,9 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
+  // Multi-variant upload: the variants ticked in Step 1 (no race exists yet).
+  const includedVariantIds = wizardData.raceSelection?.includedVariantIds || [];
+  const isMultiVariant = includedVariantIds.length > 0;
   const [knownVariants, setKnownVariants] = useState(
     (wizardData.raceSelection?.knownVariants || []).join(', ')
   );
@@ -53,8 +57,8 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
 
   const handleSubmit = async () => {
     if (!file) { setError('Please select a file'); return; }
-    const raceId = wizardData.raceSelection?.raceId;
-    if (!raceId) { setError('Please select a race first'); return; }
+    const { raceId, raceSeriesId, raceDate } = wizardData.raceSelection || {};
+    if (!raceId && !isMultiVariant) { setError('Please select a race first'); return; }
 
     try {
       setProcessing(true);
@@ -62,8 +66,15 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
 
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('raceId', raceId);
-      if (knownVariants.trim()) formData.append('knownVariants', knownVariants.trim());
+      // A multi-variant upload has no race yet - just the series, date and ticked variants.
+      if (raceId) {
+        formData.append('raceId', raceId);
+        if (knownVariants.trim()) formData.append('knownVariants', knownVariants.trim());
+      } else {
+        formData.append('raceSeriesId', raceSeriesId);
+        formData.append('raceDate', raceDate);
+        includedVariantIds.forEach((id) => formData.append('includedVariantIds', id));
+      }
 
       // Fake progress while LLM processes (can take 10–30 s)
       let fakeProgress = 0;
@@ -189,24 +200,39 @@ export default function FileUploadStep({ wizardData, onNext, onBack, onCancel })
         PDF, CSV, and Excel files are all supported.
       </p>
 
-      <div className="mt-6 flex flex-col gap-2 border-t border-border pt-6">
-        <Label htmlFor="knownVariants">Known course/variant names (optional)</Label>
-        <Input
-          id="knownVariants"
-          type="text"
-          value={knownVariants}
-          onChange={(e) => setKnownVariants(e.target.value)}
-          placeholder="e.g. Junior - Blueberry Knoll, Adult - Young at Heart Blueberry Knoll"
-          disabled={processing}
-        />
-        <p className="text-xs text-muted-foreground">
-          If this file's results cover more than one course or division at once, list the known
-          names here, comma-separated. The AI extractor will reuse these exact labels instead of
-          inventing its own when it splits the file into sections.
-          {wizardData.raceSelection?.knownVariants?.length > 0 &&
-            ' Pre-filled from this series’ other race instances — edit as needed.'}
-        </p>
-      </div>
+      {isMultiVariant ? (
+        <div className="mt-6 flex flex-col gap-2 border-t border-border pt-6">
+          <Label>Variants in this file</Label>
+          <div className="flex flex-wrap gap-2">
+            {wizardData.raceSelection.knownVariants.map((name) => (
+              <Badge key={name} variant="secondary">{name}</Badge>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The AI extractor is told the file contains only these variants and labels each section
+            with one of them. To change the list, go back to Race Selection.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-6 flex flex-col gap-2 border-t border-border pt-6">
+          <Label htmlFor="knownVariants">Known course/variant names (optional)</Label>
+          <Input
+            id="knownVariants"
+            type="text"
+            value={knownVariants}
+            onChange={(e) => setKnownVariants(e.target.value)}
+            placeholder="e.g. Junior - Blueberry Knoll, Adult - Young at Heart Blueberry Knoll"
+            disabled={processing}
+          />
+          <p className="text-xs text-muted-foreground">
+            If this file's results cover more than one course or division at once, list the known
+            names here, comma-separated. The AI extractor will reuse these exact labels instead of
+            inventing its own when it splits the file into sections.
+            {wizardData.raceSelection?.knownVariants?.length > 0 &&
+              ' Pre-filled from this series’ other race instances — edit as needed.'}
+          </p>
+        </div>
+      )}
 
       <div className="mt-8 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">
         <Button type="button" variant="outline" onClick={onBack}>

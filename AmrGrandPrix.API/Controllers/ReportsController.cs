@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
+using AmrGrandPrix.API.Models.DTOs;
 using AmrGrandPrix.API.Services;
 using AmrGrandPrix.API.Services.Captcha;
 
@@ -56,7 +57,9 @@ public class ReportsController : ControllerBase
 
         Race? race = null;
         if (request.RaceId.HasValue)
-            race = await _context.Races.FindAsync(request.RaceId.Value);
+            race = await _context.Races
+                .Include(r => r.RaceVariant).ThenInclude(v => v.RaceSeries).ThenInclude(s => s.Variants)
+                .FirstOrDefaultAsync(r => r.RaceId == request.RaceId.Value);
 
         var report = new ResultReport
         {
@@ -64,7 +67,7 @@ public class ReportsController : ControllerBase
             RunnerNameReported = request.RunnerName,
             DateOfBirthReported = request.DateOfBirth,
             RaceId = race?.RaceId,
-            RaceName = race?.Name ?? request.RaceName,
+            RaceName = race != null ? RaceProjections.DisplayName(race) : request.RaceName,
             RaceDate = request.RaceDate,
             Description = request.Description,
             ReporterEmail = request.ReporterEmail,

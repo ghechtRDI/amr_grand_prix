@@ -29,3 +29,20 @@ export function formatTime(timeSpan) {
   }
   return timeSpan;
 }
+
+// Seconds -> "1:02:03" / "12:34", for chart axes and tooltips that work in numeric seconds.
+export function formatSecondsAsClock(totalSeconds) {
+  if (totalSeconds == null) return '';
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.round(totalSeconds % 60);
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// Percent behind the winner (e.g. 12.34 -> "+12.3%"); 0 means this runner won.
+export function formatPercentBehind(pct) {
+  if (pct == null) return '—';
+  return pct === 0 ? 'Winner' : `+${pct.toFixed(1)}%`;
+}

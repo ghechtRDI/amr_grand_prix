@@ -63,6 +63,18 @@ public class ResultsProcessingService : IResultsProcessingService
         return await Task.FromResult(resultRows);
     }
 
+    public void AssignVariants(List<ResultRow> rows, IReadOnlyCollection<RaceVariant> seriesVariants)
+    {
+        foreach (var row in rows)
+        {
+            var variant = seriesVariants.FirstOrDefault(v => v.Matches(row.CourseVariant));
+            if (variant == null)
+                continue;
+            row.RaceVariantId = variant.RaceVariantId;
+            row.CourseVariant = variant.Name;
+        }
+    }
+
     private ResultRow ProcessSingleRow(
         ExtractedRow row, Gender? sectionGender, string? courseVariant, bool useLastFirst, int rowNumber)
     {

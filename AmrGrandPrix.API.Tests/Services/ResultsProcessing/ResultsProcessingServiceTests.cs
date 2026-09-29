@@ -356,4 +356,29 @@ public class ResultsProcessingServiceTests
         var calcService = new AmrGrandPrix.API.Services.GrandPrix.GrandPrixCalculationService(null!, null!);
         calcService.DetermineAgeCategory(age).Should().Be(expectedCategory);
     }
+
+    [Fact]
+    public void AssignVariants_MatchesNameOrAliasCaseInsensitively_AndCanonicalizesLabel()
+    {
+        var seriesId = Guid.NewGuid();
+        var dome = new RaceVariant { RaceVariantId = Guid.NewGuid(), RaceSeriesId = seriesId, Name = "Dome", Aliases = ["Original"] };
+        var happyTrails = new RaceVariant { RaceVariantId = Guid.NewGuid(), RaceSeriesId = seriesId, Name = "Happy Trails", Aliases = ["Happy Trail"] };
+        var rows = new List<ResultRow>
+        {
+            new() { CourseVariant = "original" },
+            new() { CourseVariant = "Happy Trail" },
+            new() { CourseVariant = "Moonwalk" },
+            new() { CourseVariant = null },
+        };
+
+        _service.AssignVariants(rows, [dome, happyTrails]);
+
+        rows[0].RaceVariantId.Should().Be(dome.RaceVariantId);
+        rows[0].CourseVariant.Should().Be("Dome");
+        rows[1].RaceVariantId.Should().Be(happyTrails.RaceVariantId);
+        rows[1].CourseVariant.Should().Be("Happy Trails");
+        rows[2].RaceVariantId.Should().BeNull();
+        rows[2].CourseVariant.Should().Be("Moonwalk");
+        rows[3].RaceVariantId.Should().BeNull();
+    }
 }

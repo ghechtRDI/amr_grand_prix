@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
+using AmrGrandPrix.API.Models.DTOs;
 using AmrGrandPrix.API.Models.DTOs.RaceResults;
 using AmrGrandPrix.API.Services.ResultsProcessing;
 
@@ -263,7 +264,7 @@ public class RunnerClaimsController : ControllerBase
     private async Task<RunnerClaimDto> BuildClaimDtoAsync(RunnerClaim claim, ApplicationUser user, Runner runner)
     {
         var results = await _context.RaceResults
-            .Include(r => r.Race)
+            .Include(r => r.Race).ThenInclude(r => r.RaceVariant).ThenInclude(v => v.RaceSeries).ThenInclude(s => s.Variants)
             .Where(r => r.RunnerId == runner.RunnerId && r.Age.HasValue)
             .OrderByDescending(r => r.Race.Date)
             .ToListAsync();
@@ -277,7 +278,7 @@ public class RunnerClaimsController : ControllerBase
             return new ClaimAgeCheckDto
             {
                 ResultId = r.ResultId,
-                RaceName = r.Race.Name,
+                RaceName = RaceProjections.DisplayName(r.Race),
                 RaceDate = r.Race.Date,
                 RecordedAge = r.Age,
                 ExpectedAge = expectedAge,

@@ -23,6 +23,8 @@ const Standings = lazy(() => import('./pages/Standings'));
 const RaceResults = lazy(() => import('./pages/RaceResults'));
 const ResultsBrowser = lazy(() => import('./pages/ResultsBrowser'));
 const RaceSeriesDetail = lazy(() => import('./pages/RaceSeriesDetail'));
+const RunnerProfile = lazy(() => import('./pages/RunnerProfile'));
+const RunnerSeries = lazy(() => import('./pages/RunnerSeries'));
 const ReportIssue = lazy(() => import('./pages/ReportIssue'));
 const Unauthorized = lazy(() => import('./pages/Unauthorized'));
 const ResultsUpload = lazy(() => import('./pages/admin/ResultsUpload'));
@@ -78,6 +80,8 @@ function App() {
               <Route path="/race-results" element={<ResultsBrowser />} />
               <Route path="/race-series/:seriesId" element={<RaceSeriesDetail />} />
               <Route path="/races/:raceId/results" element={<RaceResults />} />
+              <Route path="/runners/:runnerId" element={<RunnerProfile />} />
+              <Route path="/runners/:runnerId/series/:seriesId" element={<RunnerSeries />} />
 
               {/* Admin routes - requires Manager or Admin role */}
               <Route

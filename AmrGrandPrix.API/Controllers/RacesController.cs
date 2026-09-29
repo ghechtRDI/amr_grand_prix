@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
+using AmrGrandPrix.API.Services.GrandPrix;
 
 namespace AmrGrandPrix.API.Controllers;
 
@@ -15,13 +16,16 @@ namespace AmrGrandPrix.API.Controllers;
 public class RacesController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
+    private readonly IGrandPrixCalculationService _grandPrixCalculationService;
     private readonly ILogger<RacesController> _logger;
 
     public RacesController(
         ApplicationDbContext context,
+        IGrandPrixCalculationService grandPrixCalculationService,
         ILogger<RacesController> logger)
     {
         _context = context;
+        _grandPrixCalculationService = grandPrixCalculationService;
         _logger = logger;
     }
 
@@ -34,25 +38,8 @@ public class RacesController : ControllerBase
     public async Task<ActionResult<List<RaceDto>>> GetRaces()
     {
         var races = await _context.Races
-            .Include(r => r.Results)
             .OrderByDescending(r => r.Date)
-            .Select(r => new RaceDto
-            {
-                RaceId = r.RaceId,
-                Name = r.Name,
-                IsGrandPrixRace = r.IsGrandPrixRace,
-                Date = r.Date,
-                Year = r.Year,
-                CourseVariant = r.CourseVariant,
-                Location = r.Location,
-                RaceSeriesId = r.RaceSeriesId,
-                RaceSeriesName = r.RaceSeries != null ? r.RaceSeries.Name : null,
-                RecordTimeMale = r.RecordTimeMale,
-                RecordTimeFemale = r.RecordTimeFemale,
-                RecordHolderMale = r.RecordHolderMale,
-                RecordHolderFemale = r.RecordHolderFemale,
-                ResultsCount = r.Results.Count
-            })
+            .Select(RaceProjections.ToDto)
             .ToListAsync();
 
         return Ok(races);
@@ -67,26 +54,9 @@ public class RacesController : ControllerBase
     public async Task<ActionResult<List<RaceDto>>> GetRacesByYear(int year)
     {
         var races = await _context.Races
-            .Include(r => r.Results)
             .Where(r => r.Year == year)
             .OrderBy(r => r.Date)
-            .Select(r => new RaceDto
-            {
-                RaceId = r.RaceId,
-                Name = r.Name,
-                IsGrandPrixRace = r.IsGrandPrixRace,
-                Date = r.Date,
-                Year = r.Year,
-                CourseVariant = r.CourseVariant,
-                Location = r.Location,
-                RaceSeriesId = r.RaceSeriesId,
-                RaceSeriesName = r.RaceSeries != null ? r.RaceSeries.Name : null,
-                RecordTimeMale = r.RecordTimeMale,
-                RecordTimeFemale = r.RecordTimeFemale,
-                RecordHolderMale = r.RecordHolderMale,
-                RecordHolderFemale = r.RecordHolderFemale,
-                ResultsCount = r.Results.Count
-            })
+            .Select(RaceProjections.ToDto)
             .ToListAsync();
 
         return Ok(races);
@@ -101,26 +71,9 @@ public class RacesController : ControllerBase
     public async Task<ActionResult<List<RaceDto>>> GetGrandPrixRacesByYear(int year)
     {
         var races = await _context.Races
-            .Include(r => r.Results)
             .Where(r => r.Year == year && r.IsGrandPrixRace)
             .OrderBy(r => r.Date)
-            .Select(r => new RaceDto
-            {
-                RaceId = r.RaceId,
-                Name = r.Name,
-                IsGrandPrixRace = r.IsGrandPrixRace,
-                Date = r.Date,
-                Year = r.Year,
-                CourseVariant = r.CourseVariant,
-                Location = r.Location,
-                RaceSeriesId = r.RaceSeriesId,
-                RaceSeriesName = r.RaceSeries != null ? r.RaceSeries.Name : null,
-                RecordTimeMale = r.RecordTimeMale,
-                RecordTimeFemale = r.RecordTimeFemale,
-                RecordHolderMale = r.RecordHolderMale,
-                RecordHolderFemale = r.RecordHolderFemale,
-                ResultsCount = r.Results.Count
-            })
+            .Select(RaceProjections.ToDto)
             .ToListAsync();
 
         return Ok(races);
@@ -136,25 +89,8 @@ public class RacesController : ControllerBase
     public async Task<ActionResult<RaceDto>> GetRace(Guid id)
     {
         var race = await _context.Races
-            .Include(r => r.Results)
             .Where(r => r.RaceId == id)
-            .Select(r => new RaceDto
-            {
-                RaceId = r.RaceId,
-                Name = r.Name,
-                IsGrandPrixRace = r.IsGrandPrixRace,
-                Date = r.Date,
-                Year = r.Year,
-                CourseVariant = r.CourseVariant,
-                Location = r.Location,
-                RaceSeriesId = r.RaceSeriesId,
-                RaceSeriesName = r.RaceSeries != null ? r.RaceSeries.Name : null,
-                RecordTimeMale = r.RecordTimeMale,
-                RecordTimeFemale = r.RecordTimeFemale,
-                RecordHolderMale = r.RecordHolderMale,
-                RecordHolderFemale = r.RecordHolderFemale,
-                ResultsCount = r.Results.Count
-            })
+            .Select(RaceProjections.ToDto)
             .FirstOrDefaultAsync();
 
         if (race == null)
@@ -166,7 +102,7 @@ public class RacesController : ControllerBase
     }
 
     /// <summary>
-    /// Create a new race
+    /// Create one year's running of a race variant
     /// </summary>
     [HttpPost]
     [Authorize(Roles = "Admin,Manager")]
@@ -174,59 +110,39 @@ public class RacesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<RaceDto>> CreateRace([FromBody] CreateRaceRequest request)
     {
-        try
+        var variant = await _context.RaceVariants.FindAsync(request.RaceVariantId);
+        if (variant == null)
+            return BadRequest(new { message = $"Race variant {request.RaceVariantId} not found" });
+
+        var validationError = await ValidateUniqueYearAsync(request.RaceVariantId, request.Date.Year, excludeRaceId: null);
+        if (validationError != null)
+            return BadRequest(new { message = validationError });
+
+        var race = new Race
         {
-            var race = new Race
-            {
-                RaceId = Guid.NewGuid(),
-                Name = request.Name,
-                IsGrandPrixRace = request.IsGrandPrixRace,
-                Date = request.Date,
-                Year = request.Date.Year,
-                CourseVariant = request.CourseVariant,
-                Location = request.Location,
-                RaceSeriesId = request.RaceSeriesId,
-                CreatedAt = DateTime.UtcNow
-            };
+            RaceId = Guid.NewGuid(),
+            RaceVariantId = variant.RaceVariantId,
+            IsGrandPrixRace = request.IsGrandPrixRace ?? variant.IsGrandPrixByDefault,
+            Date = request.Date,
+            Year = request.Date.Year,
+            Location = request.Location,
+            CreatedAt = DateTime.UtcNow
+        };
 
-            _context.Races.Add(race);
-            await _context.SaveChangesAsync();
+        _context.Races.Add(race);
+        await _context.SaveChangesAsync();
 
-            var seriesName = race.RaceSeriesId.HasValue
-                ? (await _context.RaceSeries.FindAsync(race.RaceSeriesId.Value))?.Name
-                : null;
+        var raceDto = await _context.Races.Where(r => r.RaceId == race.RaceId).Select(RaceProjections.ToDto).FirstAsync();
 
-            var raceDto = new RaceDto
-            {
-                RaceId = race.RaceId,
-                Name = race.Name,
-                IsGrandPrixRace = race.IsGrandPrixRace,
-                Date = race.Date,
-                Year = race.Year,
-                CourseVariant = race.CourseVariant,
-                Location = race.Location,
-                RaceSeriesId = race.RaceSeriesId,
-                RaceSeriesName = seriesName,
-                RecordTimeMale = race.RecordTimeMale,
-                RecordTimeFemale = race.RecordTimeFemale,
-                RecordHolderMale = race.RecordHolderMale,
-                RecordHolderFemale = race.RecordHolderFemale,
-                ResultsCount = 0
-            };
+        _logger.LogInformation("Created race {RaceName} ({Variant}) {Year} ({RaceId})",
+            raceDto.RaceSeriesName, variant.Name, race.Year, race.RaceId);
 
-            _logger.LogInformation("Created new race: {RaceName} ({RaceId})", race.Name, race.RaceId);
-
-            return CreatedAtAction(nameof(GetRace), new { id = race.RaceId }, raceDto);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating race");
-            return BadRequest($"Error creating race: {ex.Message}");
-        }
+        return CreatedAtAction(nameof(GetRace), new { id = race.RaceId }, raceDto);
     }
 
     /// <summary>
-    /// Update an existing race
+    /// Update an existing race. Changing <see cref="UpdateRaceRequest.IsGrandPrixRace"/> (e.g. a
+    /// snowy year where a different variant is the Grand Prix race) recalculates points and standings.
     /// </summary>
     [HttpPut("{id}")]
     [Authorize(Roles = "Admin,Manager")]
@@ -235,59 +151,51 @@ public class RacesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<RaceDto>> UpdateRace(Guid id, [FromBody] UpdateRaceRequest request)
     {
-        try
+        var race = await _context.Races.FindAsync(id);
+        if (race == null)
+            return NotFound($"Race with ID {id} not found");
+
+        if (!await _context.RaceVariants.AnyAsync(v => v.RaceVariantId == request.RaceVariantId))
+            return BadRequest(new { message = $"Race variant {request.RaceVariantId} not found" });
+
+        var validationError = await ValidateUniqueYearAsync(request.RaceVariantId, request.Date.Year, excludeRaceId: id);
+        if (validationError != null)
+            return BadRequest(new { message = validationError });
+
+        var previousYear = race.Year;
+        var gpChanged = race.IsGrandPrixRace != request.IsGrandPrixRace || previousYear != request.Date.Year;
+        var standingsAffected = gpChanged && (race.IsGrandPrixRace || request.IsGrandPrixRace);
+
+        // Moving a GP race's points in or out of a finalized season would change locked standings
+        if (standingsAffected)
         {
-            var race = await _context.Races.FindAsync(id);
-            if (race == null)
+            foreach (var year in new[] { previousYear, request.Date.Year }.Distinct())
             {
-                return NotFound($"Race with ID {id} not found");
+                if (await _grandPrixCalculationService.IsSeasonFinalizedAsync(year))
+                    return Conflict(new { message = GrandPrixSeasonFinalizedException.MessageFor(year) });
             }
-
-            // Update allowed fields
-            race.Name = request.Name;
-            race.Date = request.Date;
-            race.Year = request.Date.Year;
-            race.CourseVariant = request.CourseVariant;
-            race.Location = request.Location;
-            race.RaceSeriesId = request.RaceSeriesId;
-            race.RecordTimeMale = request.RecordTimeMale;
-            race.RecordTimeFemale = request.RecordTimeFemale;
-            race.RecordHolderMale = request.RecordHolderMale;
-            race.RecordHolderFemale = request.RecordHolderFemale;
-
-            await _context.SaveChangesAsync();
-
-            var seriesName = race.RaceSeriesId.HasValue
-                ? (await _context.RaceSeries.FindAsync(race.RaceSeriesId.Value))?.Name
-                : null;
-
-            var raceDto = new RaceDto
-            {
-                RaceId = race.RaceId,
-                Name = race.Name,
-                IsGrandPrixRace = race.IsGrandPrixRace,
-                Date = race.Date,
-                Year = race.Year,
-                CourseVariant = race.CourseVariant,
-                Location = race.Location,
-                RaceSeriesId = race.RaceSeriesId,
-                RaceSeriesName = seriesName,
-                RecordTimeMale = race.RecordTimeMale,
-                RecordTimeFemale = race.RecordTimeFemale,
-                RecordHolderMale = race.RecordHolderMale,
-                RecordHolderFemale = race.RecordHolderFemale,
-                ResultsCount = race.Results?.Count ?? 0
-            };
-
-            _logger.LogInformation("Updated race: {RaceName} ({RaceId})", race.Name, race.RaceId);
-
-            return Ok(raceDto);
         }
-        catch (Exception ex)
+
+        race.RaceVariantId = request.RaceVariantId;
+        race.Date = request.Date;
+        race.Year = request.Date.Year;
+        race.IsGrandPrixRace = request.IsGrandPrixRace;
+        race.Location = request.Location;
+
+        await _context.SaveChangesAsync();
+
+        if (standingsAffected)
         {
-            _logger.LogError(ex, "Error updating race {RaceId}", id);
-            return BadRequest($"Error updating race: {ex.Message}");
+            await _grandPrixCalculationService.RecalculateAfterResultsChangeAsync(race.RaceId);
+            if (previousYear != race.Year)
+                await _grandPrixCalculationService.UpdateStandingsAsync(previousYear);
         }
+
+        var raceDto = await _context.Races.Where(r => r.RaceId == id).Select(RaceProjections.ToDto).FirstAsync();
+
+        _logger.LogInformation("Updated race {RaceName} {Year} ({RaceId})", raceDto.RaceSeriesName, race.Year, race.RaceId);
+
+        return Ok(raceDto);
     }
 
     /// <summary>
@@ -320,7 +228,7 @@ public class RacesController : ControllerBase
             _context.Races.Remove(race);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Deleted race: {RaceName} ({RaceId})", race.Name, race.RaceId);
+            _logger.LogInformation("Deleted race {RaceId} ({Year})", race.RaceId, race.Year);
 
             return NoContent();
         }
@@ -329,5 +237,12 @@ public class RacesController : ControllerBase
             _logger.LogError(ex, "Error deleting race {RaceId}", id);
             return BadRequest($"Error deleting race: {ex.Message}");
         }
+    }
+
+    private async Task<string?> ValidateUniqueYearAsync(Guid raceVariantId, int year, Guid? excludeRaceId)
+    {
+        var exists = await _context.Races.AnyAsync(r =>
+            r.RaceVariantId == raceVariantId && r.Year == year && r.RaceId != excludeRaceId);
+        return exists ? $"This variant already has a race in {year}" : null;
     }
 }

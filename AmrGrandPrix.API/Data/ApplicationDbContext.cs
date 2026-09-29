@@ -15,10 +15,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     // Race Results DbSets
     public DbSet<Race> Races { get; set; } = null!;
     public DbSet<RaceSeries> RaceSeries { get; set; } = null!;
+    public DbSet<RaceVariant> RaceVariants { get; set; } = null!;
     public DbSet<Runner> Runners { get; set; } = null!;
     public DbSet<RaceResult> RaceResults { get; set; } = null!;
     public DbSet<GrandPrixPoints> GrandPrixPoints { get; set; } = null!;
     public DbSet<GrandPrixStanding> GrandPrixStandings { get; set; } = null!;
+    public DbSet<GrandPrixSeason> GrandPrixSeasons { get; set; } = null!;
     public DbSet<UploadBatch> UploadBatches { get; set; } = null!;
     public DbSet<RunnerClaim> RunnerClaims { get; set; } = null!;
     public DbSet<ResultReport> ResultReports { get; set; } = null!;
@@ -75,23 +77,46 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasIndex(r => r.Year);
             entity.HasIndex(r => new { r.Year, r.IsGrandPrixRace });
 
-            entity.Property(r => r.Name).IsRequired().HasMaxLength(200);
             entity.Property(r => r.Date).IsRequired();
             entity.Property(r => r.Year).IsRequired();
 
-            entity.HasOne(r => r.RaceSeries)
-                .WithMany(s => s.Races)
-                .HasForeignKey(r => r.RaceSeriesId)
-                .OnDelete(DeleteBehavior.SetNull);
+            // One running of a variant per year
+            entity.HasIndex(r => new { r.RaceVariantId, r.Year }).IsUnique();
+
+            entity.HasOne(r => r.RaceVariant)
+                .WithMany(v => v.Races)
+                .HasForeignKey(r => r.RaceVariantId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // Configure RaceSeries entity
         builder.Entity<RaceSeries>(entity =>
         {
             entity.HasKey(s => s.RaceSeriesId);
-            entity.HasIndex(s => s.Name);
+            entity.HasIndex(s => s.Name).IsUnique();
 
             entity.Property(s => s.Name).IsRequired().HasMaxLength(200);
+        });
+
+        // Configure GrandPrixSeason entity (key is the year itself, not generated)
+        builder.Entity<GrandPrixSeason>(entity =>
+        {
+            entity.HasKey(s => s.Year);
+            entity.Property(s => s.Year).ValueGeneratedNever();
+        });
+
+        // Configure RaceVariant entity
+        builder.Entity<RaceVariant>(entity =>
+        {
+            entity.HasKey(v => v.RaceVariantId);
+            entity.HasIndex(v => new { v.RaceSeriesId, v.Name }).IsUnique();
+
+            entity.Property(v => v.Name).IsRequired().HasMaxLength(100);
+
+            entity.HasOne(v => v.RaceSeries)
+                .WithMany(s => s.Variants)
+                .HasForeignKey(v => v.RaceSeriesId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Configure Runner entity
@@ -191,11 +216,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(b => b.FileType).IsRequired();
             entity.Property(b => b.Status).IsRequired();
             entity.Property(b => b.UploadedBy).IsRequired();
+            entity.PrimitiveCollection(b => b.IncludedVariantIds).HasDefaultValueSql("'{}'");
 
             // Configure relationship
             entity.HasOne(b => b.Race)
                 .WithMany(race => race.UploadBatches)
                 .HasForeignKey(b => b.RaceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(b => b.RaceSeries)
+                .WithMany()
+                .HasForeignKey(b => b.RaceSeriesId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

@@ -44,6 +44,9 @@
   --chart-3: var(--success);
   --chart-4: var(--brand-purple-dark);
   --chart-5: var(--brand-gold-dark);
+  /* Runner finish-time chart: actual vs age-graded (validated for contrast + CVD on the card surface) */
+  --chart-runner-time: #6f70d8;
+  --chart-runner-graded: #a27c00;
   --radius: 0.625rem;
   --sidebar: var(--card);
   --sidebar-foreground: var(--foreground);
@@ -93,6 +96,8 @@
   --chart-3: var(--success);
   --chart-4: var(--brand-purple-dark);
   --chart-5: var(--brand-gold-dark);
+  --chart-runner-time: #b88c05;
+  --chart-runner-graded: #7f80ec;
   --sidebar: var(--card);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);

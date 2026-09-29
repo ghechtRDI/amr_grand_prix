@@ -5,16 +5,16 @@ namespace AmrGrandPrix.API.Services.RaceStatistics;
 public interface IRaceStatisticsService
 {
     /// <summary>
-    /// Computes all-time statistics for one course variant/gender within a race series:
+    /// Computes all-time statistics for one course variant/gender across every year it was run:
     /// the top 20 finish times ever, the history of who has held the course record, and the
     /// current record holder per age category.
     /// </summary>
-    Task<RaceSeriesStatisticsDto> GetStatisticsAsync(Guid raceSeriesId, string? courseVariant, Gender gender);
+    Task<RaceSeriesStatisticsDto> GetStatisticsAsync(Guid raceVariantId, Gender gender);
 }
 
 public class RaceSeriesStatisticsDto
 {
-    public string? CourseVariant { get; set; }
+    public Guid RaceVariantId { get; set; }
     public Gender Gender { get; set; }
     public List<TimeResultDto> Top20AllTime { get; set; } = new();
     public List<CourseRecordEventDto> CourseRecordHistory { get; set; } = new();

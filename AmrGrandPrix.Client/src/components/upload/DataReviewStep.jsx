@@ -11,7 +11,7 @@ import {
   createColumnHelper,
 } from '@tanstack/react-table';
 import { AlertTriangle, ArrowLeftRight, CheckCircle2, Sparkles, UserCheck, UserPlus, UserSearch, Trash2 } from 'lucide-react';
-import * as tokenService from '../../services/tokenService';
+import * as raceService from '../../services/raceService';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -362,123 +362,124 @@ function RunnerMatchCell({ row, table }) {
   );
 }
 
-// Race resolver shown for each course-variant group that isn't the primary
-// (pre-selected in Step 1) race — pick an existing race or create a new one.
-// Candidates are restricted to races on the same date (and, when Step 1 picked a series, within
-// that series), since that's the only pool a same-event, same-day variant could belong to. If one
-// of them already has a matching course variant, it's auto-selected.
+// Race resolver shown for each course-variant group when an upload covers several variants.
+// The group's label is matched to one of the series' variants (by name or alias); if that
+// variant already has a race in the Step 1 race's year it's auto-selected, otherwise the admin
+// can create it in one click. An unrecognized label can be mapped to an existing variant or
+// saved as a new one. For a multi-variant upload a missing race isn't created here: the group
+// resolves to a pending race ({ raceId: null, pendingRace }) that Confirmation creates on save,
+// so only variants that end up with results get a race; the dropdown is limited to the variants
+// ticked in Step 1.
+const NEW_VARIANT = '__new_variant__';
+
 function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve }) {
   const raceSeriesId = primaryRaceSelection.raceSeriesId;
-  const raceDate = primaryRaceSelection.raceDate;
+  const year = raceService.yearOf(primaryRaceSelection.raceDate);
+  const includedVariantIds = primaryRaceSelection.includedVariantIds || [];
+  const deferCreate = includedVariantIds.length > 0;
 
-  const [races, setRaces] = useState([]);
+  const [series, setSeries] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState('select');
+  const [variantChoice, setVariantChoice] = useState('');
+  const [newVariantName, setNewVariantName] = useState(groupKey);
+  const [date, setDate] = useState(primaryRaceSelection.raceDate || new Date().toISOString().split('T')[0]);
+  const [isGrandPrixRace, setIsGrandPrixRace] = useState(false);
   const [autoMatched, setAutoMatched] = useState(false);
-  const [newRace, setNewRace] = useState({
-    name: primaryRaceSelection.raceName || groupKey,
-    date: raceDate || new Date().toISOString().split('T')[0],
-    isGrandPrixRace: false,
-    courseVariant: groupKey,
-  });
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
+
+  const variantById = (id) => series?.variants.find(v => v.raceVariantId === id);
+  // A multi-variant upload's sections can only go to the variants ticked in Step 1.
+  const selectableVariants = (s) =>
+    s.variants.filter(v => !deferCreate || includedVariantIds.includes(v.raceVariantId));
+  const raceFor = (s, variantId) => s?.races.find(r => r.raceVariantId === variantId && r.year === year);
+
+  const resolveTo = (s, variant, race) => onResolve({
+    raceId: race.raceId,
+    raceName: raceService.raceLabel(s, variant),
+    isGrandPrixRace: !!race.isGrandPrixRace,
+  });
+
+  const resolvePending = (s, variant, raceDate, gp) => onResolve({
+    raceId: null,
+    pendingRace: { raceVariantId: variant.raceVariantId, date: raceDate, isGrandPrixRace: gp },
+    raceName: raceService.raceLabel(s, variant),
+    isGrandPrixRace: gp,
+  });
+
+  const chooseVariant = (s, value) => {
+    setVariantChoice(value);
+    const variant = s.variants.find(v => v.raceVariantId === value);
+    // Step 1's per-variant Grand Prix choices (multi-variant upload) win over the variant default.
+    const gp = primaryRaceSelection.variantGrandPrix?.[value] ?? !!variant?.isGrandPrixByDefault;
+    setIsGrandPrixRace(gp);
+    const race = variant && raceFor(s, variant.raceVariantId);
+    if (race) resolveTo(s, variant, race);
+    else if (variant && deferCreate) resolvePending(s, variant, date, gp);
+    else onResolve(null);
+  };
+
+  const pendingVariant = deferCreate && !raceFor(series, variantChoice) ? variantById(variantChoice) : null;
+
+  const handleDateChange = (value) => {
+    setDate(value);
+    if (pendingVariant) resolvePending(series, pendingVariant, value, isGrandPrixRace);
+  };
+
+  const handleGrandPrixChange = (value) => {
+    setIsGrandPrixRace(value);
+    if (pendingVariant) resolvePending(series, pendingVariant, date, value);
+  };
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setLoading(true);
-        let candidates = [];
-
-        if (raceSeriesId) {
-          const res = await fetch(`/api/race-series/${raceSeriesId}`);
-          if (res.ok) {
-            const series = await res.json();
-            candidates = series.races.filter(r => r.date === raceDate);
-          }
-        } else {
-          const token = tokenService.getAccessToken();
-          const year = raceDate ? new Date(raceDate).getFullYear() : new Date().getFullYear();
-          const res = await fetch(`/api/races/${year}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (res.ok) {
-            const list = await res.json();
-            candidates = list.filter(r => r.date === raceDate);
-          }
-        }
-
+        const s = await raceService.getSeriesDetail(raceSeriesId);
         if (cancelled) return;
-        setRaces(candidates);
+        setSeries(s);
 
-        // Auto-select an existing race for this date whose variant already matches.
-        const match = candidates.find(
-          r => (r.courseVariant || '').trim().toLowerCase() === groupKey.trim().toLowerCase()
-        );
-        if (match) {
-          setAutoMatched(true);
-          onResolve({
-            raceId: match.raceId,
-            raceName: primaryRaceSelection.raceName || groupKey,
-            isGrandPrixRace: !!match.isGrandPrixRace,
-          });
+        // Untagged rows belong to the Step 1 race's variant.
+        const variant = groupKey
+          ? raceService.findVariant(selectableVariants(s), groupKey)
+          : s.variants.find(v => v.raceVariantId === primaryRaceSelection.raceVariantId);
+        if (!variant) {
+          setVariantChoice(NEW_VARIANT);
+          return;
         }
+        chooseVariant(s, variant.raceVariantId);
+        setAutoMatched(!!raceFor(s, variant.raceVariantId));
+      } catch (err) {
+        if (!cancelled) setError(err.message);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-    // Runs once per group when its date/series context is known; onResolve is intentionally
+    // Runs once per group when its series context is known; onResolve is intentionally
     // excluded (a fresh function identity every parent render would otherwise re-fire this).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [raceSeriesId, raceDate, groupKey]);
-
-  // base-ui's Select doesn't resolve a selected item's label from its children the
-  // way Radix does - it needs an explicit lookup to render anything but the raw value.
-  const raceOptionLabel = (value) => {
-    if (!value) return null;
-    if (value === 'new') return '+ Create New Race';
-    const race = races.find(r => r.raceId === value);
-    if (!race) return value;
-    return `${race.courseVariant || 'Standard'}${race.resultsCount != null ? ` (${race.resultsCount} results)` : ''}`;
-  };
-
-  const handleSelect = (value) => {
-    setAutoMatched(false);
-    if (value === 'new') {
-      setMode('new');
-      onResolve(null);
-    } else if (value) {
-      setMode('select');
-      const race = races.find(r => r.raceId === value);
-      onResolve({ raceId: value, raceName: primaryRaceSelection.raceName || groupKey, isGrandPrixRace: !!race?.isGrandPrixRace });
-    } else {
-      setMode('select');
-      onResolve(null);
-    }
-  };
+  }, [raceSeriesId, groupKey]);
 
   const handleCreate = async () => {
     try {
       setCreating(true);
       setError(null);
-      const token = tokenService.getAccessToken();
-      const res = await fetch('/api/races', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          name: newRace.name,
-          date: newRace.date,
-          isGrandPrixRace: newRace.isGrandPrixRace,
-          courseVariant: newRace.courseVariant || null,
-          location: null,
-          raceSeriesId: raceSeriesId || null,
-        }),
-      });
-      if (!res.ok) throw new Error('Failed to create race');
-      const created = await res.json();
-      onResolve({ raceId: created.raceId, raceName: created.name, isGrandPrixRace: !!created.isGrandPrixRace });
+      let s = series;
+      let variant = variantById(variantChoice);
+      if (variantChoice === NEW_VARIANT) {
+        variant = await raceService.createVariant(raceSeriesId, {
+          name: newVariantName.trim(),
+          isGrandPrixByDefault: isGrandPrixRace,
+        });
+        s = { ...s, variants: [...s.variants, variant] };
+      }
+      const race = await raceService.createRace({ raceVariantId: variant.raceVariantId, date, isGrandPrixRace });
+      s = { ...s, races: [...s.races, { ...race, resultsCount: 0 }] };
+      setSeries(s);
+      setVariantChoice(variant.raceVariantId);
+      resolveTo(s, variant, race);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -486,78 +487,97 @@ function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve
     }
   };
 
+  // base-ui's Select doesn't resolve a selected item's label from its children the
+  // way Radix does - it needs an explicit lookup to render anything but the raw value.
+  const variantOptionLabel = (value) => {
+    if (!value) return null;
+    if (value === NEW_VARIANT) return `+ New variant`;
+    return variantById(value)?.name ?? value;
+  };
+
+  const existingRace = variantChoice && variantChoice !== NEW_VARIANT ? raceFor(series, variantChoice) : null;
+  const needsCreate = !loading && variantChoice && !existingRace && !resolved;
+  const isPending = !loading && !!resolved?.pendingRace;
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Label className="text-sm font-normal text-muted-foreground">
-        Race for &ldquo;{groupKey}&rdquo;:
+        Variant for &ldquo;{groupKey || 'untagged rows'}&rdquo;:
       </Label>
       {loading ? (
         <Skeleton className="h-8 w-56" />
-      ) : (
+      ) : series && (
         <Select
-          value={mode === 'new' ? 'new' : (resolved?.raceId || undefined)}
-          onValueChange={handleSelect}
+          value={variantChoice || undefined}
+          onValueChange={(value) => { setAutoMatched(false); chooseVariant(series, value); }}
         >
           <SelectTrigger className="min-w-56">
-            <SelectValue placeholder="-- Select a race --">
-              {(value) => raceOptionLabel(value) || '-- Select a race --'}
+            <SelectValue placeholder="-- Select a variant --">
+              {(value) => variantOptionLabel(value) || '-- Select a variant --'}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {races.map(r => (
-              <SelectItem key={r.raceId} value={r.raceId}>
-                {r.courseVariant || 'Standard'}
-                {r.resultsCount != null ? ` (${r.resultsCount} results)` : ''}
-              </SelectItem>
-            ))}
-            <SelectItem value="new">+ Create New Race</SelectItem>
+            {selectableVariants(series).map(v => {
+              const race = raceFor(series, v.raceVariantId);
+              return (
+                <SelectItem key={v.raceVariantId} value={v.raceVariantId}>
+                  {v.name}{race ? ` (${year}: ${race.resultsCount} results)` : ` (no ${year} race yet)`}
+                </SelectItem>
+              );
+            })}
+            <SelectItem value={NEW_VARIANT}>+ New variant</SelectItem>
           </SelectContent>
         </Select>
       )}
-      {autoMatched && mode !== 'new' && (
-        <span className="text-xs text-success">Matched by variant name</span>
+      {autoMatched && resolved && (
+        <span className="text-xs text-success">Matched {year} race</span>
       )}
-      {mode === 'new' && (
+      {resolved && !autoMatched && existingRace && (
+        <span className="text-xs text-muted-foreground">&rarr; {existingRace.date}</span>
+      )}
+      {isPending && (
+        <span className="text-xs text-muted-foreground">New race &mdash; created when saved</span>
+      )}
+      {(needsCreate || isPending) && (
         <div className="mt-2 flex w-full flex-wrap items-center gap-2">
-          <Input
-            type="text"
-            value={newRace.name}
-            onChange={(e) => setNewRace({ ...newRace, name: e.target.value })}
-            placeholder="Race name"
-            disabled={!!resolved}
-            className="w-48"
-          />
+          {variantChoice === NEW_VARIANT && (
+            <Input
+              type="text"
+              value={newVariantName}
+              onChange={(e) => setNewVariantName(e.target.value)}
+              placeholder="Variant name"
+              className="w-56"
+            />
+          )}
           <Input
             type="date"
-            value={newRace.date}
-            onChange={(e) => setNewRace({ ...newRace, date: e.target.value })}
-            disabled={!!resolved}
+            value={date}
+            onChange={(e) => handleDateChange(e.target.value)}
             className="w-40"
           />
           <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <input
               type="checkbox"
               className="size-4 rounded border-input accent-primary"
-              checked={newRace.isGrandPrixRace}
-              onChange={(e) => setNewRace({ ...newRace, isGrandPrixRace: e.target.checked })}
-              disabled={!!resolved}
+              checked={isGrandPrixRace}
+              onChange={(e) => handleGrandPrixChange(e.target.checked)}
             />
             Grand Prix race
           </label>
-          <Input
-            type="text"
-            value={newRace.courseVariant}
-            onChange={(e) => setNewRace({ ...newRace, courseVariant: e.target.value })}
-            placeholder="Course variant"
-            disabled={!!resolved}
-            className="w-40"
-          />
-          <Button type="button" variant="secondary" size="sm" onClick={handleCreate} disabled={creating || !!resolved}>
-            {resolved ? 'Race Created ✓' : (creating ? 'Creating…' : 'Create Race')}
-          </Button>
-          {error && <span className="text-sm text-destructive">{error}</span>}
+          {needsCreate && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleCreate}
+              disabled={creating || (variantChoice === NEW_VARIANT && !newVariantName.trim())}
+            >
+              {creating ? 'Creating…' : `Create ${raceService.yearOf(date)} race`}
+            </Button>
+          )}
         </div>
       )}
+      {error && <span className="text-sm text-destructive">{error}</span>}
     </div>
   );
 }
@@ -697,6 +717,19 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
   }, []);
 
   const [deleteTarget, setDeleteTarget] = useState(null); // { rowIndex, name }
+  // A whole course-variant section to drop, e.g. one the extractor duplicated: { key, count }.
+  const [sectionDeleteTarget, setSectionDeleteTarget] = useState(null);
+
+  const confirmDeleteSection = () => {
+    const { key } = sectionDeleteTarget;
+    setData(old => old.filter(row => (row.courseVariant || '').trim() !== key));
+    setGroupRaces(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setSectionDeleteTarget(null);
+  };
 
   const requestDeleteRow = useCallback((rowIndex, name) => {
     setDeleteTarget({ rowIndex, name });
@@ -742,7 +775,13 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
   // (e.g. a junior race section can appear before the main race in the source file),
   // so the admin must explicitly resolve every group below, including whichever one
   // is actually the Step 1 race.
-  const primaryKey = hasMultipleGroups ? null : (rowGroups[0]?.[0] ?? '');
+  // A multi-variant upload has no Step 1 race, so it's resolved per group even if only one
+  // variant came back.
+  const includedVariantNames = primaryRaceSelection.includedVariantIds?.length
+    ? primaryRaceSelection.knownVariants || []
+    : null;
+  const showGroups = hasMultipleGroups || !!includedVariantNames;
+  const primaryKey = showGroups ? null : (rowGroups[0]?.[0] ?? '');
 
   const tableHead = (
     <TableHeader>
@@ -829,7 +868,7 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
 
     const unresolvedGroups = rowGroups
       .map(([key]) => key)
-      .filter(key => key !== primaryKey && !groupRaces[key]?.raceId);
+      .filter(key => key !== primaryKey && !groupRaces[key]?.raceId && !groupRaces[key]?.pendingRace);
 
     if (unresolvedGroups.length > 0) {
       alert(
@@ -892,12 +931,31 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
         )}
       </div>
 
-      {!hasMultipleGroups && renderTable(rowGroups[0]?.[1] || [])}
+      {!showGroups && renderTable(rowGroups[0]?.[1] || [])}
 
-      {hasMultipleGroups && rowGroups.map(([key, rows]) => (
+      {showGroups && rowGroups.map(([key, rows]) => (
         <div className="mb-8 rounded-xl border border-border bg-muted/20 p-4" key={key || '(primary)'}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-semibold">{key || primaryRaceSelection.raceName || 'Primary race'}</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-semibold">{key || primaryRaceSelection.raceName || 'Primary race'}</h3>
+              <span className="text-sm text-muted-foreground">
+                ({rows.length} result{rows.length === 1 ? '' : 's'})
+              </span>
+              {includedVariantNames && !includedVariantNames.some(n => n.toLowerCase() === key.toLowerCase()) && (
+                <Badge variant="outline" className="border-amber-500/50 text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="size-3" /> Not one of the selected variants
+                </Badge>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => setSectionDeleteTarget({ key, count: rows.length })}
+              >
+                <Trash2 className="size-3.5" /> Remove section
+              </Button>
+            </div>
             {key === primaryKey ? (
               <span className="text-sm text-success">
                 &rarr; {primaryRaceSelection.raceName} (Step 1 selection)
@@ -927,6 +985,24 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
         <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
         <Button type="button" onClick={handleSubmit}>Next &rarr;</Button>
       </div>
+
+      <AlertDialog open={!!sectionDeleteTarget} onOpenChange={(open) => !open && setSectionDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this whole section?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove all {sectionDeleteTarget?.count} result{sectionDeleteTarget?.count === 1 ? '' : 's'} in
+              &ldquo;{sectionDeleteTarget?.key || 'untagged rows'}&rdquo; from this upload? Use this when the
+              extractor duplicated results under the wrong variant. They won&rsquo;t be saved, and this
+              can&rsquo;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDeleteSection}>Remove section</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>

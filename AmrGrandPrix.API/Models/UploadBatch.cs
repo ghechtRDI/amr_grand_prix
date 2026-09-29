@@ -8,8 +8,24 @@ public class UploadBatch
     [Key]
     public Guid UploadBatchId { get; set; }
 
-    [Required]
-    public Guid RaceId { get; set; }
+    /// <summary>
+    /// The race these results belong to. Null only while a multi-variant upload is pending: its
+    /// races are created per variant when the reviewed results are saved, so the batch is held
+    /// against <see cref="RaceSeriesId"/> + <see cref="RaceDate"/> until then.
+    /// </summary>
+    public Guid? RaceId { get; set; }
+
+    /// <summary>Series of a pending multi-variant upload (see <see cref="RaceId"/>).</summary>
+    public Guid? RaceSeriesId { get; set; }
+
+    /// <summary>Race date of a pending multi-variant upload (see <see cref="RaceId"/>).</summary>
+    public DateOnly? RaceDate { get; set; }
+
+    /// <summary>
+    /// The variants the admin said a multi-variant upload's file contains, so resuming it routes
+    /// sections to the same set. Empty for a single-race upload.
+    /// </summary>
+    public List<Guid> IncludedVariantIds { get; set; } = new();
 
     [Required]
     [MaxLength(255)]
@@ -43,7 +59,10 @@ public class UploadBatch
 
     // Navigation properties
     [ForeignKey("RaceId")]
-    public virtual Race Race { get; set; } = null!;
+    public virtual Race? Race { get; set; }
+
+    [ForeignKey("RaceSeriesId")]
+    public virtual RaceSeries? RaceSeries { get; set; }
 
     public virtual ICollection<RaceResult> Results { get; set; } = new List<RaceResult>();
 }

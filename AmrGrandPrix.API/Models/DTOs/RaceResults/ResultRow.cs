@@ -23,11 +23,18 @@ public class ResultRow
 
     /// <summary>
     /// Course/event variant this row's source section was tagged with (e.g. "Full Monty",
-    /// "Junior 1-Mile"), as detected by the LLM. Null when the uploaded document describes
-    /// only one race. Used only during upload review to group rows and route them to the
-    /// correct Race — not persisted on the saved RaceResult.
+    /// "Junior 1-Mile"), as detected by the LLM — rewritten to the canonical variant name when it
+    /// matches a known variant or alias. Null when the uploaded document describes only one race.
+    /// Used only during upload review to group rows and route them to the correct Race — not
+    /// persisted on the saved RaceResult.
     /// </summary>
     public string? CourseVariant { get; set; }
+
+    /// <summary>
+    /// The series variant <see cref="CourseVariant"/> resolved to, or null if it matched none
+    /// (a new variant) or no course was detected.
+    /// </summary>
+    public Guid? RaceVariantId { get; set; }
 
     /// <summary>
     /// Validation issues found for this row

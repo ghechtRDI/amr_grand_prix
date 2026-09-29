@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,6 @@ namespace AmrGrandPrix.API.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[AllowAnonymous]
 public class StandingsController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
@@ -34,6 +34,7 @@ public class StandingsController : ControllerBase
     /// Get all standings for a specific year
     /// </summary>
     [HttpGet("{year}")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(List<StandingDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<StandingDto>>> GetStandingsByYear(int year)
     {
@@ -69,6 +70,7 @@ public class StandingsController : ControllerBase
     /// Get standings for a specific division (Open Male or Open Female)
     /// </summary>
     [HttpGet("{year}/open/{gender}")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(StandingsLeaderboardResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<StandingsLeaderboardResponse>> GetOpenDivisionStandings(
         int year,
@@ -116,8 +118,7 @@ public class StandingsController : ControllerBase
                     FirstName = s.Runner.FirstName,
                     LastName = s.Runner.LastName,
                     Gender = s.Runner.Gender,
-                    DateOfBirth = s.Runner.DateOfBirth,
-                    Email = s.Runner.Email
+                    DateOfBirth = s.Runner.DateOfBirth
                 },
                 PointsBreakdown = new List<GrandPrixPointsDto>()
             })
@@ -135,7 +136,7 @@ public class StandingsController : ControllerBase
                 {
                     PointsId = p.PointsId,
                     RaceId = p.RaceId,
-                    RaceName = p.Race.Name,
+                    RaceName = RaceProjections.DisplayName(p.Race.RaceVariant.RaceSeries.Name, p.Race.RaceVariant.Name, p.Race.RaceVariant.RaceSeries.Variants.Count),
                     Points = p.Points,
                     IsRecordBonus = p.IsRecordBonus,
                     Division = p.Division,
@@ -162,6 +163,7 @@ public class StandingsController : ControllerBase
     /// Get standings for a specific age category
     /// </summary>
     [HttpGet("{year}/age/{category}/{gender}")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(StandingsLeaderboardResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<StandingsLeaderboardResponse>> GetAgeDivisionStandings(
         int year,
@@ -212,8 +214,7 @@ public class StandingsController : ControllerBase
                     FirstName = s.Runner.FirstName,
                     LastName = s.Runner.LastName,
                     Gender = s.Runner.Gender,
-                    DateOfBirth = s.Runner.DateOfBirth,
-                    Email = s.Runner.Email
+                    DateOfBirth = s.Runner.DateOfBirth
                 },
                 PointsBreakdown = new List<GrandPrixPointsDto>()
             })
@@ -232,7 +233,7 @@ public class StandingsController : ControllerBase
                 {
                     PointsId = p.PointsId,
                     RaceId = p.RaceId,
-                    RaceName = p.Race.Name,
+                    RaceName = RaceProjections.DisplayName(p.Race.RaceVariant.RaceSeries.Name, p.Race.RaceVariant.Name, p.Race.RaceVariant.RaceSeries.Variants.Count),
                     Points = p.Points,
                     IsRecordBonus = p.IsRecordBonus,
                     Division = p.Division,
@@ -259,6 +260,7 @@ public class StandingsController : ControllerBase
     /// Get all Grand Prix history for a specific runner
     /// </summary>
     [HttpGet("runner/{runnerId}")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(List<StandingDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<List<StandingDto>>> GetRunnerHistory(Guid runnerId)
@@ -297,47 +299,27 @@ public class StandingsController : ControllerBase
     }
 
     /// <summary>
-    /// Manually recalculate standings for a specific year
+    /// Manually recalculate standings for a specific year. Not allowed once the year is finalized.
     /// </summary>
     [HttpPost("{year}/recalculate")]
     [Authorize(Roles = "Admin,Manager")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> RecalculateStandings(int year)
     {
+        if (await _grandPrixCalculationService.IsSeasonFinalizedAsync(year))
+            return Conflict(new { message = GrandPrixSeasonFinalizedException.MessageFor(year) });
+
         try
         {
             _logger.LogInformation("Manually recalculating standings for year {Year}", year);
-
-            // Delete existing standings for this year
-            var existingStandings = await _context.GrandPrixStandings
-                .Where(s => s.Year == year)
-                .ToListAsync();
-
-            _context.GrandPrixStandings.RemoveRange(existingStandings);
-            await _context.SaveChangesAsync();
-
-            // Recalculate all GP races for this year
-            var races = await _context.Races
-                .Where(r => r.Year == year && r.IsGrandPrixRace)
-                .ToListAsync();
-
-            foreach (var race in races)
-            {
-                await _grandPrixCalculationService.CalculateRacePointsAsync(race.RaceId);
-            }
-
-            // Update standings
-            await _grandPrixCalculationService.UpdateStandingsAsync(year);
-
-            _logger.LogInformation(
-                "Successfully recalculated standings for {Year}. Processed {RaceCount} races",
-                year, races.Count);
+            var racesProcessed = await RecalculateYearAsync(year);
 
             return Ok(new
             {
                 message = $"Successfully recalculated standings for {year}",
-                racesProcessed = races.Count
+                racesProcessed
             });
         }
         catch (Exception ex)
@@ -348,9 +330,114 @@ public class StandingsController : ControllerBase
     }
 
     /// <summary>
+    /// Whether a year's Grand Prix is finalized, plus a summary of its GP races for the admin
+    /// finalize confirmation.
+    /// </summary>
+    [HttpGet("{year}/season")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(GrandPrixSeasonDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<GrandPrixSeasonDto>> GetSeason(int year) => Ok(await BuildSeasonDtoAsync(year));
+
+    /// <summary>
+    /// Marks a year's Grand Prix as over: recalculates standings one final time, then locks them so
+    /// no result change or recalculation can alter that year's points. Admin/Manager only.
+    /// </summary>
+    [HttpPost("{year}/finalize")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(typeof(GrandPrixSeasonDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<GrandPrixSeasonDto>> FinalizeSeason(int year)
+    {
+        if (await _grandPrixCalculationService.IsSeasonFinalizedAsync(year))
+            return Conflict(new { message = $"The {year} Grand Prix is already finalized" });
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
+        await RecalculateYearAsync(year);
+
+        var season = await _context.GrandPrixSeasons.FindAsync(year);
+        if (season == null)
+        {
+            season = new GrandPrixSeason { Year = year };
+            _context.GrandPrixSeasons.Add(season);
+        }
+        season.IsFinalized = true;
+        season.FinalizedAt = DateTime.UtcNow;
+        season.FinalizedBy = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        _logger.LogInformation("Grand Prix {Year} finalized by {UserId}", year, season.FinalizedBy);
+        return Ok(await BuildSeasonDtoAsync(year));
+    }
+
+    /// <summary>
+    /// Re-opens a finalized year so results can be corrected and standings recalculated; finalize
+    /// it again afterwards. Admin/Manager only.
+    /// </summary>
+    [HttpPost("{year}/unfinalize")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(typeof(GrandPrixSeasonDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<GrandPrixSeasonDto>> UnfinalizeSeason(int year)
+    {
+        var season = await _context.GrandPrixSeasons.FindAsync(year);
+        if (season is not { IsFinalized: true })
+            return Conflict(new { message = $"The {year} Grand Prix isn't finalized" });
+
+        season.IsFinalized = false;
+        season.FinalizedAt = null;
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Grand Prix {Year} un-finalized by {UserId}", year, User.FindFirstValue(ClaimTypes.NameIdentifier));
+        return Ok(await BuildSeasonDtoAsync(year));
+    }
+
+    /// <summary>Recalculates points for every GP race in the year, then the year's standings.</summary>
+    private async Task<int> RecalculateYearAsync(int year)
+    {
+        var raceIds = await _context.Races
+            .Where(r => r.Year == year && r.IsGrandPrixRace)
+            .Select(r => r.RaceId)
+            .ToListAsync();
+
+        foreach (var raceId in raceIds)
+            await _grandPrixCalculationService.CalculateRacePointsAsync(raceId);
+
+        await _grandPrixCalculationService.UpdateStandingsAsync(year);
+
+        _logger.LogInformation("Recalculated standings for {Year}. Processed {RaceCount} races", year, raceIds.Count);
+        return raceIds.Count;
+    }
+
+    private async Task<GrandPrixSeasonDto> BuildSeasonDtoAsync(int year)
+    {
+        var season = await _context.GrandPrixSeasons.FindAsync(year);
+        var races = await _context.Races
+            .Where(r => r.Year == year && r.IsGrandPrixRace)
+            .OrderBy(r => r.Date)
+            .Select(r => new
+            {
+                Name = RaceProjections.DisplayName(r.RaceVariant.RaceSeries.Name, r.RaceVariant.Name, r.RaceVariant.RaceSeries.Variants.Count),
+                HasResults = r.Results.Any()
+            })
+            .ToListAsync();
+
+        return new GrandPrixSeasonDto
+        {
+            Year = year,
+            IsFinalized = season?.IsFinalized ?? false,
+            FinalizedAt = season?.IsFinalized == true ? season.FinalizedAt : null,
+            GrandPrixRaceCount = races.Count,
+            GrandPrixRacesWithoutResults = races.Where(r => !r.HasResults).Select(r => r.Name).ToList()
+        };
+    }
+
+    /// <summary>
     /// Get available years with GP data
     /// </summary>
     [HttpGet("years")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(List<int>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<int>>> GetAvailableYears()
     {
@@ -367,6 +454,7 @@ public class StandingsController : ControllerBase
     /// Get all age categories for a specific year
     /// </summary>
     [HttpGet("{year}/categories")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<string>>> GetAgeCategories(int year)
     {
