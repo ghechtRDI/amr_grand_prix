@@ -1,76 +1,5 @@
+# Local dev services. The API, client, and Postgres run natively (see CLAUDE.md).
 services:
-  # .NET API Service
-  api:
-    build:
-      context: ./AmrGrandPrix.API
-      dockerfile: Dockerfile
-      target: development
-    container_name: amr-api-dev
-    ports:
-      - "8080:8080"   # HTTP
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://+:8080
-      - DOTNET_RUNNING_IN_CONTAINER=true
-      - DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
-      - ConnectionStrings__DefaultConnection=Host=db;Database=AmrGrandPrix;Username=postgres;Password=YourStrong@Passw0rd
-    # volumes:
-      # - ./AmrGrandPrix.API:/app:delegated
-      # - nuget-cache:/root/.nuget/packages
-    # Note: Volume mounting disabled to avoid NuGet conflicts in development
-    # For hot reload, rebuild the container after changes
-    depends_on:
-      - client
-    networks:
-      - amr-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # React Client Service
-  client:
-    build:
-      context: ./AmrGrandPrix.Client
-      dockerfile: Dockerfile
-      target: development
-    container_name: amr-client-dev
-    ports:
-      - "5173:5173"   # Vite dev server
-    environment:
-      - NODE_ENV=development
-      - VITE_API_URL=http://api:8080
-    volumes:
-      - ./AmrGrandPrix.Client:/app:delegated
-      - /app/node_modules
-    networks:
-      - amr-network
-    restart: unless-stopped
-    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
-
-  # PostgreSQL Database
-  db:
-    image: postgres:16-alpine
-    container_name: amr-db-dev
-    environment:
-      - POSTGRES_DB=AmrGrandPrix
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=YourStrong@Passw0rd
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - amr-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # MailHog for email testing (SMTP server + web UI)
   mailhog:
     image: mailhog/mailhog:latest
@@ -100,9 +29,5 @@ networks:
     name: amr-grand-prix-network
 
 volumes:
-  postgres-data:
-    name: amr-postgres-data
-  nuget-cache:
-    name: amr-nuget-cache
   ollama-data:
     name: amr-ollama-data

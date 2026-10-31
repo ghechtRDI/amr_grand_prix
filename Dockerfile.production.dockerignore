@@ -1,0 +1,21 @@
+# Build-context exclusions for Dockerfile.production (the context is the repo root).
+# Host node_modules/bin/obj must stay out: COPY would overwrite the Linux build's
+# copies with macOS ones.
+**/node_modules
+**/bin
+**/obj
+**/dist
+**/.DS_Store
+**/*.md
+.git
+.claude
+.vscode
+DOCS
+ResultsArchive
+semgrep-reports
+AmrGrandPrix.API.Tests
+
+# Secrets stay out of the image. The client's .env only holds the public Turnstile
+# site key, which Vite needs at build time.
+**/.env*
+!AmrGrandPrix.Client/.env

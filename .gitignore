@@ -114,3 +114,6 @@ UpgradeLog*.XML
 
 # PDFS
 *.pdf
+
+# Semgrep scan output
+semgrep-reports/

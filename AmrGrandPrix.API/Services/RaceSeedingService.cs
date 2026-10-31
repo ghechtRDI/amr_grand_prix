@@ -20,7 +20,14 @@ public class RaceSeedingService
         _logger = logger;
     }
 
-    private record VariantTemplate(string Name, bool IsGrandPrix, params string[] Aliases);
+    private record VariantTemplate(string Name, bool IsGrandPrix, params string[] Aliases)
+    {
+        /// <summary>Junior-only course: GP races award age-group points only.</summary>
+        public bool IsAgeGroupOnly { get; init; }
+
+        /// <summary>Non-GP course whose finishers still get Gamut credit for the series.</summary>
+        public bool CountsTowardGamut { get; init; }
+    }
 
     private record SeriesTemplate(string Name, params VariantTemplate[] Variants);
 
@@ -30,22 +37,22 @@ public class RaceSeedingService
         new("Kal's Knoya Ridge Run",
             // Full Monty is the GP race unless snow forces the Dome to be the GP race that year
             new VariantTemplate("Full Monty", true),
-            new VariantTemplate("Dome", false, "Original", "Dome Finish"),
+            new VariantTemplate("Dome", false, "Original", "Dome Finish") { CountsTowardGamut = true },
             new VariantTemplate("Happy Trails", false, "Happy Trail")),
         new("Government Peak Climb",
             new VariantTemplate("Round Trip", true, "Up-and-Down", "Up and Down"),
-            new VariantTemplate("Uphill Only", false, "Up Hill Only")),
+            new VariantTemplate("Uphill Only", false, "Up Hill Only") { CountsTowardGamut = true }),
         new("Blueberry Rampage",
             new VariantTemplate("Full Mountain", true, "Adult - Full Mountain"),
-            new VariantTemplate("Junior Blueberry Knoll", true, "Junior - Blueberry Knoll"),
+            new VariantTemplate("Junior Blueberry Knoll", true, "Junior - Blueberry Knoll") { IsAgeGroupOnly = true },
             new VariantTemplate("Young at Heart Blueberry Knoll", false, "Adult - Young at Heart Blueberry Knoll")),
         new("Bird Ridge",
             new VariantTemplate("Hill Climb", true, "Robert Spurr Memorial Hill Climb"),
-            new VariantTemplate("Jack's Run", true)),
+            new VariantTemplate("Jack's Run", true) { IsAgeGroupOnly = true }),
         new("Juneau Ridge Race", new VariantTemplate(RaceVariant.StandardName, true)),
         new("Mount Marathon Race",
             new VariantTemplate("Adult", true),
-            new VariantTemplate("Junior", true, "Juniors")),
+            new VariantTemplate("Junior", true, "Juniors") { IsAgeGroupOnly = true }),
         new("Crow Pass Crossing", new VariantTemplate(RaceVariant.StandardName, false)),
         new("Alyeska Cirque Series", new VariantTemplate(RaceVariant.StandardName, true)),
         new("Matanuska Peak Challenge", new VariantTemplate(RaceVariant.StandardName, true)),
@@ -81,6 +88,8 @@ public class RaceSeedingService
                     Name = v.Name,
                     Aliases = v.Aliases.ToList(),
                     IsGrandPrixByDefault = v.IsGrandPrix,
+                    IsAgeGroupOnly = v.IsAgeGroupOnly,
+                    CountsTowardGamut = v.CountsTowardGamut,
                     DisplayOrder = i,
                     CreatedAt = DateTime.UtcNow
                 });

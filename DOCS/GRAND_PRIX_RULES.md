@@ -15,6 +15,7 @@ The Grand Prix has 9 races:
 
 ### Grand Prix Open Division Points
 - Points are awarded for the first 20 men and women in each race based on the FIS Continental Cup scoring system.
+- Juniors (17 and Under) who run the main race score Open points like everyone else. Junior-only races (e.g. Jack's Run at Bird Ridge, the Mount Marathon junior race, Junior Blueberry Knoll) count toward age groups only, not the Open division.
 - You must finish in the Top 20 of at least 1 race to be eligible for the Grand Prix standings and awards. We count up to 4 races. If you run in more than 4 races, we will count your 4 best performances.
     - 1st place – 100 points
     - 2nd – 90

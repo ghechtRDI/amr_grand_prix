@@ -325,6 +325,8 @@ public class RaceSeriesController : ControllerBase
         variant.Aliases = NormalizeAliases(request.Aliases, variant.Name);
         variant.Description = request.Description;
         variant.IsGrandPrixByDefault = request.IsGrandPrixByDefault;
+        variant.IsAgeGroupOnly = request.IsAgeGroupOnly;
+        variant.CountsTowardGamut = request.CountsTowardGamut;
         variant.DisplayOrder = request.DisplayOrder ?? variant.DisplayOrder;
         variant.RecordTimeMale = request.RecordTimeMale;
         variant.RecordTimeFemale = request.RecordTimeFemale;
@@ -430,6 +432,8 @@ public class RaceSeriesController : ControllerBase
             Aliases = NormalizeAliases(request.Aliases, name),
             Description = request.Description,
             IsGrandPrixByDefault = request.IsGrandPrixByDefault,
+            IsAgeGroupOnly = request.IsAgeGroupOnly,
+            CountsTowardGamut = request.CountsTowardGamut,
             DisplayOrder = displayOrder,
             RecordTimeMale = request.RecordTimeMale,
             RecordTimeFemale = request.RecordTimeFemale,
@@ -454,6 +458,8 @@ public class RaceSeriesController : ControllerBase
         Aliases = v.Aliases,
         Description = v.Description,
         IsGrandPrixByDefault = v.IsGrandPrixByDefault,
+        IsAgeGroupOnly = v.IsAgeGroupOnly,
+        CountsTowardGamut = v.CountsTowardGamut,
         DisplayOrder = v.DisplayOrder,
         RecordTimeMale = v.RecordTimeMale,
         RecordTimeFemale = v.RecordTimeFemale,
@@ -492,6 +498,8 @@ public class RaceVariantDto
     public List<string> Aliases { get; set; } = new();
     public string? Description { get; set; }
     public bool IsGrandPrixByDefault { get; set; }
+    public bool IsAgeGroupOnly { get; set; }
+    public bool CountsTowardGamut { get; set; }
     public int DisplayOrder { get; set; }
     public TimeSpan? RecordTimeMale { get; set; }
     public TimeSpan? RecordTimeFemale { get; set; }
@@ -540,6 +548,8 @@ public class RaceVariantRequest
     public List<string>? Aliases { get; set; }
     public string? Description { get; set; }
     public bool IsGrandPrixByDefault { get; set; }
+    public bool IsAgeGroupOnly { get; set; }
+    public bool CountsTowardGamut { get; set; }
     public int? DisplayOrder { get; set; }
     public TimeSpan? RecordTimeMale { get; set; }
     public TimeSpan? RecordTimeFemale { get; set; }

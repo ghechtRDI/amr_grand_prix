@@ -8,6 +8,7 @@ using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
 using AmrGrandPrix.API.Models.DTOs.RaceResults;
 using AmrGrandPrix.API.Services.ResultsProcessing;
+using AmrGrandPrix.API.Services.Runners;
 
 namespace AmrGrandPrix.API.Controllers;
 
@@ -239,8 +240,9 @@ public class RunnerClaimsController : ControllerBase
 
     /// <summary>
     /// Links the user's account to the runner and syncs the user's verified profile data (date of
-    /// birth, preferred name, alternate names) onto the runner as its new authoritative values —
-    /// shared by both the auto-approval path in <see cref="SubmitClaim"/> and the admin-driven
+    /// birth, preferred name) onto the runner as its new authoritative values and adds the user's
+    /// alternate names to the runner's — shared by both the auto-approval path in
+    /// <see cref="SubmitClaim"/> and the admin-driven
     /// <see cref="ApproveClaim"/>. <paramref name="admin"/> is null for an auto-approval.
     /// </summary>
     private static void ApplyApproval(RunnerClaim claim, ApplicationUser user, Runner runner, ApplicationUser? admin)
@@ -252,7 +254,9 @@ public class RunnerClaimsController : ControllerBase
         user.RunnerId = runner.RunnerId;
         runner.DateOfBirth = user.DateOfBirth;
         runner.PreferredName = user.PreferredName;
-        runner.AlternateNames = user.AlternateNames;
+        // Keep names the runner already has (e.g. from an admin merge) so uploads under them
+        // still match — the user's names are added, not substituted.
+        runner.AlternateNames = RunnerNames.Normalize(user.AlternateNames.Concat(runner.AlternateNames));
         runner.UpdatedAt = DateTime.UtcNow;
     }
 

@@ -15,6 +15,6 @@ public class AnthropicLlmSettings
 
 public class OllamaLlmSettings
 {
-    public string BaseUrl { get; set; } = "http://ollama:11434";
+    public string BaseUrl { get; set; } = "http://localhost:11434";
     public string Model { get; set; } = "qwen2.5:14b-instruct";
 }

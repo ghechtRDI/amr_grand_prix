@@ -77,13 +77,7 @@ public class StandingsController : ControllerBase
         string gender)
     {
         // Parse gender
-        var genderEnum = gender.ToLower() switch
-        {
-            "male" or "m" => (Gender?)Gender.Male,
-            "female" or "f" => (Gender?)Gender.Female,
-            "nonbinary" or "nb" or "x" => (Gender?)Gender.Nonbinary,
-            _ => null
-        };
+        var genderEnum = ParseGender(gender);
 
         if (!genderEnum.HasValue)
         {
@@ -171,13 +165,7 @@ public class StandingsController : ControllerBase
         string gender)
     {
         // Parse gender
-        var genderEnum = gender.ToLower() switch
-        {
-            "male" or "m" => (Gender?)Gender.Male,
-            "female" or "f" => (Gender?)Gender.Female,
-            "nonbinary" or "nb" or "x" => (Gender?)Gender.Nonbinary,
-            _ => null
-        };
+        var genderEnum = ParseGender(gender);
 
         if (!genderEnum.HasValue)
         {
@@ -255,6 +243,174 @@ public class StandingsController : ControllerBase
 
         return Ok(response);
     }
+
+    /// <summary>
+    /// Full points breakdown for one gender: every runner's points in every GP race of the year,
+    /// for the Overall (Open) division and then each age group.
+    /// </summary>
+    [HttpGet("{year}/breakdown/{gender}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(StandingsBreakdownResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<StandingsBreakdownResponse>> GetBreakdown(int year, string gender)
+    {
+        var genderEnum = ParseGender(gender);
+        if (!genderEnum.HasValue)
+        {
+            return BadRequest("Invalid gender. Use 'male', 'female', or 'nonbinary'");
+        }
+
+        var openDivision = GrandPrixConstants.GetOpenDivision(genderEnum.Value);
+        var ageDivision = GrandPrixConstants.GetAgeDivision(genderEnum.Value);
+
+        var races = await GetGrandPrixRacesAsync(year);
+        var raceById = races.ToDictionary(r => r.RaceId);
+        var columns = ToSeriesColumns(races);
+
+        var standings = await _context.GrandPrixStandings
+            .Include(s => s.Runner)
+            .Where(s => s.Year == year && (s.Division == openDivision || s.Division == ageDivision))
+            .ToListAsync();
+
+        var points = await _context.GrandPrixPoints
+            .Where(p => p.Year == year && (p.Division == openDivision || p.Division == ageDivision))
+            .ToListAsync();
+        var pointsByStanding = points.ToLookup(p => (p.Division, p.AgeCategory, p.RunnerId));
+
+        BreakdownRowDto ToRow(GrandPrixStanding s)
+        {
+            // Same best-4 selection as the standings calculation (ties broken by race date)
+            var cells = pointsByStanding[(s.Division, s.AgeCategory, s.RunnerId)]
+                .Where(p => raceById.ContainsKey(p.RaceId))
+                .OrderByDescending(p => p.Points)
+                .ThenBy(p => raceById[p.RaceId].Date)
+                .Select((p, i) => new BreakdownCellDto
+                {
+                    RaceId = p.RaceId,
+                    Points = p.Points,
+                    IsRecordBonus = p.IsRecordBonus,
+                    Counted = i < GrandPrixConstants.BestRacesCounted
+                });
+
+            return new BreakdownRowDto
+            {
+                RunnerId = s.RunnerId,
+                RunnerName = $"{s.Runner.FirstName} {s.Runner.LastName}",
+                Rank = s.Rank,
+                TotalPoints = s.TotalPoints,
+                RacesCompleted = s.RacesCompleted,
+                RunTheGamutQualified = s.RunTheGamutQualified,
+                // One cell per series; a runner normally scores on only one of a series' courses,
+                // so if there are two the higher-scoring one is shown
+                Points = cells
+                    .GroupBy(c => raceById[c.RaceId].RaceSeriesId)
+                    .ToDictionary(g => g.Key, g => g.First())
+            };
+        }
+
+        BreakdownSectionDto ToSection(Division division, string? ageCategory) => new()
+        {
+            Division = division,
+            AgeCategory = ageCategory,
+            Rows = standings
+                .Where(s => s.Division == division && s.AgeCategory == ageCategory)
+                .OrderBy(s => s.Rank)
+                .ThenBy(s => s.Runner.LastName)
+                .Select(ToRow)
+                .ToList()
+        };
+
+        var season = await _context.GrandPrixSeasons.FindAsync(year);
+
+        return Ok(new StandingsBreakdownResponse
+        {
+            Year = year,
+            Gender = genderEnum.Value,
+            IsFinalized = season?.IsFinalized ?? false,
+            Columns = columns,
+            Overall = ToSection(openDivision, null),
+            AgeGroups = GrandPrixConstants.AgeCategories
+                .Select(c => ToSection(ageDivision, c.Name))
+                .Where(section => section.Rows.Count > 0)
+                .ToList()
+        });
+    }
+
+    /// <summary>
+    /// Runners who completed at least <see cref="GrandPrixConstants.RunTheGamutMinRaces"/> of the
+    /// year's Grand Prix events ("Run the Gamut"), whether or not they scored points, with the
+    /// events each one finished.
+    /// </summary>
+    [HttpGet("{year}/gamut")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(GamutResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<GamutResponse>> GetGamut(int year)
+    {
+        var columns = ToSeriesColumns(await GetGrandPrixRacesAsync(year));
+        var completions = await _grandPrixCalculationService.GetGamutCompletionsAsync(year);
+
+        var qualifiedIds = completions
+            .Where(c => c.Value.Count >= GrandPrixConstants.RunTheGamutMinRaces)
+            .Select(c => c.Key)
+            .ToList();
+        var runners = await _context.Runners
+            .Where(r => qualifiedIds.Contains(r.RunnerId))
+            .ToListAsync();
+
+        var season = await _context.GrandPrixSeasons.FindAsync(year);
+
+        return Ok(new GamutResponse
+        {
+            Year = year,
+            IsFinalized = season?.IsFinalized ?? false,
+            MinEvents = GrandPrixConstants.RunTheGamutMinRaces,
+            Columns = columns,
+            Runners = runners
+                .OrderByDescending(r => completions[r.RunnerId].Count)
+                .ThenBy(r => r.LastName)
+                .ThenBy(r => r.FirstName)
+                .Select(r => new GamutRunnerDto
+                {
+                    RunnerId = r.RunnerId,
+                    RunnerName = $"{r.FirstName} {r.LastName}",
+                    Gender = r.Gender,
+                    EventsCompleted = completions[r.RunnerId].Count,
+                    CompletedSeriesIds = columns
+                        .Where(c => completions[r.RunnerId].Contains(c.RaceSeriesId))
+                        .Select(c => c.RaceSeriesId)
+                        .ToList()
+                })
+                .ToList()
+        });
+    }
+
+    private record GrandPrixRaceInfo(Guid RaceId, DateOnly Date, Guid RaceSeriesId, string SeriesName);
+
+    private Task<List<GrandPrixRaceInfo>> GetGrandPrixRacesAsync(int year) => _context.Races
+        .Where(r => r.Year == year && r.IsGrandPrixRace)
+        .Select(r => new GrandPrixRaceInfo(r.RaceId, r.Date, r.RaceVariant.RaceSeriesId, r.RaceVariant.RaceSeries.Name))
+        .ToListAsync();
+
+    /// <summary>One column per series with a GP race, in date order.</summary>
+    private static List<BreakdownColumnDto> ToSeriesColumns(List<GrandPrixRaceInfo> races) => races
+        .GroupBy(r => r.RaceSeriesId)
+        .Select(g => new BreakdownColumnDto
+        {
+            RaceSeriesId = g.Key,
+            Name = g.First().SeriesName,
+            Date = g.Min(r => r.Date),
+            RaceIds = g.OrderBy(r => r.Date).Select(r => r.RaceId).ToList()
+        })
+        .OrderBy(c => c.Date)
+        .ToList();
+
+    private static Gender? ParseGender(string gender) => gender.ToLower() switch
+    {
+        "male" or "m" => Gender.Male,
+        "female" or "f" => Gender.Female,
+        "nonbinary" or "nb" or "x" => Gender.Nonbinary,
+        _ => null
+    };
 
     /// <summary>
     /// Get all Grand Prix history for a specific runner

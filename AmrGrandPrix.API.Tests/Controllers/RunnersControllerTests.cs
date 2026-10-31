@@ -4,6 +4,7 @@ using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Tests.Infrastructure;
 using AmrGrandPrix.API.Services.ResultsProcessing;
+using AmrGrandPrix.API.Services.Runners;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -28,6 +29,7 @@ public class RunnersControllerTests : IDisposable
         _controller = new RunnersController(
             _context,
             Mock.Of<IRunnerMatchingService>(),
+            Mock.Of<IRunnerMergeService>(),
             Mock.Of<ILogger<RunnersController>>());
     }
 

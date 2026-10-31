@@ -119,6 +119,7 @@ export default function NavBar() {
               <DropdownMenuContent align="center" className="w-56">
                 <DropdownMenuItem className={dropdownItemClass} render={<NavLink to="/admin/results">Results Management</NavLink>} />
                 <DropdownMenuItem className={dropdownItemClass} render={<NavLink to="/admin/results/upload">Upload Results</NavLink>} />
+                <DropdownMenuItem className={dropdownItemClass} render={<NavLink to="/admin/runners">Racer Management</NavLink>} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -186,6 +187,9 @@ export default function NavBar() {
               </NavLink>
               <NavLink to="/admin/results/upload" className={navLinkClass}>
                 Upload Results
+              </NavLink>
+              <NavLink to="/admin/runners" className={navLinkClass}>
+                Racer Management
               </NavLink>
             </>
           )}

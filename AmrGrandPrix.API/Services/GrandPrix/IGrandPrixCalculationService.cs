@@ -72,4 +72,12 @@ public interface IGrandPrixCalculationService
     /// for that year can't be recalculated.
     /// </summary>
     Task<bool> IsSeasonFinalizedAsync(int year);
+
+    /// <summary>
+    /// Which Grand Prix events each runner completed in <paramref name="year"/>, for "Run the
+    /// Gamut": runner ID → IDs of the race series they finished. An event is a series with a GP
+    /// race that year; finishing the GP race, or a course flagged
+    /// <see cref="RaceVariant.CountsTowardGamut"/>, completes it. Every runner with a finish is included.
+    /// </summary>
+    Task<Dictionary<Guid, HashSet<Guid>>> GetGamutCompletionsAsync(int year);
 }

@@ -399,6 +399,9 @@ namespace AmrGrandPrix.API.Migrations
                         .IsRequired()
                         .HasColumnType("text[]");
 
+                    b.Property<bool>("CountsTowardGamut")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -408,6 +411,9 @@ namespace AmrGrandPrix.API.Migrations
 
                     b.Property<int>("DisplayOrder")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("IsAgeGroupOnly")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsGrandPrixByDefault")
                         .HasColumnType("boolean");
