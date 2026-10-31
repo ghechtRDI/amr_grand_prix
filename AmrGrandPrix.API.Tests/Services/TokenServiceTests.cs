@@ -103,36 +103,4 @@ public class TokenServiceTests
         // Assert
         principal.Should().BeNull();
     }
-
-    [Fact]
-    public void GetPrincipalFromExpiredToken_WithExpiredToken_ShouldReturnClaimsPrincipal()
-    {
-        // Arrange
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, "test-user-id"),
-            new(ClaimTypes.Email, "test@example.com")
-        };
-        var token = _tokenService.GenerateAccessToken(claims);
-
-        // Act
-        var principal = _tokenService.GetPrincipalFromExpiredToken(token);
-
-        // Assert
-        principal.Should().NotBeNull();
-        principal!.FindFirst(ClaimTypes.NameIdentifier)?.Value.Should().Be("test-user-id");
-    }
-
-    [Fact]
-    public void GetPrincipalFromExpiredToken_WithInvalidToken_ShouldReturnNull()
-    {
-        // Arrange
-        var invalidToken = "invalid.token.here";
-
-        // Act
-        var principal = _tokenService.GetPrincipalFromExpiredToken(invalidToken);
-
-        // Assert
-        principal.Should().BeNull();
-    }
 }

@@ -7,6 +7,7 @@ using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
 using AmrGrandPrix.API.Models.DTOs.RaceResults;
 using AmrGrandPrix.API.Services.ResultsProcessing;
+using AmrGrandPrix.API.Services.Runners;
 
 namespace AmrGrandPrix.API.Controllers;
 
@@ -19,15 +20,18 @@ public class RunnersController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly IRunnerMatchingService _runnerMatchingService;
+    private readonly IRunnerMergeService _runnerMergeService;
     private readonly ILogger<RunnersController> _logger;
 
     public RunnersController(
         ApplicationDbContext context,
         IRunnerMatchingService runnerMatchingService,
+        IRunnerMergeService runnerMergeService,
         ILogger<RunnersController> logger)
     {
         _context = context;
         _runnerMatchingService = runnerMatchingService;
+        _runnerMergeService = runnerMergeService;
         _logger = logger;
     }
 
@@ -267,12 +271,21 @@ public class RunnersController : ControllerBase
                 return NotFound($"Runner with ID {id} not found");
             }
 
+            if (request.AlternateNames != null && request.AlternateNames.Count > UpdateRunnerRequest.MaxAlternateNames)
+            {
+                return BadRequest($"Up to {UpdateRunnerRequest.MaxAlternateNames} alternate names are allowed");
+            }
+
             // Update fields
             runner.FirstName = request.FirstName;
             runner.LastName = request.LastName;
             runner.Gender = request.Gender;
             runner.DateOfBirth = request.DateOfBirth;
             runner.Email = request.Email;
+            if (request.PreferredName != null)
+                runner.PreferredName = string.IsNullOrWhiteSpace(request.PreferredName) ? null : request.PreferredName.Trim();
+            if (request.AlternateNames != null)
+                runner.AlternateNames = RunnerNames.Normalize(request.AlternateNames);
             runner.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -340,6 +353,96 @@ public class RunnersController : ControllerBase
             _logger.LogError(ex, "Error deleting runner {RunnerId}", id);
             return BadRequest($"Error deleting runner: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Admin runner list with alternate names, birth info, result counts, and linked accounts.
+    /// The search matches legal, preferred, and alternate names.
+    /// </summary>
+    [HttpGet("manage")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(typeof(List<RunnerAdminDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<RunnerAdminDto>>> GetRunnersForManagement(
+        [FromQuery] string? search = null,
+        [FromQuery] int limit = 100)
+    {
+        // Alternate names are a Postgres array, so the name search runs in memory — the runner
+        // table is small enough (a few thousand rows) for that to be cheap.
+        var runners = await _context.Runners
+            .AsNoTracking()
+            .Select(r => new { r.RunnerId, r.FirstName, r.LastName, r.PreferredName, r.AlternateNames })
+            .ToListAsync();
+
+        var terms = (search ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var ids = runners
+            .Where(r =>
+            {
+                var haystack = string.Join(" ",
+                    new[] { r.FirstName, r.LastName, r.PreferredName ?? string.Empty }.Concat(r.AlternateNames));
+                return terms.All(t => haystack.Contains(t, StringComparison.OrdinalIgnoreCase));
+            })
+            .OrderBy(r => r.LastName).ThenBy(r => r.FirstName)
+            .Take(Math.Clamp(limit, 1, 500))
+            .Select(r => r.RunnerId)
+            .ToList();
+
+        var summaries = await _runnerMergeService.GetAdminSummariesAsync(ids);
+        return Ok(ids.Select(id => summaries[id]).ToList());
+    }
+
+    /// <summary>
+    /// Pairs of runner records that are probably the same person (default: at least 75% match),
+    /// highest confidence first.
+    /// </summary>
+    [HttpGet("potential-duplicates")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(typeof(List<PotentialDuplicateDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<PotentialDuplicateDto>>> GetPotentialDuplicates(
+        [FromQuery] double minConfidence = 0.75)
+    {
+        return Ok(await _runnerMergeService.FindPotentialDuplicatesAsync(Math.Clamp(minConfidence, 0.5, 1.0)));
+    }
+
+    /// <summary>
+    /// What merging <paramref name="sourceId"/> into <paramref name="id"/> would do — results moved,
+    /// resulting names, standings recalculated, and anything that blocks it. Changes nothing.
+    /// </summary>
+    [HttpGet("{id}/merge-preview/{sourceId}")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(typeof(RunnerMergePreviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RunnerMergePreviewDto>> GetMergePreview(Guid id, Guid sourceId)
+    {
+        var preview = await _runnerMergeService.PreviewMergeAsync(id, sourceId);
+        return preview == null ? NotFound("Runner not found") : Ok(preview);
+    }
+
+    /// <summary>
+    /// Merges the source runner into this one: every result moves over, both names become
+    /// alternate names, the source is deleted, and affected Grand Prix standings are recalculated.
+    /// Returns 409 if a finalized Grand Prix year would change, 400 for any other blocking issue.
+    /// </summary>
+    [HttpPost("{id}/merge")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(typeof(RunnerMergeResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<RunnerMergeResultDto>> MergeRunner(Guid id, [FromBody] MergeRunnersRequest request)
+    {
+        var preview = await _runnerMergeService.PreviewMergeAsync(id, request.SourceRunnerId);
+        if (preview == null)
+            return NotFound(new { message = "Runner not found" });
+
+        if (!preview.CanMerge)
+        {
+            var message = string.Join(" ", preview.BlockingIssues);
+            return preview.FinalizedYears.Count > 0
+                ? Conflict(new { message })
+                : BadRequest(new { message });
+        }
+
+        return Ok(await _runnerMergeService.MergeAsync(id, request.SourceRunnerId));
     }
 
     /// <summary>
@@ -710,11 +813,23 @@ public class CreateRunnerRequest
 /// </summary>
 public class UpdateRunnerRequest
 {
+    /// <summary>
+    /// More than a user profile's 3: a merged runner collects the names of every record folded
+    /// into it.
+    /// </summary>
+    public const int MaxAlternateNames = 20;
+
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public Gender Gender { get; set; }
     public DateOnly? DateOfBirth { get; set; }
     public string? Email { get; set; }
+
+    /// <summary>Null leaves it unchanged; an empty string clears it.</summary>
+    public string? PreferredName { get; set; }
+
+    /// <summary>Null leaves them unchanged; an empty list clears them.</summary>
+    public List<string>? AlternateNames { get; set; }
 }
 
 /// <summary>

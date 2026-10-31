@@ -15,11 +15,6 @@ public interface ITokenService
     string GenerateRefreshToken();
 
     /// <summary>
-    /// Extracts the claims principal from an expired token (for refresh token validation)
-    /// </summary>
-    ClaimsPrincipal? GetPrincipalFromExpiredToken(string token);
-
-    /// <summary>
     /// Validates a token and returns the claims principal if valid
     /// </summary>
     ClaimsPrincipal? ValidateToken(string token);

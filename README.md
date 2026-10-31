@@ -69,23 +69,15 @@ docker compose exec ollama ollama pull gwen2.5:14b-instruct
 # "Llm": { "Provider": "Ollama" }
 ```
 
-### Full Docker
-
-```bash
-./docker-dev.sh start
-
-# Frontend: http://localhost:5173
-# API:      http://localhost:8080
-# MailHog:  http://localhost:8025
-# Ollama:   http://localhost:11434
-```
+Local URLs: MailHog web UI at http://localhost:8025, Ollama at http://localhost:11434. `docker-compose.yml` only runs these two dev services; the API, client, and Postgres run natively.
 
 ## 📁 Documentation
 
 - [CLAUDE.md](CLAUDE.md) — Development context & architecture
 - [DOCS/LLM_FILE_PARSER_PLAN.md](DOCS/LLM_FILE_PARSER_PLAN.md) — LLM extraction design
 - [TESTING_AUTH.md](TESTING_AUTH.md) — Authentication testing guide
-- [DOCKER.md](DOCKER.md) — Docker setup & deployment
+- [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) — Production deployment
+- [DOCS/SEMGREP_SCAN.md](DOCS/SEMGREP_SCAN.md) — Static analysis scan
 
 ## 🛠️ Development
 

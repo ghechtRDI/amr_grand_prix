@@ -43,41 +43,6 @@ public class TokenService : ITokenService
         return Convert.ToBase64String(randomNumber);
     }
 
-    public ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
-    {
-        var tokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = false, // Don't validate expiration for refresh
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = _jwtSettings.Issuer,
-            ValidAudience = _jwtSettings.Audience,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret)),
-            ClockSkew = TimeSpan.Zero
-        };
-
-        try
-        {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out SecurityToken securityToken);
-
-            if (securityToken is not JwtSecurityToken jwtSecurityToken ||
-                !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
-            {
-                _logger.LogWarning("Invalid token algorithm");
-                return null;
-            }
-
-            return principal;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to validate expired token");
-            return null;
-        }
-    }
-
     public ClaimsPrincipal? ValidateToken(string token)
     {
         var tokenValidationParameters = new TokenValidationParameters

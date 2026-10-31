@@ -29,6 +29,7 @@ const ReportIssue = lazy(() => import('./pages/ReportIssue'));
 const Unauthorized = lazy(() => import('./pages/Unauthorized'));
 const ResultsUpload = lazy(() => import('./pages/admin/ResultsUpload'));
 const ResultsManagement = lazy(() => import('./pages/admin/ResultsManagement'));
+const RunnerManagement = lazy(() => import('./pages/admin/RunnerManagement'));
 
 // Same loading treatment ProtectedRoute already uses for its auth check, so
 // a route-chunk fetch and an auth-check look identical to the user.
@@ -97,6 +98,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['Admin', 'Manager']}>
                     <ResultsUpload />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/runners"
+                element={
+                  <ProtectedRoute roles={['Admin', 'Manager']}>
+                    <RunnerManagement />
                   </ProtectedRoute>
                 }
               />

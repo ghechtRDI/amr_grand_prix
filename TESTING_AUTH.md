@@ -4,7 +4,7 @@
 
 Before testing, ensure:
 
-1. **PostgreSQL is running** (via Docker)
+1. **PostgreSQL is running** locally
 2. **Database migrations have been applied**
 3. **MailHog is running** for email testing
 4. **API is running** on port 8080
@@ -12,11 +12,9 @@ Before testing, ensure:
 
 ## Starting the Application
 
-### Option 1: Run Locally (Recommended for Development)
-
 ```bash
-# Terminal 1 - Start PostgreSQL and MailHog
-./docker-dev.sh start
+# Terminal 1 - Start MailHog (PostgreSQL must already be running locally)
+docker-compose up -d mailhog
 
 # Terminal 2 - Run API
 cd AmrGrandPrix.API
@@ -26,13 +24,6 @@ dotnet run
 # Terminal 3 - Run Frontend
 cd AmrGrandPrix.Client
 npm run dev
-```
-
-### Option 2: Run in Docker
-
-```bash
-./docker-dev.sh start
-# Access frontend at http://localhost:5173
 ```
 
 ## Testing Checklist

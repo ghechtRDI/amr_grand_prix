@@ -16,8 +16,8 @@ public class Runner
     public string LastName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Self-reported date of birth. Set only when the runner has created and verified their own
-    /// profile — the app never estimates or auto-populates this field.
+    /// Verified date of birth: synced from the runner's own profile when they claim this record, or
+    /// entered by an admin in Racer Management — the app never estimates or auto-populates it.
     /// </summary>
     public DateOnly? DateOfBirth { get; set; }
 

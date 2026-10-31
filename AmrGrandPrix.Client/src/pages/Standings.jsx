@@ -1,6 +1,7 @@
 /**
  * Grand Prix Standings Dashboard
- * Shows standings for Open and Age divisions, filterable by year.
+ * Shows standings for Open and Age divisions, a per-race points breakdown, and the year's
+ * Run the Gamut finishers, filterable by year.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -8,7 +9,6 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AlertCircle, Check } from 'lucide-react';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -22,31 +22,18 @@ import {
 import { SearchInput } from '@/components/ui/search-input';
 import { cn } from '@/lib/utils';
 import { AGE_CATEGORIES } from '@/lib/ageCategories';
+import { GenderToggle, RankBadge } from '@/components/standings/shared';
+import { STICKY_HEAD, genderLabel } from '@/components/standings/constants';
+import PointsBreakdown from '@/components/standings/PointsBreakdown';
+import GamutFinishers from '@/components/standings/GamutFinishers';
 
 const DIVISION_OPEN = 'open';
 const DIVISION_AGE = 'age';
+const VIEW_BREAKDOWN = 'breakdown';
+const VIEW_GAMUT = 'gamut';
 
-const STICKY_HEAD =
-  'sticky top-0 z-10 h-9 whitespace-nowrap bg-zinc-900 text-[11px] font-semibold tracking-wider text-zinc-300 uppercase dark:bg-black';
-
-const RANK_TINTS = {
-  1: 'border-amber-400/50 bg-amber-400/20 text-amber-700 dark:text-amber-400',
-  2: 'border-slate-400/50 bg-slate-400/20 text-slate-600 dark:text-slate-300',
-  3: 'border-orange-700/40 bg-orange-700/15 text-orange-700 dark:text-orange-400',
-};
-
-function RankBadge({ rank }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex size-7 items-center justify-center rounded-full border text-sm font-bold tabular-nums',
-        RANK_TINTS[rank] || 'border-transparent bg-muted text-muted-foreground'
-      )}
-    >
-      {rank}
-    </span>
-  );
-}
+// Tabs that fetch their own data rather than a standings list
+const isStandingsTab = (tab) => tab === DIVISION_OPEN || tab === DIVISION_AGE;
 
 function StandingsTable({ standings, showAgeCategory }) {
   if (!standings || standings.length === 0) {
@@ -116,9 +103,9 @@ export default function Standings() {
   const [availableYears, setAvailableYears] = useState([]);
   const [selectedYear, setSelectedYear] = useState(parseInt(yearParam) || CURRENT_YEAR);
   const [mainTab, setMainTab] = useState(DIVISION_OPEN);
-  const [genderTab, setGenderTab] = useState('male');
+  // One gender for all tabs, so switching tabs keeps the selection
+  const [gender, setGender] = useState('female');
   const [ageCategory, setAgeCategory] = useState(AGE_CATEGORIES[2]); // default 30-39
-  const [ageGender, setAgeGender] = useState('male');
 
   const [standings, setStandings] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -144,15 +131,16 @@ export default function Standings() {
   }, [yearParam]);
 
   const loadStandings = useCallback(async () => {
+    if (!isStandingsTab(mainTab)) return; // PointsBreakdown / GamutFinishers fetch their own data
     setLoading(true);
     setError(null);
     try {
       let url;
       if (mainTab === DIVISION_OPEN) {
-        url = `/api/standings/${selectedYear}/open/${genderTab}`;
+        url = `/api/standings/${selectedYear}/open/${gender}`;
       } else {
         const encoded = encodeURIComponent(ageCategory);
-        url = `/api/standings/${selectedYear}/age/${encoded}/${ageGender}`;
+        url = `/api/standings/${selectedYear}/age/${encoded}/${gender}`;
       }
 
       const res = await fetch(url);
@@ -165,7 +153,7 @@ export default function Standings() {
     } finally {
       setLoading(false);
     }
-  }, [selectedYear, mainTab, genderTab, ageCategory, ageGender]);
+  }, [selectedYear, mainTab, gender, ageCategory]);
 
   useEffect(() => {
     loadStandings();
@@ -180,32 +168,15 @@ export default function Standings() {
   // races do report a nonbinary gender place (see RaceResults.jsx) and the backend already
   // computes Nonbinary Open/Age Grand Prix standings for whenever this division is added here.
   const divisionLabel = () => {
-    if (mainTab === DIVISION_OPEN) {
-      return `Open ${genderTab === 'male' ? 'Male' : 'Female'} Division`;
-    }
-    return `${ageCategory} ${ageGender === 'male' ? 'Male' : 'Female'}`;
+    if (mainTab === DIVISION_OPEN) return `Open ${genderLabel(gender)} Division`;
+    if (mainTab === VIEW_BREAKDOWN) return `${genderLabel(gender)} Points Breakdown`;
+    if (mainTab === VIEW_GAMUT) return 'Run the Gamut';
+    return `${ageCategory} ${genderLabel(gender)}`;
   };
-
-  const GenderToggle = ({ value, onChange }) => (
-    <div className="inline-flex overflow-hidden rounded-lg border border-border">
-      {['male', 'female'].map((g, i) => (
-        <Button
-          key={g}
-          type="button"
-          size="sm"
-          variant={value === g ? 'default' : 'ghost'}
-          className={cn('rounded-none', i > 0 && 'border-l border-border')}
-          onClick={() => onChange(g)}
-        >
-          {g === 'male' ? 'Male' : 'Female'}
-        </Button>
-      ))}
-    </div>
-  );
 
   return (
     <div className="min-h-svh bg-background px-4 py-8 md:py-12">
-      <div className="mx-auto max-w-5xl">
+      <div className={cn('mx-auto', isStandingsTab(mainTab) ? 'max-w-5xl' : 'max-w-7xl')}>
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <h1 className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-2xl font-semibold tracking-tight text-transparent md:text-3xl">
             Grand Prix Standings
@@ -233,11 +204,17 @@ export default function Standings() {
             <TabsTrigger value={DIVISION_AGE} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
               Age Divisions
             </TabsTrigger>
+            <TabsTrigger value={VIEW_BREAKDOWN} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
+              Points Breakdown
+            </TabsTrigger>
+            <TabsTrigger value={VIEW_GAMUT} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
+              Run the Gamut
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value={DIVISION_OPEN}>
             <div className="mb-6">
-              <GenderToggle value={genderTab} onChange={setGenderTab} />
+              <GenderToggle value={gender} onChange={setGender} />
             </div>
           </TabsContent>
 
@@ -256,7 +233,13 @@ export default function Standings() {
                   </SelectContent>
                 </Select>
               </div>
-              <GenderToggle value={ageGender} onChange={setAgeGender} />
+              <GenderToggle value={gender} onChange={setGender} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value={VIEW_BREAKDOWN}>
+            <div className="mb-6">
+              <GenderToggle value={gender} onChange={setGender} />
             </div>
           </TabsContent>
         </Tabs>
@@ -264,9 +247,11 @@ export default function Standings() {
         <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold">{selectedYear} — {divisionLabel()}</h2>
-            <p className="text-sm text-muted-foreground">
-              Best 4 races count toward total. <Check className="inline size-3.5" /> = Run the Gamut (7+ races).
-            </p>
+            {isStandingsTab(mainTab) && (
+              <p className="text-sm text-muted-foreground">
+                Best 4 races count toward total. <Check className="inline size-3.5" /> = Run the Gamut (7+ events).
+              </p>
+            )}
           </div>
           <SearchInput
             value={searchTerm}
@@ -276,19 +261,23 @@ export default function Standings() {
           />
         </div>
 
-        {loading && (
+        {mainTab === VIEW_BREAKDOWN && (
+          <PointsBreakdown year={selectedYear} gender={gender} searchTerm={searchTerm} />
+        )}
+        {mainTab === VIEW_GAMUT && <GamutFinishers year={selectedYear} searchTerm={searchTerm} />}
+        {isStandingsTab(mainTab) && loading && (
           <div className="space-y-2">
             <Skeleton className="h-9 w-full" />
             <Skeleton className="h-64 w-full" />
           </div>
         )}
-        {error && (
+        {isStandingsTab(mainTab) && error && (
           <Alert variant="destructive">
             <AlertCircle />
             <AlertDescription>Error loading standings: {error}</AlertDescription>
           </Alert>
         )}
-        {!loading && !error && (
+        {isStandingsTab(mainTab) && !loading && !error && (
           <StandingsTable
             standings={filteredStandings}
             showAgeCategory={mainTab === DIVISION_AGE}

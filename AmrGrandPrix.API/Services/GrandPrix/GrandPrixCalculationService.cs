@@ -15,7 +15,6 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
     private const int RecordBonusPoints = 10;
     private const int MinRacesForEligibility = 1; // Must finish top 20/5 in at least 1 race
     private const int BestRacesCount = 4; // Count best 4 races
-    private const int RunTheGamutMinRaces = 7; // Need 7 of 9 races for "Run the Gamut"
 
     public GrandPrixCalculationService(
         ApplicationDbContext context,
@@ -54,6 +53,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         _logger.LogInformation("Calculating points for race {RaceId}", raceId);
 
         var race = await _context.Races
+            .Include(r => r.RaceVariant)
             .Include(r => r.Results)
             .ThenInclude(r => r.Runner)
             .FirstOrDefaultAsync(r => r.RaceId == raceId);
@@ -113,27 +113,18 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
     {
         var pointsCreated = 0;
 
-        // Open Division points only count finishers outside the "17 and Under" age category,
-        // ranked among themselves — otherwise a fast junior finisher would take an Open slot
-        // (and bump adults out of top-20 points) despite not being Open-eligible. Results with
-        // unknown age are treated as Open-eligible, matching pre-existing behavior.
-        var openEligibleResults = results
-            .Where(r => GetResultAgeCategory(r) != GrandPrixConstants.AgeCategories[0].Name)
-            .ToList();
-
         for (int i = 0; i < results.Count; i++)
         {
             var result = results[i];
             var placeInGender = i + 1;
 
-            // Update PlaceGender on the result (true overall gender place, includes juniors)
             result.PlaceGender = placeInGender;
 
-            // Calculate Open Division points (top 20 among Open-eligible finishers)
-            var placeInOpenDivision = openEligibleResults.IndexOf(result) + 1;
-            if (placeInOpenDivision >= 1 && placeInOpenDivision <= 20)
+            // Open Division points: top 20 finishers per gender, juniors included — except on a
+            // junior-only course (e.g. Jack's Run), which scores age groups only
+            if (placeInGender <= 20 && !race.RaceVariant.IsAgeGroupOnly)
             {
-                var openPoints = CalculateOpenDivisionPoints(placeInOpenDivision, result.IsNewRecord);
+                var openPoints = CalculateOpenDivisionPoints(placeInGender, result.IsNewRecord);
                 var openDivision = GrandPrixConstants.GetOpenDivision(gender);
 
                 _context.GrandPrixPoints.Add(new GrandPrixPoints
@@ -209,20 +200,21 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         _context.GrandPrixStandings.RemoveRange(existingStandings);
 
         var standingsCreated = 0;
+        var gamutCompletions = await GetGamutCompletionsAsync(year);
 
         // Calculate standings for each division
-        standingsCreated += await CalculateDivisionStandings(year, Division.OpenMale, null);
-        standingsCreated += await CalculateDivisionStandings(year, Division.OpenFemale, null);
-        standingsCreated += await CalculateDivisionStandings(year, Division.OpenNonbinary, null);
+        standingsCreated += await CalculateDivisionStandings(year, Division.OpenMale, null, gamutCompletions);
+        standingsCreated += await CalculateDivisionStandings(year, Division.OpenFemale, null, gamutCompletions);
+        standingsCreated += await CalculateDivisionStandings(year, Division.OpenNonbinary, null, gamutCompletions);
 
         // Calculate standings for each age category
         var ageCategories = GrandPrixConstants.AgeCategories.Select(c => c.Name);
 
         foreach (var category in ageCategories)
         {
-            standingsCreated += await CalculateDivisionStandings(year, Division.AgeMale, category);
-            standingsCreated += await CalculateDivisionStandings(year, Division.AgeFemale, category);
-            standingsCreated += await CalculateDivisionStandings(year, Division.AgeNonbinary, category);
+            standingsCreated += await CalculateDivisionStandings(year, Division.AgeMale, category, gamutCompletions);
+            standingsCreated += await CalculateDivisionStandings(year, Division.AgeFemale, category, gamutCompletions);
+            standingsCreated += await CalculateDivisionStandings(year, Division.AgeNonbinary, category, gamutCompletions);
         }
 
         await _context.SaveChangesAsync();
@@ -232,7 +224,8 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         return standingsCreated;
     }
 
-    private async Task<int> CalculateDivisionStandings(int year, Division division, string? ageCategory)
+    private async Task<int> CalculateDivisionStandings(
+        int year, Division division, string? ageCategory, Dictionary<Guid, HashSet<Guid>> gamutCompletions)
     {
         // Get all points for this division
         var query = _context.GrandPrixPoints
@@ -282,7 +275,8 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
                 SecondBestRacePoints = best4Points.ElementAtOrDefault(1)?.Points ?? 0,
                 ThirdBestRacePoints = best4Points.ElementAtOrDefault(2)?.Points ?? 0,
                 FourthBestRacePoints = best4Points.ElementAtOrDefault(3)?.Points ?? 0,
-                RunTheGamutQualified = rp.AllRacePoints.Count >= RunTheGamutMinRaces,
+                RunTheGamutQualified = gamutCompletions.TryGetValue(rp.RunnerId, out var completed) &&
+                                       completed.Count >= GrandPrixConstants.RunTheGamutMinRaces,
                 LastUpdated = DateTime.UtcNow
             };
 
@@ -298,16 +292,26 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
             .ThenByDescending(s => s.FourthBestRacePoints)
             .ToList();
 
-        // Assign ranks
+        // Assign ranks — tiebreakers already ordered the list; runners still level on total and
+        // all four best races share a rank (standard competition ranking: 1, 2, 2, 4)
         for (int i = 0; i < sortedStandings.Count; i++)
         {
-            sortedStandings[i].Rank = i + 1;
+            sortedStandings[i].Rank = i > 0 && IsFullTie(sortedStandings[i], sortedStandings[i - 1])
+                ? sortedStandings[i - 1].Rank
+                : i + 1;
         }
 
         _context.GrandPrixStandings.AddRange(sortedStandings);
 
         return sortedStandings.Count;
     }
+
+    private static bool IsFullTie(GrandPrixStanding a, GrandPrixStanding b) =>
+        a.TotalPoints == b.TotalPoints &&
+        a.BestRacePoints == b.BestRacePoints &&
+        a.SecondBestRacePoints == b.SecondBestRacePoints &&
+        a.ThirdBestRacePoints == b.ThirdBestRacePoints &&
+        a.FourthBestRacePoints == b.FourthBestRacePoints;
 
     public async Task<List<GrandPrixStanding>> GetStandingsAsync(int year, Division division, string? ageCategory = null)
     {
@@ -371,6 +375,27 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
     /// <summary>Whether the race counts toward the Grand Prix or still has points from when it did.</summary>
     private async Task<bool> AffectsStandingsAsync(Race race) =>
         race.IsGrandPrixRace || await _context.GrandPrixPoints.AnyAsync(p => p.RaceId == race.RaceId);
+
+    public async Task<Dictionary<Guid, HashSet<Guid>>> GetGamutCompletionsAsync(int year)
+    {
+        var gpSeriesIds = await _context.Races
+            .Where(r => r.Year == year && r.IsGrandPrixRace)
+            .Select(r => r.RaceVariant.RaceSeriesId)
+            .Distinct()
+            .ToListAsync();
+
+        var finishes = await _context.RaceResults
+            .Where(r => r.Status == ResultStatus.Finished &&
+                        r.Race.Year == year &&
+                        (r.Race.IsGrandPrixRace || r.Race.RaceVariant.CountsTowardGamut) &&
+                        gpSeriesIds.Contains(r.Race.RaceVariant.RaceSeriesId))
+            .Select(r => new { r.RunnerId, r.Race.RaceVariant.RaceSeriesId })
+            .ToListAsync();
+
+        return finishes
+            .GroupBy(f => f.RunnerId)
+            .ToDictionary(g => g.Key, g => g.Select(f => f.RaceSeriesId).ToHashSet());
+    }
 
     private async Task EnsureSeasonNotFinalizedAsync(int year)
     {

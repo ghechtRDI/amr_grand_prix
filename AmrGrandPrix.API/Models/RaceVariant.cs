@@ -38,6 +38,19 @@ public class RaceVariant
     /// </summary>
     public bool IsGrandPrixByDefault { get; set; }
 
+    /// <summary>
+    /// A junior-only course (e.g. Bird Ridge's "Jack's Run") whose GP races award age-group
+    /// points only — no Open Division points. Juniors who run the main race still score Open points.
+    /// </summary>
+    public bool IsAgeGroupOnly { get; set; }
+
+    /// <summary>
+    /// A non-GP course whose finishers still get credit for the series toward "Run the Gamut"
+    /// (e.g. Knoya's "Dome"/Original and Government Peak's "Uphill Only"). Finishing any GP race
+    /// always counts; this only matters on years the course isn't the series' GP race.
+    /// </summary>
+    public bool CountsTowardGamut { get; set; }
+
     /// <summary>Sort order within the series (lowest first).</summary>
     public int DisplayOrder { get; set; }
 

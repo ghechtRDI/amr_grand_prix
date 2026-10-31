@@ -140,6 +140,10 @@ builder.Services.AddScoped<AmrGrandPrix.API.Services.GrandPrix.IGrandPrixCalcula
 builder.Services.AddScoped<AmrGrandPrix.API.Services.RaceStatistics.IRaceStatisticsService,
                            AmrGrandPrix.API.Services.RaceStatistics.RaceStatisticsService>();
 
+// Runner duplicate detection and merging
+builder.Services.AddScoped<AmrGrandPrix.API.Services.Runners.IRunnerMergeService,
+                           AmrGrandPrix.API.Services.Runners.RunnerMergeService>();
+
 builder.Services.AddOpenApi();
 
 builder.Services.AddControllers()

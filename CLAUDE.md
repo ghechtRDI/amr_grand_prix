@@ -59,7 +59,7 @@ dotnet ef database update
 - `RaceSeries` — a recurring event (e.g. "Mount Marathon Race"); owns its `RaceVariant`s
 - `RaceVariant` — a course run year after year within a series (e.g. Knoya's "Full Monty"/"Dome"/"Happy Trails", MMR's "Adult"/"Junior"); has `Aliases` (alternate names, used to match LLM section labels), `IsGrandPrixByDefault`, `DisplayOrder`, and course records. Single-course series have one variant named "Standard" (APIs return `courseVariant: null` for these)
 - `Race` — one year's running of one variant (unique per `RaceVariantId` + `Year`) with `IsGrandPrixRace` (defaults from the variant but can be overridden per year, e.g. Knoya moves the GP to the Dome in snowy years), `Year`, `Date`. Name/series come from the variant — use `RaceProjections.ToDto` / `RaceProjections.DisplayName`
-- `Runner` — person with gender, DOB, name
+- `Runner` — person with gender, DOB, name, `PreferredName`, and `AlternateNames` (extra full names used by `RunnerMatchingService`). Duplicate records are merged via `RunnerMergeService` (see below)
 - `RaceResult` — links Runner to Race with time, place, age, gender, status (Finished/DNF/DNS/DQ)
 - `GrandPrixPoints` — computed points per runner per race, split by Division (OpenMale/OpenFemale/OpenNonbinary/AgeMale/AgeFemale/AgeNonbinary); Nonbinary runners score in their own division, ranked only against other nonbinary finishers
 - `GrandPrixStanding` — season standings per runner per division, best-4-races logic
@@ -67,9 +67,10 @@ dotnet ef database update
 - `UploadBatch` — tracks file uploads; includes LLM audit fields (RawLlmJson, LlmModel, LlmInputTokens, LlmOutputTokens). `RaceId` is null while a multi-variant upload is pending (held against `RaceSeriesId` + `RaceDate` + `IncludedVariantIds` instead); it's set on save
 
 **Scoring rules** (`Models/GrandPrixConstants.cs`, `Services/GrandPrix/GrandPrixCalculationService.cs`):
-- Open Division: top 20 finishers per gender score points (100/90/85…1); +10 bonus for course record
+- Open Division: top 20 finishers per gender score points (100/90/85…1), juniors included; +10 bonus for course record. Junior-only courses (`RaceVariant.IsAgeGroupOnly`, e.g. Bird Ridge's "Jack's Run", MMR "Junior") score age groups only
 - Age Division: top 5 per age category score 5/4/3/2/1
-- Standings: best 4 races count; 7+ races earns "Run the Gamut" flag
+- Standings: best 4 races count; ties broken by best race, then 2nd/3rd/4th best; runners still level share a rank
+- Run the Gamut: finishing 7+ of the year's GP events (series with a GP race), scoring or not. Finishing the GP race or a `RaceVariant.CountsTowardGamut` course (Knoya "Dome", Gov Peak "Uphill Only") completes the event; two courses in one series count once. `GrandPrixCalculationService.GetGamutCompletionsAsync` is the single source for both the standings flag and the Gamut tab
 - Age categories: "17 and Under", "19-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80-89"
 
 **Results upload pipeline** (`Services/`):
@@ -87,7 +88,9 @@ dotnet ef database update
 - Text extractors: `PdfTextExtractor` (PdfPig), `CsvTextExtractor`, `XlsxTextExtractor` (ClosedXML)
 - Config keys: `Llm:Provider`, `Llm:Anthropic:ApiKey`/`Model`, `Llm:Ollama:BaseUrl`/`Model`
 
-**Controllers**: `AuthController`, `RacesController`, `RaceSeriesController` (series + variant CRUD, series/variant merge, per-variant statistics), `ResultsController`, `RunnersController`, `StandingsController`, `UserManagementController`
+**Controllers**: `AuthController`, `RacesController`, `RaceSeriesController` (series + variant CRUD, series/variant merge, per-variant statistics), `ResultsController`, `RunnersController`, `StandingsController` (incl. `GET {year}/breakdown/{gender}` — per-race points for Overall + every age group, one column per series; `GET {year}/gamut` — Run the Gamut finishers with the events each completed), `UserManagementController`
+
+**Runner merge** (`Services/Runners/RunnerMergeService.cs`, Admin/Manager endpoints on `RunnersController`): `GET potential-duplicates` lists runner pairs with a 75%+ match (name similarity ≥75% across legal/preferred/alternate names, weighted 70%, plus gender 15% and birth year within 2 years 15% — unknown birth year doesn't count against a pair), skipping pairs with results in the same race. `GET {id}/merge-preview/{sourceId}` describes a merge without changing anything; `POST {id}/merge` moves the source's results, GP points, claims, and account link to the target, adds both full names to the target's `AlternateNames`, fills fields the target lacks (DOB, email, etc.) from the source, deletes the source, and rebuilds standings for affected years. Blocked (400) if both runners have a result in the same race or both are linked to user accounts; 409 if a finalized GP year would change. `GET manage` is the admin runner list (searches alternate names too); `PUT {id}` also takes `PreferredName`/`AlternateNames`
 
 **Auth**: JWT bearer tokens, ASP.NET Identity, email confirmation via MailHog in dev. `ResultsController` requires `Admin`/`Manager` role; standings/results reads are `[AllowAnonymous]`.
 
@@ -97,6 +100,7 @@ dotnet ef database update
 
 - **UI system**: Tailwind CSS v4 + shadcn/ui primitives in `components/ui/` (button, card, table, tabs, select, alert-dialog, etc.), styled with `class-variance-authority`; `lib/utils.js` has the `cn()` class merger. Light/dark theme via `hooks/useTheme.js`.
 - **Layout & feature components**: `components/layout/`, `components/auth/`, `components/upload/`
+- **Racer Management** (`pages/admin/RunnerManagement.jsx`, `/admin/runners`): "Possible Duplicates" and "All Racers" tabs; edit DOB/preferred/alternate names (`components/runner-management/EditRunnerDialog.jsx`) and merge runners through a preview-and-confirm modal (`MergeRunnersDialog.jsx`)
 - **Results upload wizard** (`pages/admin/ResultsUpload.jsx`): 4 steps — Race Selection → File Upload → Data Review → Confirmation, each in `components/upload/`. LLM handles extraction automatically; no column-mapping step.
 - **Auth** (`contexts/AuthContext.jsx`, `services/authService.js`, `hooks/useAuth.js`, `useRequireAuth.js`, `useRequireRole.js`): JWT stored in context, auto-refresh.
 - Vite proxies `/api` to the backend in development.
