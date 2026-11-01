@@ -2,7 +2,7 @@
 # This builds the React app and serves it through the .NET application
 
 # Stage 1: Build React Application
-FROM node:20-alpine AS client-build
+FROM node:24-alpine AS client-build
 WORKDIR /client
 
 # Copy client package files (devDependencies included: vite is needed for the build)
