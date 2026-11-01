@@ -51,10 +51,14 @@ public class RunnersController : ControllerBase
         // Apply search filter
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var searchLower = search.ToLower();
+            var searchLower = search.ToLowerInvariant();
+            // Translated to SQL lower(...) LIKE; the culture/StringComparison overloads the
+            // analyzers suggest can't be translated by EF.
+#pragma warning disable CA1304, CA1311, CA1862
             query = query.Where(r =>
                 r.FirstName.ToLower().Contains(searchLower) ||
                 r.LastName.ToLower().Contains(searchLower));
+#pragma warning restore CA1304, CA1311, CA1862
         }
 
         // Apply pagination
@@ -165,7 +169,7 @@ public class RunnersController : ControllerBase
 
         var response = new CheckDuplicatesResponse
         {
-            HasPotentialDuplicates = matchDtos.Any(),
+            HasPotentialDuplicates = matchDtos.Count > 0,
             PotentialMatches = matchDtos,
             HighConfidenceMatch = matches.Any(m => m.Confidence >= 0.95)
         };
@@ -200,7 +204,7 @@ public class RunnersController : ControllerBase
                     request.Gender);
 
                 // If we found potential duplicates, return them
-                if (matches.Any())
+                if (matches.Count > 0)
                 {
                     var matchDtos = matches.Select(m => RunnerMatchDto.FromRunnerMatch(m)).ToList();
 
@@ -334,7 +338,7 @@ public class RunnersController : ControllerBase
             }
 
             // Prevent deletion if results exist
-            if (runner.Results.Any())
+            if (runner.Results.Count > 0)
             {
                 return BadRequest("Cannot delete runner with existing race results");
             }
@@ -805,7 +809,7 @@ public class CreateRunnerRequest
     public Gender Gender { get; set; }
     public DateOnly? DateOfBirth { get; set; }
     public string? Email { get; set; }
-    public bool SkipDuplicateCheck { get; set; } = false;
+    public bool SkipDuplicateCheck { get; set; }
 }
 
 /// <summary>

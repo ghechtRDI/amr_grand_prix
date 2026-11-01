@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using UglyToad.PdfPig; // PdfPig NuGet package
 using UglyToad.PdfPig.Content;
@@ -13,7 +14,7 @@ public static class PdfTextExtractor
         using var document = PdfDocument.Open(stream);
         foreach (var page in document.GetPages())
         {
-            sb.AppendLine($"--- Page {page.Number} ---");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"--- Page {page.Number} ---");
             // GetWords() preserves relative spatial ordering better than raw characters
             var words = page.GetWords();
             var lines = GroupIntoLines(words);

@@ -55,7 +55,7 @@ var key = Encoding.ASCII.GetBytes(jwtSettings?.Secret ?? throw new InvalidOperat
 
 // appsettings.json ships a placeholder secret for local dev; anyone could forge tokens with it.
 if (builder.Environment.IsProduction() &&
-    (jwtSettings.Secret.StartsWith("YourSuperSecretKey") || jwtSettings.Secret.Length < 32))
+    (jwtSettings.Secret.StartsWith("YourSuperSecretKey", StringComparison.Ordinal) || jwtSettings.Secret.Length < 32))
     throw new InvalidOperationException("Jwt:Secret must be set to a unique value of at least 32 characters in production");
 
 builder.Services.AddAuthentication(options =>

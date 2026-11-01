@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using ClosedXML.Excel;
 
@@ -12,7 +13,7 @@ public static class XlsxTextExtractor
         using var workbook = new XLWorkbook(stream);
         foreach (var worksheet in workbook.Worksheets)
         {
-            sb.AppendLine($"--- Sheet: {worksheet.Name} ---");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"--- Sheet: {worksheet.Name} ---");
 
             var usedRange = worksheet.RangeUsed();
             if (usedRange == null) continue;

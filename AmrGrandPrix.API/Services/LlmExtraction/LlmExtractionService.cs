@@ -73,12 +73,12 @@ public class LlmExtractionService : ILlmExtractionService
     }
 
     // Internal DTO for deserialization (uses snake_case via JsonPropertyName)
-    private class LlmExtractionPayload
+    private sealed class LlmExtractionPayload
     {
         public List<LlmSection> Sections { get; set; } = new();
     }
 
-    private class LlmSection
+    private sealed class LlmSection
     {
         public string? Name   { get; set; }
         public string? Gender { get; set; }
@@ -89,7 +89,7 @@ public class LlmExtractionService : ILlmExtractionService
             new(Name, Gender, Course, Rows.Select(r => r.ToExtractedRow()).ToList());
     }
 
-    private class LlmRow
+    private sealed class LlmRow
     {
         public int?    Place       { get; set; }
         public string  Name        { get; set; } = string.Empty;

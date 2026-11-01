@@ -98,9 +98,9 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         var femaleResults    = results.Where(r => r.Gender == Gender.Female).ToList();
         var nonbinaryResults = results.Where(r => r.Gender == Gender.Nonbinary).ToList();
 
-        pointsCreated += await CalculateGenderDivisionPoints(race, maleResults, Gender.Male);
-        pointsCreated += await CalculateGenderDivisionPoints(race, femaleResults, Gender.Female);
-        pointsCreated += await CalculateGenderDivisionPoints(race, nonbinaryResults, Gender.Nonbinary);
+        pointsCreated += CalculateGenderDivisionPoints(race, maleResults, Gender.Male);
+        pointsCreated += CalculateGenderDivisionPoints(race, femaleResults, Gender.Female);
+        pointsCreated += CalculateGenderDivisionPoints(race, nonbinaryResults, Gender.Nonbinary);
 
         await _context.SaveChangesAsync();
 
@@ -109,7 +109,7 @@ public class GrandPrixCalculationService : IGrandPrixCalculationService
         return pointsCreated;
     }
 
-    private async Task<int> CalculateGenderDivisionPoints(Race race, List<RaceResult> results, Gender gender)
+    private int CalculateGenderDivisionPoints(Race race, List<RaceResult> results, Gender gender)
     {
         var pointsCreated = 0;
 
