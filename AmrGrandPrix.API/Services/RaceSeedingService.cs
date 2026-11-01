@@ -20,7 +20,7 @@ public class RaceSeedingService
         _logger = logger;
     }
 
-    private record VariantTemplate(string Name, bool IsGrandPrix, params string[] Aliases)
+    private sealed record VariantTemplate(string Name, bool IsGrandPrix, params string[] Aliases)
     {
         /// <summary>Junior-only course: GP races award age-group points only.</summary>
         public bool IsAgeGroupOnly { get; init; }
@@ -29,7 +29,7 @@ public class RaceSeedingService
         public bool CountsTowardGamut { get; init; }
     }
 
-    private record SeriesTemplate(string Name, params VariantTemplate[] Variants);
+    private sealed record SeriesTemplate(string Name, params VariantTemplate[] Variants);
 
     private static readonly SeriesTemplate[] Catalog =
     [

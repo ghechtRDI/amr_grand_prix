@@ -297,14 +297,16 @@ public class RunnerMatchingService : IRunnerMatchingService
         return similarity;
     }
 
-    private string NormalizeName(string name)
+    private static readonly char[] NameSeparators = [' ', '\t'];
+
+    private static string NormalizeName(string name)
     {
         // Lowercase, trim, and normalize whitespace
         return string.Join(" ", name.ToLowerInvariant()
-            .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries));
+            .Split(NameSeparators, StringSplitOptions.RemoveEmptyEntries));
     }
 
-    private int LevenshteinDistance(string s1, string s2)
+    private static int LevenshteinDistance(string s1, string s2)
     {
         var len1 = s1.Length;
         var len2 = s2.Length;
@@ -337,7 +339,7 @@ public class RunnerMatchingService : IRunnerMatchingService
         return d[len1, len2];
     }
 
-    private double CalculateConfidence(double nameSimilarity, bool ageMatch, bool genderMatch)
+    private static double CalculateConfidence(double nameSimilarity, bool ageMatch, bool genderMatch)
     {
         // Name similarity is weighted most heavily (70%)
         var confidence = nameSimilarity * 0.70;

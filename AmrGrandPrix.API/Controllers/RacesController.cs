@@ -220,7 +220,7 @@ public class RacesController : ControllerBase
             }
 
             // Prevent deletion if results exist
-            if (race.Results.Any())
+            if (race.Results.Count > 0)
             {
                 return BadRequest($"Cannot delete race with existing results. Delete results first.");
             }
