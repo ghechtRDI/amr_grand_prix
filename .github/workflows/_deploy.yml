@@ -135,8 +135,9 @@ jobs:
           dc="docker compose -f docker-compose.prod.yml"
           $dc pull --quiet app
           $dc up -d --wait db
-          # Migrate before the new app starts: it seeds roles on startup
-          $dc run --rm --entrypoint ./efbundle app
+          # Migrate before the new app starts: it seeds roles on startup. </dev/null because
+          # `run` attaches stdin, which here is this script: it would swallow the lines below.
+          $dc run --rm --entrypoint ./efbundle app </dev/null
           $dc up -d --wait --wait-timeout 180 --remove-orphans
           docker logout ghcr.io
           docker image prune -f

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- lucide-react "Mountain" (the NavBar logo) on the nav's gold, in its dark text color -->
+  <rect width="32" height="32" rx="6" fill="#FECC31"/>
+  <g transform="translate(4 4)" fill="none" stroke="#1a1400" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m8 3 4 8 5-5 5 15H2L8 3z"/>
+  </g>
+</svg>

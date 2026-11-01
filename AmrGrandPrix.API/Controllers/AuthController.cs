@@ -83,14 +83,10 @@ public class AuthController : ControllerBase
 
         // Generate email confirmation token
         var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-        var confirmationLink = Url.Action(
-            nameof(ConfirmEmail),
-            "Auth",
-            new { userId = user.Id, token },
-            Request.Scheme);
+        var confirmationLink = EmailConfirmationLink(user.Id, token);
 
         // Send confirmation email
-        await _emailService.SendEmailConfirmationAsync(user.Email!, confirmationLink!);
+        await _emailService.SendEmailConfirmationAsync(user.Email!, confirmationLink);
 
         _logger.LogInformation("User {Email} registered successfully", request.Email);
 
@@ -302,14 +298,10 @@ public class AuthController : ControllerBase
 
         // Generate new confirmation token
         var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-        var confirmationLink = Url.Action(
-            nameof(ConfirmEmail),
-            "Auth",
-            new { userId = user.Id, token },
-            Request.Scheme);
+        var confirmationLink = EmailConfirmationLink(user.Id, token);
 
         // Send confirmation email
-        await _emailService.SendEmailConfirmationAsync(user.Email!, confirmationLink!);
+        await _emailService.SendEmailConfirmationAsync(user.Email!, confirmationLink);
 
         _logger.LogInformation("Resent confirmation email to {Email}", request.Email);
 
@@ -497,4 +489,11 @@ public class AuthController : ControllerBase
 
         return Ok(new { message = "Password changed successfully" });
     }
+
+    /// <summary>
+    /// Link to the SPA's /confirm-email page, which calls the confirm-email endpoint and
+    /// then offers a login button (linking the API directly would show raw JSON)
+    /// </summary>
+    private string EmailConfirmationLink(string userId, string token) =>
+        $"{Request.Scheme}://{Request.Host}/confirm-email?userId={Uri.EscapeDataString(userId)}&token={Uri.EscapeDataString(token)}";
 }

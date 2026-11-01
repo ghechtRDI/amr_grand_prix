@@ -19,7 +19,9 @@ export default defineConfig({
         // Proxy to API running on port 8080
         // Use localhost for local dev, host.docker.internal in Docker
         target: process.env.DOCKER_ENV ? 'http://api:8080' : 'http://localhost:8080',
-        changeOrigin: true,
+        // Keep the browser's Host (localhost:5173) so links the API puts in emails
+        // (confirm email, reset password) open the SPA rather than the API port
+        changeOrigin: false,
         secure: false,
       }
     }
