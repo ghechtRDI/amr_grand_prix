@@ -51,6 +51,24 @@ public class UploadBatch
     [Required]
     public UploadStatus Status { get; set; } = UploadStatus.Pending;
 
+    // Background extraction inputs (see ExtractionWorker). The file's text is pulled out during
+    // the upload request so the worker - including a restart re-queue - never needs the file.
+    /// <summary>Plain text extracted from the uploaded file and sent to the LLM.</summary>
+    public string? ExtractedText { get; set; }
+
+    /// <summary>Course/variant names passed to the LLM as a labeling hint.</summary>
+    public List<string> KnownVariants { get; set; } = new();
+
+    /// <summary>The file covers exactly <see cref="KnownVariants"/> (multi-variant upload).</summary>
+    public bool OnlyTheseVariants { get; set; }
+
+    /// <summary>Rough count of result rows in <see cref="ExtractedText"/>, for the progress bar. Null if unknown.</summary>
+    public int? ExpectedRows { get; set; }
+
+    /// <summary>Why extraction failed, when <see cref="Status"/> is <see cref="UploadStatus.Failed"/>.</summary>
+    [MaxLength(2000)]
+    public string? ExtractionError { get; set; }
+
     // LLM audit fields
     public string? RawLlmJson     { get; set; }
     public string? LlmModel       { get; set; }

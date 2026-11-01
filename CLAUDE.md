@@ -74,8 +74,8 @@ dotnet ef database update
 - Age categories: "17 and Under", "19-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80-89"
 
 **Results upload pipeline** (`Services/`):
-1. `ResultsController.UploadResults` receives file upload
-2. `ILlmExtractionService` extracts text (PdfPig / plain text / ClosedXML) then calls the configured `ILlmProvider`
+1. `ResultsController.UploadResults` receives the file, pulls its text out (`ILlmExtractionService.ExtractTextAsync`: PdfPig / plain text / ClosedXML), stores it on a new `UploadBatch` with status `Extracting`, queues it on `ExtractionJobs`, and returns **202** — the LLM call can take minutes, longer than Cloudflare's 100 s proxy timeout
+2. `ExtractionWorker` (hosted `BackgroundService`) drains the queue one batch at a time via `ExtractionJobRunner`, calling the configured `ILlmProvider`; the batch becomes `Pending` (with `RawLlmJson`) or `Failed` (with `ExtractionError`). Batches left `Extracting` by a restart are re-queued on startup; deleting a batch cancels its job. The client polls `GET api/results/upload/{id}` — live `rowsExtracted` (counted from the Anthropic stream by `StreamedRowCounter`) vs `expectedRows` (`ResultRowEstimator`) drives the progress bar, and once ready it returns the processed results
 3. LLM returns structured JSON: `sections[].{name, gender, course, rows[].{place, name, age, gender, time_string, status, notes}}` (hinted with the series' variant names)
 4. `ResultsProcessingService` converts `List<ExtractedSection>` → `List<ResultRow>` (validates, parses times, resolves gender from section header), then `AssignVariants` maps each section's course label to a `RaceVariant` by name/alias
 5. `RunnerMatchingService` fuzzy-matches names to existing `Runner` records
@@ -83,7 +83,8 @@ dotnet ef database update
 7. `GrandPrixCalculationService` recalculates standings for Grand Prix races
 
 **LLM services** (`Services/LlmExtraction/`):
-- `ILlmExtractionService` — orchestrates text extraction + LLM call + JSON parsing
+- `ILlmExtractionService` — text extraction (`ExtractTextAsync`) and LLM call + JSON parsing (`ExtractFromTextAsync`)
+- Background extraction: `ExtractionJobs` (singleton in-memory queue + live progress + per-job cancellation; the `UploadBatch` row is the durable state), `ExtractionWorker`, `ExtractionJobRunner`. Single app instance assumed
 - `ILlmProvider` — abstraction over Anthropic (`AnthropicLlmProvider`, forced tool use) and Ollama (`OllamaLlmProvider`, `/api/chat` with `format: "json"`)
 - Text extractors: `PdfTextExtractor` (PdfPig), `CsvTextExtractor`, `XlsxTextExtractor` (ClosedXML)
 - Config keys: `Llm:Provider`, `Llm:Anthropic:ApiKey`/`Model`, `Llm:Ollama:BaseUrl`/`Model`

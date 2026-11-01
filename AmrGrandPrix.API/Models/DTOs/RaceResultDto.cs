@@ -54,4 +54,6 @@ public class UploadBatchDto
     public string UploadedBy { get; set; } = string.Empty;
     public DateTime UploadedAt { get; set; }
     public UploadStatus Status { get; set; }
+    /// <summary>Why extraction failed, for a <see cref="UploadStatus.Failed"/> batch.</summary>
+    public string? ExtractionError { get; set; }
 }

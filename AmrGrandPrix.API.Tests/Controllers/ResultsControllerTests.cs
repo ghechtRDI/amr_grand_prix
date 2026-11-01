@@ -24,6 +24,7 @@ public class ResultsControllerTests : IDisposable
     private readonly ApplicationDbContext _context;
     private readonly ResultsController _controller;
     private readonly IGrandPrixCalculationService _grandPrixService;
+    private readonly ExtractionJobs _extractionJobs = new();
 
     public ResultsControllerTests()
     {
@@ -49,6 +50,7 @@ public class ResultsControllerTests : IDisposable
             new ResultsProcessingService(Mock.Of<ILogger<ResultsProcessingService>>()),
             Mock.Of<IRunnerMatchingService>(),
             _grandPrixService,
+            _extractionJobs,
             userManager.Object,
             Mock.Of<ILogger<ResultsController>>())
         {
@@ -734,6 +736,7 @@ public class ResultsControllerTests : IDisposable
             new ResultsProcessingService(Mock.Of<ILogger<ResultsProcessingService>>()),
             matching.Object,
             _grandPrixService,
+            _extractionJobs,
             userManager.Object,
             Mock.Of<ILogger<ResultsController>>())
         {
@@ -751,7 +754,7 @@ public class ResultsControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadResults_SelectedVariants_HintsOnlyThoseAndRoutesOnlyToThem()
+    public async Task UploadResults_SelectedVariants_StoresTextAndQueuesExtractionWithOnlyThoseHinted()
     {
         var fullMonty = TestData.Variant("Knoya Ridge", "Full Monty", isGrandPrixByDefault: true);
         fullMonty.DisplayOrder = 0;
@@ -762,17 +765,9 @@ public class ResultsControllerTests : IDisposable
         _context.RaceSeries.Add(fullMonty.RaceSeries);
         await _context.SaveChangesAsync();
 
-        // The LLM still invents a Full Monty section - it must not be routed to that variant.
-        var row = new ExtractedRow(1, "Alice Runner", 30, null, "F", "1:00:00", "Finished", null);
-        var sections = new List<ExtractedSection>
-        {
-            new("Dome", "F", "Dome", new List<ExtractedRow> { row }),
-            new("Full Monty", "F", "Full Monty", new List<ExtractedRow> { row }),
-        };
         var llm = new Mock<ILlmExtractionService>();
-        llm.Setup(l => l.ExtractAsync(It.IsAny<Stream>(), It.IsAny<string>(),
-                It.IsAny<IReadOnlyList<string>?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ExtractionResult(sections, "{}", "test-model", 1, 1));
+        llm.Setup(l => l.ExtractTextAsync(It.IsAny<Stream>(), "results.pdf"))
+            .ReturnsAsync("1 Alice Runner 30 F 1:00:00\n2 Bob Runner 41 M 1:05:00\n");
 
         var result = await ControllerWithLlm(llm).UploadResults(new UploadResultsRequest
         {
@@ -782,20 +777,134 @@ public class ResultsControllerTests : IDisposable
             RaceDate = new DateOnly(2026, 7, 4),
         }, CancellationToken.None);
 
-        var response = result.Result.Should().BeOfType<OkObjectResult>().Subject.Value
-            .Should().BeOfType<UploadResultsResponse>().Subject;
-        llm.Verify(l => l.ExtractAsync(It.IsAny<Stream>(), "results.pdf",
-            It.Is<IReadOnlyList<string>?>(v => v!.SequenceEqual(new[] { "Dome", "Happy Trails" })),
-            true, It.IsAny<CancellationToken>()));
-        response.ParsedResults.Single(r => r.CourseVariant == "Dome").RaceVariantId.Should().Be(dome.RaceVariantId);
-        response.ParsedResults.Single(r => r.CourseVariant == "Full Monty").RaceVariantId.Should().BeNull();
+        var accepted = result.Result.Should().BeOfType<AcceptedAtActionResult>().Subject.Value
+            .Should().BeOfType<UploadAcceptedResponse>().Subject;
+        accepted.ExpectedRows.Should().Be(2);
+        llm.Verify(l => l.ExtractFromTextAsync(It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<IReadOnlyList<string>?>(), It.IsAny<bool>(), It.IsAny<Action<int>?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the LLM runs in the background worker, not in the request");
 
         (await _context.Races.CountAsync()).Should().Be(0, "races are only created when results are saved");
         var batch = await _context.UploadBatches.SingleAsync();
+        batch.UploadBatchId.Should().Be(accepted.UploadBatchId);
+        batch.Status.Should().Be(UploadStatus.Extracting);
+        batch.ExtractedText.Should().Contain("Alice Runner");
+        batch.KnownVariants.Should().Equal("Dome", "Happy Trails");
+        batch.OnlyTheseVariants.Should().BeTrue();
         batch.RaceId.Should().BeNull();
         batch.RaceSeriesId.Should().Be(fullMonty.RaceSeriesId);
         batch.RaceDate.Should().Be(new DateOnly(2026, 7, 4));
         batch.IncludedVariantIds.Should().BeEquivalentTo(new[] { dome.RaceVariantId, happyTrails.RaceVariantId });
+        _extractionJobs.GetProgress(batch.UploadBatchId).Should().Be(new ExtractionProgress(false, 0), "it's queued");
+    }
+
+    [Fact]
+    public async Task UploadResults_NoReadableText_ReturnsBadRequestWithoutQueuing()
+    {
+        var race = new Race
+        {
+            RaceId = Guid.NewGuid(), RaceVariant = TestData.Variant("Crow Pass"),
+            Date = new DateOnly(2026, 6, 1), Year = 2026
+        };
+        _context.Races.Add(race);
+        await _context.SaveChangesAsync();
+        var llm = new Mock<ILlmExtractionService>();
+        llm.Setup(l => l.ExtractTextAsync(It.IsAny<Stream>(), It.IsAny<string>())).ReturnsAsync("  \n ");
+
+        var result = await ControllerWithLlm(llm).UploadResults(
+            new UploadResultsRequest { File = FakeFile(), RaceId = race.RaceId }, CancellationToken.None);
+
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        (await _context.UploadBatches.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetUploadStatus_WhileExtracting_ReportsQueuedThenLiveRowCount()
+    {
+        var batch = new UploadBatch { UploadBatchId = Guid.NewGuid(), FileName = "r.pdf", Status = UploadStatus.Extracting, ExpectedRows = 120 };
+        _context.UploadBatches.Add(batch);
+        await _context.SaveChangesAsync();
+        _extractionJobs.Enqueue(batch.UploadBatchId);
+
+        var queued = await StatusOf(_controller, batch.UploadBatchId);
+        queued.State.Should().Be(ExtractionState.Queued);
+        queued.ExpectedRows.Should().Be(120);
+
+        var job = _extractionJobs.Start(batch.UploadBatchId)!;
+        job.ReportRows(42);
+        var running = await StatusOf(_controller, batch.UploadBatchId);
+        running.State.Should().Be(ExtractionState.Extracting);
+        running.RowsExtracted.Should().Be(42);
+    }
+
+    [Fact]
+    public async Task GetUploadStatus_Failed_ReturnsError()
+    {
+        var batch = new UploadBatch { UploadBatchId = Guid.NewGuid(), FileName = "r.pdf", Status = UploadStatus.Failed, ExtractionError = "LLM returned invalid JSON" };
+        _context.UploadBatches.Add(batch);
+        await _context.SaveChangesAsync();
+
+        var status = await StatusOf(_controller, batch.UploadBatchId);
+
+        status.State.Should().Be(ExtractionState.Failed);
+        status.Error.Should().Be("LLM returned invalid JSON");
+    }
+
+    [Fact]
+    public async Task GetUploadStatus_Extracted_ReturnsResultsRoutedOnlyToSelectedVariants()
+    {
+        var fullMonty = TestData.Variant("Knoya Ridge", "Full Monty", isGrandPrixByDefault: true);
+        var dome = TestData.AddVariant(fullMonty.RaceSeries, "Dome");
+        var happyTrails = TestData.AddVariant(fullMonty.RaceSeries, "Happy Trails");
+        _context.RaceSeries.Add(fullMonty.RaceSeries);
+        var batch = new UploadBatch
+        {
+            UploadBatchId = Guid.NewGuid(), FileName = "results.pdf", Status = UploadStatus.Pending,
+            RaceSeriesId = fullMonty.RaceSeriesId, RaceDate = new DateOnly(2026, 7, 4),
+            IncludedVariantIds = new List<Guid> { dome.RaceVariantId, happyTrails.RaceVariantId },
+            RawLlmJson = "{\"sections\":[]}",
+        };
+        _context.UploadBatches.Add(batch);
+        await _context.SaveChangesAsync();
+
+        // The LLM still invented a Full Monty section - it must not be routed to that variant.
+        var row = new ExtractedRow(1, "Alice Runner", 30, null, "F", "1:00:00", "Finished", null);
+        var llm = new Mock<ILlmExtractionService>();
+        llm.Setup(l => l.RehydrateSections(batch.RawLlmJson, "results.pdf")).Returns(new List<ExtractedSection>
+        {
+            new("Dome", "F", "Dome", new List<ExtractedRow> { row }),
+            new("Full Monty", "F", "Full Monty", new List<ExtractedRow> { row }),
+        });
+
+        var status = await StatusOf(ControllerWithLlm(llm), batch.UploadBatchId);
+
+        status.State.Should().Be(ExtractionState.Ready);
+        var response = status.Result!;
+        response.UploadBatchId.Should().Be(batch.UploadBatchId);
+        response.ParsedResults.Single(r => r.CourseVariant == "Dome").RaceVariantId.Should().Be(dome.RaceVariantId);
+        response.ParsedResults.Single(r => r.CourseVariant == "Full Monty").RaceVariantId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DeleteUploadBatch_WhileExtracting_CancelsTheJob()
+    {
+        var batch = new UploadBatch { UploadBatchId = Guid.NewGuid(), FileName = "r.pdf", Status = UploadStatus.Extracting };
+        _context.UploadBatches.Add(batch);
+        await _context.SaveChangesAsync();
+        _extractionJobs.Enqueue(batch.UploadBatchId);
+        var job = _extractionJobs.Start(batch.UploadBatchId)!;
+
+        (await _controller.DeleteUploadBatch(batch.UploadBatchId)).Should().BeOfType<NoContentResult>();
+
+        job.Cancellation.IsCancellationRequested.Should().BeTrue();
+        _extractionJobs.GetProgress(batch.UploadBatchId).Should().BeNull();
+    }
+
+    private static async Task<UploadStatusResponse> StatusOf(ResultsController controller, Guid batchId)
+    {
+        var result = await controller.GetUploadStatus(batchId);
+        return result.Result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<UploadStatusResponse>().Subject;
     }
 
     [Fact]

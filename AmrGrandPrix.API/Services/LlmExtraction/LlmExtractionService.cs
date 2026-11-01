@@ -21,13 +21,23 @@ public class LlmExtractionService : ILlmExtractionService
         _logger   = logger;
     }
 
-    public async Task<ExtractionResult> ExtractAsync(Stream file, string fileName, IReadOnlyList<string>? knownVariants = null, bool onlyTheseVariants = false, CancellationToken ct = default)
+    public async Task<string> ExtractTextAsync(Stream file, string fileName)
     {
-        _logger.LogInformation("Extracting text from {FileName}", fileName);
-        var text = await ExtractTextAsync(file, fileName);
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        var text = ext switch
+        {
+            ".pdf"          => PdfTextExtractor.Extract(file),
+            ".csv" or ".txt" => await CsvTextExtractor.ExtractAsync(file),
+            ".xlsx" or ".xls" => XlsxTextExtractor.Extract(file),
+            _ => throw new NotSupportedException($"File type '{ext}' is not supported")
+        };
         _logger.LogInformation("Extracted {Chars} characters from {FileName}", text.Length, fileName);
+        return text;
+    }
 
-        var providerResult = await _provider.ExtractAsync(text, fileName, knownVariants, onlyTheseVariants, ct);
+    public async Task<ExtractionResult> ExtractFromTextAsync(string text, string fileName, IReadOnlyList<string>? knownVariants = null, bool onlyTheseVariants = false, Action<int>? onRowsExtracted = null, CancellationToken ct = default)
+    {
+        var providerResult = await _provider.ExtractAsync(text, fileName, knownVariants, onlyTheseVariants, onRowsExtracted, ct);
         var sections       = RehydrateSections(providerResult.Json, fileName);
 
         return new ExtractionResult(
@@ -42,18 +52,6 @@ public class LlmExtractionService : ILlmExtractionService
     {
         var extraction = DeserializeExtraction(rawJson, fileName);
         return extraction.Sections.Select(s => s.ToExtractedSection()).ToList();
-    }
-
-    private static async Task<string> ExtractTextAsync(Stream stream, string fileName)
-    {
-        var ext = Path.GetExtension(fileName).ToLowerInvariant();
-        return ext switch
-        {
-            ".pdf"          => PdfTextExtractor.Extract(stream),
-            ".csv" or ".txt" => await CsvTextExtractor.ExtractAsync(stream),
-            ".xlsx" or ".xls" => XlsxTextExtractor.Extract(stream),
-            _ => throw new NotSupportedException($"File type '{ext}' is not supported")
-        };
     }
 
     private LlmExtractionPayload DeserializeExtraction(string json, string fileName)

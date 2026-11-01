@@ -35,10 +35,15 @@ public enum FileType
 
 public enum UploadStatus
 {
+    /// <summary>Extraction finished; the results are ready for review in the upload wizard.</summary>
     Pending,
     Validated,
     Saved,
-    Cancelled
+    Cancelled,
+    /// <summary>Queued for, or running, LLM extraction in the background (<c>ExtractionWorker</c>).</summary>
+    Extracting,
+    /// <summary>LLM extraction failed; see <see cref="UploadBatch.ExtractionError"/>.</summary>
+    Failed
 }
 
 public enum ClaimStatus
