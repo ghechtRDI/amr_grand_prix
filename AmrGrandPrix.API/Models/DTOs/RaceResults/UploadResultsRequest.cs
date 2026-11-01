@@ -39,6 +39,37 @@ public class UploadResultsResponse
     public int RowsWithIssues { get; set; }
 }
 
+/// <summary>202 response to an upload: extraction runs in the background, poll its status.</summary>
+public class UploadAcceptedResponse
+{
+    public Guid UploadBatchId { get; set; }
+    public int? ExpectedRows { get; set; }
+}
+
+public enum ExtractionState
+{
+    /// <summary>Waiting behind another upload's extraction.</summary>
+    Queued,
+    /// <summary>The LLM is extracting results.</summary>
+    Extracting,
+    /// <summary>Done; <see cref="UploadStatusResponse.Result"/> holds the parsed results.</summary>
+    Ready,
+    Failed
+}
+
+/// <summary>Progress of a background extraction (GET api/results/upload/{id}).</summary>
+public class UploadStatusResponse
+{
+    public Guid UploadBatchId { get; set; }
+    public ExtractionState State { get; set; }
+    /// <summary>Result rows the LLM has written so far (live while extracting).</summary>
+    public int RowsExtracted { get; set; }
+    /// <summary>Rough number of result rows in the file; null if it couldn't be estimated.</summary>
+    public int? ExpectedRows { get; set; }
+    public string? Error { get; set; }
+    public UploadResultsResponse? Result { get; set; }
+}
+
 public class ResumeBatchResponse
 {
     public Guid UploadBatchId { get; set; }

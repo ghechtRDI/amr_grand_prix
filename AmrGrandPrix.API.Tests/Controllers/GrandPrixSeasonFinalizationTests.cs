@@ -63,6 +63,7 @@ public class GrandPrixSeasonFinalizationTests : IDisposable
             new ResultsProcessingService(Mock.Of<ILogger<ResultsProcessingService>>()),
             Mock.Of<IRunnerMatchingService>(),
             _gp,
+            new ExtractionJobs(),
             userManager.Object,
             Mock.Of<ILogger<ResultsController>>())
         {

@@ -79,7 +79,7 @@ public class OllamaLlmProvider : ILlmProvider
         _logger = logger;
     }
 
-    public async Task<LlmProviderResult> ExtractAsync(string text, string fileName, IReadOnlyList<string>? knownVariants = null, bool onlyTheseVariants = false, CancellationToken ct = default)
+    public async Task<LlmProviderResult> ExtractAsync(string text, string fileName, IReadOnlyList<string>? knownVariants = null, bool onlyTheseVariants = false, Action<int>? onRowsExtracted = null, CancellationToken ct = default)
     {
         var userContent = $"{KnownVariantsHint.BuildPrefix(knownVariants, onlyTheseVariants)}filename: {fileName}\n---\n{text}";
 

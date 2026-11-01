@@ -107,7 +107,7 @@ public class AnthropicLlmProvider : ILlmProvider
         _logger = logger;
     }
 
-    public async Task<LlmProviderResult> ExtractAsync(string text, string fileName, IReadOnlyList<string>? knownVariants = null, bool onlyTheseVariants = false, CancellationToken ct = default)
+    public async Task<LlmProviderResult> ExtractAsync(string text, string fileName, IReadOnlyList<string>? knownVariants = null, bool onlyTheseVariants = false, Action<int>? onRowsExtracted = null, CancellationToken ct = default)
     {
         var userContent = $"{KnownVariantsHint.BuildPrefix(knownVariants, onlyTheseVariants)}filename: {fileName}\n---\n{text}";
 
@@ -166,6 +166,7 @@ public class AnthropicLlmProvider : ILlmProvider
         string? stopReason    = null;
         var toolBlockIndex    = -1;
         var toolInputByIndex  = new Dictionary<int, StringBuilder>();
+        var rowCounter        = new StreamedRowCounter();
 
         await using (var stream = await res.Content.ReadAsStreamAsync(ct))
         using (var reader = new StreamReader(stream))
@@ -205,7 +206,11 @@ public class AnthropicLlmProvider : ILlmProvider
                         var delta      = evt["delta"]!;
                         if (delta["type"]?.GetValue<string>() == "input_json_delta"
                             && toolInputByIndex.TryGetValue(deltaIndex, out var builder))
+                        {
                             builder.Append(delta["partial_json"]?.GetValue<string>());
+                            if (onRowsExtracted != null && deltaIndex == toolBlockIndex && rowCounter.Advance(builder))
+                                onRowsExtracted(rowCounter.Count);
+                        }
                         break;
 
                     case "message_delta":

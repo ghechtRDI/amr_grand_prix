@@ -47,6 +47,8 @@ const BATCH_STATUS_BADGE_CLASSES = {
   Pending: 'bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
   Validated: 'bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400',
   Cancelled: 'bg-muted text-muted-foreground',
+  Extracting: 'bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400',
+  Failed: 'bg-destructive/10 text-destructive dark:bg-destructive/20',
 };
 
 function fileTypeLabel(fileType) {
@@ -58,15 +60,19 @@ function fileTypeLabel(fileType) {
 
 function statusLabel(status) {
   if (typeof status === 'number') {
-    return ['Pending', 'Validated', 'Saved', 'Cancelled'][status] ?? status;
+    return ['Pending', 'Validated', 'Saved', 'Cancelled', 'Extracting', 'Failed'][status] ?? status;
   }
   return status;
 }
 
-function BatchStatusBadge({ status }) {
+function BatchStatusBadge({ status, error }) {
   const s = statusLabel(status);
   return (
-    <Badge variant="outline" className={cn('border-transparent font-medium', BATCH_STATUS_BADGE_CLASSES[s] || 'bg-muted text-muted-foreground')}>
+    <Badge
+      variant="outline"
+      className={cn('border-transparent font-medium', BATCH_STATUS_BADGE_CLASSES[s] || 'bg-muted text-muted-foreground')}
+      title={s === 'Failed' && error ? error : undefined}
+    >
       {s}
     </Badge>
   );
@@ -522,7 +528,7 @@ export default function ResultsManagement() {
                       <TableCell className="text-muted-foreground">
                         {new Date(b.uploadedAt).toLocaleString()}
                       </TableCell>
-                      <TableCell><BatchStatusBadge status={b.status} /></TableCell>
+                      <TableCell><BatchStatusBadge status={b.status} error={b.extractionError} /></TableCell>
                       <TableCell className="text-right whitespace-nowrap">
                         <div className="flex justify-end gap-1.5">
                           {statusLabel(b.status) === 'Pending' && (

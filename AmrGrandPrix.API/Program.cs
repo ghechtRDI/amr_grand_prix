@@ -131,6 +131,10 @@ else
     builder.Services.AddScoped<ILlmProvider>(sp => sp.GetRequiredService<AnthropicLlmProvider>());
 
 builder.Services.AddScoped<ILlmExtractionService, LlmExtractionService>();
+// Uploads return 202 and extraction runs here, polled via GET api/results/upload/{id}
+builder.Services.AddSingleton<ExtractionJobs>();
+builder.Services.AddScoped<ExtractionJobRunner>();
+builder.Services.AddHostedService<ExtractionWorker>();
 
 // Results processing services
 builder.Services.AddScoped<AmrGrandPrix.API.Services.ResultsProcessing.IResultsProcessingService,

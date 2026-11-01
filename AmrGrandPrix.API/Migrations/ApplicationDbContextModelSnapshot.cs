@@ -598,6 +598,16 @@ namespace AmrGrandPrix.API.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("ExpectedRows")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ExtractedText")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExtractionError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -612,6 +622,12 @@ namespace AmrGrandPrix.API.Migrations
                         .HasColumnType("uuid[]")
                         .HasDefaultValueSql("'{}'");
 
+                    b.PrimitiveCollection<List<string>>("KnownVariants")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'");
+
                     b.Property<int>("LlmInputTokens")
                         .HasColumnType("integer");
 
@@ -620,6 +636,9 @@ namespace AmrGrandPrix.API.Migrations
 
                     b.Property<int>("LlmOutputTokens")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("OnlyTheseVariants")
+                        .HasColumnType("boolean");
 
                     b.Property<DateOnly?>("RaceDate")
                         .HasColumnType("date");
@@ -651,6 +670,8 @@ namespace AmrGrandPrix.API.Migrations
                     b.HasIndex("RaceId");
 
                     b.HasIndex("RaceSeriesId");
+
+                    b.HasIndex("Status");
 
                     b.HasIndex("UploadedAt");
 

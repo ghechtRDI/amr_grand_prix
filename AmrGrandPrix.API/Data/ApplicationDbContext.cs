@@ -217,6 +217,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(b => b.Status).IsRequired();
             entity.Property(b => b.UploadedBy).IsRequired();
             entity.PrimitiveCollection(b => b.IncludedVariantIds).HasDefaultValueSql("'{}'");
+            entity.PrimitiveCollection(b => b.KnownVariants).HasDefaultValueSql("'{}'");
+            entity.HasIndex(b => b.Status);
 
             // Configure relationship
             entity.HasOne(b => b.Race)

@@ -22,6 +22,7 @@ public class ResultsController : ControllerBase
     private readonly IResultsProcessingService _resultsProcessingService;
     private readonly IRunnerMatchingService _runnerMatchingService;
     private readonly IGrandPrixCalculationService _grandPrixCalculationService;
+    private readonly ExtractionJobs _extractionJobs;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ILogger<ResultsController> _logger;
 
@@ -31,6 +32,7 @@ public class ResultsController : ControllerBase
         IResultsProcessingService resultsProcessingService,
         IRunnerMatchingService runnerMatchingService,
         IGrandPrixCalculationService grandPrixCalculationService,
+        ExtractionJobs extractionJobs,
         UserManager<ApplicationUser> userManager,
         ILogger<ResultsController> logger)
     {
@@ -39,16 +41,21 @@ public class ResultsController : ControllerBase
         _resultsProcessingService = resultsProcessingService;
         _runnerMatchingService    = runnerMatchingService;
         _grandPrixCalculationService = grandPrixCalculationService;
+        _extractionJobs           = extractionJobs;
         _userManager              = userManager;
         _logger                   = logger;
     }
 
-    /// <summary>Upload a race results file (PDF, CSV, or Excel) and extract results via LLM.</summary>
+    /// <summary>
+    /// Upload a race results file (PDF, CSV, or Excel). The file's text is read here, but the LLM
+    /// extraction runs in the background (it can take minutes - longer than Cloudflare holds a
+    /// request open): this returns 202 with the batch ID; poll <see cref="GetUploadStatus"/>.
+    /// </summary>
     [HttpPost("upload")]
-    [ProducesResponseType(typeof(UploadResultsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(UploadAcceptedResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UploadResultsResponse>> UploadResults(
+    public async Task<ActionResult<UploadAcceptedResponse>> UploadResults(
         [FromForm] UploadResultsRequest request,
         CancellationToken ct)
     {
@@ -120,18 +127,11 @@ public class ResultsController : ControllerBase
                     .ToList();
             }
 
-            // LLM extraction
-            ExtractionResult extraction;
+            string text;
             using (var stream = request.File.OpenReadStream())
-                extraction = await _llmExtractionService.ExtractAsync(
-                    stream, request.File.FileName, knownVariants, onlyTheseVariants, ct);
-
-            var processedResults = await _resultsProcessingService.ProcessResultsAsync(extraction.Sections);
-            // Only route to the selected variants - a section the LLM labeled with any other course
-            // stays unmatched so it stands out in Data Review.
-            _resultsProcessingService.AssignVariants(
-                processedResults, onlyTheseVariants ? includedVariants : seriesVariants.ToList());
-            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults, raceDate);
+                text = await _llmExtractionService.ExtractTextAsync(stream, request.File.FileName);
+            if (string.IsNullOrWhiteSpace(text))
+                return BadRequest("No text could be read from this file. If it's a scanned PDF, export the results as CSV or Excel instead.");
 
             var user = await _userManager.GetUserAsync(User);
             var uploadBatch = new UploadBatch
@@ -149,26 +149,30 @@ public class ResultsController : ControllerBase
                     ".pdf"           => FileType.PDF,
                     _                => FileType.CSV
                 },
-                RecordsUploaded  = processedResults.Count,
-                UploadedBy       = user?.Id ?? "system",
-                UploadedAt       = DateTime.UtcNow,
-                Status           = UploadStatus.Pending,
-                RawLlmJson       = extraction.RawModelJson,
-                LlmModel         = extraction.LlmModel,
-                LlmInputTokens   = extraction.InputTokens,
-                LlmOutputTokens  = extraction.OutputTokens
+                UploadedBy        = user?.Id ?? "system",
+                UploadedAt        = DateTime.UtcNow,
+                Status            = UploadStatus.Extracting,
+                ExtractedText     = text,
+                KnownVariants     = knownVariants,
+                OnlyTheseVariants = onlyTheseVariants,
+                ExpectedRows      = ResultRowEstimator.Estimate(text)
             };
 
             _context.UploadBatches.Add(uploadBatch);
             await _context.SaveChangesAsync(ct);
+            _extractionJobs.Enqueue(uploadBatch.UploadBatchId);
 
             _logger.LogInformation(
-                "File {FileName} uploaded for race {RaceId} (series {RaceSeriesId}) by {UserId}. Extracted {Sections} section(s), {Rows} rows. Tokens: {In}in/{Out}out",
+                "File {FileName} uploaded for race {RaceId} (series {RaceSeriesId}) by {UserId}; queued for extraction as batch {BatchId} (~{ExpectedRows} rows)",
                 request.File.FileName, race?.RaceId, request.RaceSeriesId, user?.Id,
-                extraction.Sections.Count, processedResults.Count,
-                extraction.InputTokens, extraction.OutputTokens);
+                uploadBatch.UploadBatchId, uploadBatch.ExpectedRows);
 
-            return Ok(BuildResponse(uploadBatch.UploadBatchId, processedResults));
+            return AcceptedAtAction(nameof(GetUploadStatus), new { batchId = uploadBatch.UploadBatchId },
+                new UploadAcceptedResponse
+                {
+                    UploadBatchId = uploadBatch.UploadBatchId,
+                    ExpectedRows  = uploadBatch.ExpectedRows
+                });
         }
         catch (NotSupportedException ex)
         {
@@ -182,6 +186,63 @@ public class ResultsController : ControllerBase
     }
 
     /// <summary>Re-validate corrected results data.</summary>
+    /// <summary>
+    /// Progress of an upload's background extraction. Once extraction is done this returns the
+    /// parsed, matched results (the same shape the upload itself used to return).
+    /// </summary>
+    [HttpGet("upload/{batchId:guid}")]
+    [ProducesResponseType(typeof(UploadStatusResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UploadStatusResponse>> GetUploadStatus(Guid batchId)
+    {
+        // Cheap lookup first - this is polled every couple of seconds while extracting.
+        var state = await _context.UploadBatches
+            .Where(b => b.UploadBatchId == batchId)
+            .Select(b => new { b.Status, b.ExpectedRows, b.ExtractionError })
+            .FirstOrDefaultAsync();
+        if (state == null)
+            return NotFound($"Upload batch {batchId} not found");
+
+        var response = new UploadStatusResponse { UploadBatchId = batchId, ExpectedRows = state.ExpectedRows };
+        switch (state.Status)
+        {
+            case UploadStatus.Extracting:
+                // Not in the queue yet = the app just restarted and the worker is re-queuing it.
+                var progress = _extractionJobs.GetProgress(batchId);
+                response.State = progress?.Started == true ? ExtractionState.Extracting : ExtractionState.Queued;
+                response.RowsExtracted = progress?.RowsExtracted ?? 0;
+                return Ok(response);
+
+            case UploadStatus.Failed:
+                response.State = ExtractionState.Failed;
+                response.Error = state.ExtractionError;
+                return Ok(response);
+
+            case UploadStatus.Pending:
+                try
+                {
+                    var batch = (await LoadBatchWithSeriesAsync(batchId))!;
+                    if (ResolveSeriesAndDate(batch) is not var (series, raceDate))
+                        return BadRequest("This upload batch isn't linked to a race or race series");
+
+                    var results = await ProcessStoredExtractionAsync(batch, RoutingVariants(batch, series), raceDate);
+                    response.State = ExtractionState.Ready;
+                    response.RowsExtracted = results.Count;
+                    response.Result = BuildResponse(batchId, results);
+                    return Ok(response);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing extracted results for batch {BatchId}", batchId);
+                    return BadRequest($"Error processing extracted results: {ex.Message}");
+                }
+
+            default:
+                return BadRequest($"Upload batch is already {state.Status}");
+        }
+    }
+
     [HttpPost("validate")]
     [ProducesResponseType(typeof(UploadResultsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -545,10 +606,7 @@ public class ResultsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ResumeBatchResponse>> ResumeBatch(Guid batchId)
     {
-        var uploadBatch = await _context.UploadBatches
-            .Include(b => b.Race!).ThenInclude(r => r.RaceVariant).ThenInclude(v => v.RaceSeries).ThenInclude(s => s.Variants)
-            .Include(b => b.RaceSeries!).ThenInclude(s => s.Variants)
-            .FirstOrDefaultAsync(b => b.UploadBatchId == batchId);
+        var uploadBatch = await LoadBatchWithSeriesAsync(batchId);
 
         if (uploadBatch == null)
             return NotFound($"Upload batch {batchId} not found");
@@ -562,30 +620,18 @@ public class ResultsController : ControllerBase
         try
         {
             var race = uploadBatch.Race;
-            var series = race?.RaceVariant.RaceSeries ?? uploadBatch.RaceSeries;
-            var raceDate = race?.Date ?? uploadBatch.RaceDate;
-            if (series == null || raceDate == null)
+            if (ResolveSeriesAndDate(uploadBatch) is not var (series, raceDate))
                 return BadRequest("This upload batch isn't linked to a race or race series");
 
-            // A pending multi-variant batch routes to the variants picked at upload (all of the
-            // series' if none were recorded, or they've since been merged away).
-            var includedVariants = race == null
-                ? series.Variants.Where(v => uploadBatch.IncludedVariantIds.Contains(v.RaceVariantId)).ToList()
-                : new List<RaceVariant>();
-            if (includedVariants.Count == 0)
-                includedVariants = series.Variants.ToList();
-
-            var sections = _llmExtractionService.RehydrateSections(uploadBatch.RawLlmJson, uploadBatch.FileName);
-            var processedResults = await _resultsProcessingService.ProcessResultsAsync(sections);
-            _resultsProcessingService.AssignVariants(processedResults, includedVariants);
-            processedResults = await _runnerMatchingService.FindMatchesForResultsAsync(processedResults, raceDate.Value);
+            var includedVariants = RoutingVariants(uploadBatch, series);
+            var processedResults = await ProcessStoredExtractionAsync(uploadBatch, includedVariants, raceDate);
 
             return Ok(new ResumeBatchResponse
             {
                 UploadBatchId   = uploadBatch.UploadBatchId,
                 RaceId          = race?.RaceId,
                 RaceName        = series.Name,
-                RaceDate        = raceDate.Value,
+                RaceDate        = raceDate,
                 IsGrandPrixRace = race?.IsGrandPrixRace ?? false,
                 RaceSeriesId    = series.RaceSeriesId,
                 RaceVariantId   = race?.RaceVariantId,
@@ -639,7 +685,8 @@ public class ResultsController : ControllerBase
                 RecordsUploaded = b.RecordsUploaded,
                 UploadedBy      = b.UploadedBy,
                 UploadedAt      = b.UploadedAt,
-                Status          = b.Status
+                Status          = b.Status,
+                ExtractionError = b.ExtractionError
             })
             .ToListAsync();
 
@@ -683,6 +730,7 @@ public class ResultsController : ControllerBase
             }
 
             await transaction.CommitAsync();
+            _extractionJobs.Cancel(batchId); // stop the LLM call if it's still extracting
 
             _logger.LogInformation(
                 "Deleted upload batch {BatchId} with {ResultCount} results", batchId, results.Count);
@@ -698,6 +746,42 @@ public class ResultsController : ControllerBase
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private Task<UploadBatch?> LoadBatchWithSeriesAsync(Guid batchId) =>
+        _context.UploadBatches
+            .Include(b => b.Race!).ThenInclude(r => r.RaceVariant).ThenInclude(v => v.RaceSeries).ThenInclude(s => s.Variants)
+            .Include(b => b.RaceSeries!).ThenInclude(s => s.Variants)
+            .FirstOrDefaultAsync(b => b.UploadBatchId == batchId);
+
+    /// <summary>The batch's series and race date (from its race, or for a multi-variant batch, held on the batch).</summary>
+    private static (RaceSeries Series, DateOnly RaceDate)? ResolveSeriesAndDate(UploadBatch batch)
+    {
+        var series = batch.Race?.RaceVariant.RaceSeries ?? batch.RaceSeries;
+        var raceDate = batch.Race?.Date ?? batch.RaceDate;
+        return series != null && raceDate != null ? (series, raceDate.Value) : null;
+    }
+
+    /// <summary>
+    /// Variants a batch's sections may be routed to: a multi-variant batch's picked variants (all
+    /// of the series' if none were recorded, or they've since been merged away), otherwise all.
+    /// </summary>
+    private static List<RaceVariant> RoutingVariants(UploadBatch batch, RaceSeries series)
+    {
+        var included = batch.Race == null
+            ? series.Variants.Where(v => batch.IncludedVariantIds.Contains(v.RaceVariantId)).ToList()
+            : new List<RaceVariant>();
+        return included.Count > 0 ? included : series.Variants.ToList();
+    }
+
+    /// <summary>Turn a batch's stored LLM JSON into validated, variant-routed, runner-matched rows.</summary>
+    private async Task<List<ResultRow>> ProcessStoredExtractionAsync(UploadBatch batch, List<RaceVariant> routeTo, DateOnly raceDate)
+    {
+        var sections = _llmExtractionService.RehydrateSections(batch.RawLlmJson ?? "{}", batch.FileName);
+        var results = await _resultsProcessingService.ProcessResultsAsync(sections);
+        // A section labeled with a course outside routeTo stays unmatched so it stands out in Data Review.
+        _resultsProcessingService.AssignVariants(results, routeTo);
+        return await _runnerMatchingService.FindMatchesForResultsAsync(results, raceDate);
+    }
 
     private static UploadResultsResponse BuildResponse(Guid batchId, List<ResultRow> results) =>
         new()
