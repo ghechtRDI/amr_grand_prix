@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -57,18 +58,7 @@ public class UserManagementController : ControllerBase
         foreach (var user in users)
         {
             var roles = await _userManager.GetRolesAsync(user);
-            userResponses.Add(new UserResponse
-            {
-                Id = user.Id,
-                Email = user.Email!,
-                FirstName = user.FirstName,
-                LastName = user.LastName,
-                DateOfBirth = user.DateOfBirth,
-                Gender = user.Gender,
-                EmailConfirmed = user.EmailConfirmed,
-                Roles = roles.ToList(),
-                CreatedAt = user.CreatedAt
-            });
+            userResponses.Add(ToResponse(user, roles));
         }
 
         return Ok(new
@@ -93,18 +83,7 @@ public class UserManagementController : ControllerBase
 
         var roles = await _userManager.GetRolesAsync(user);
 
-        return Ok(new UserResponse
-        {
-            Id = user.Id,
-            Email = user.Email!,
-            FirstName = user.FirstName,
-            LastName = user.LastName,
-            DateOfBirth = user.DateOfBirth,
-            Gender = user.Gender,
-            EmailConfirmed = user.EmailConfirmed,
-            Roles = roles.ToList(),
-            CreatedAt = user.CreatedAt
-        });
+        return Ok(ToResponse(user, roles));
     }
 
     /// <summary>
@@ -113,6 +92,9 @@ public class UserManagementController : ControllerBase
     [HttpPut("{id}/role")]
     public async Task<IActionResult> AssignRole(string id, [FromBody] AssignRoleRequest request)
     {
+        if (IsSelf(id))
+            return BadRequest(new { message = "You can't change your own role" });
+
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
@@ -152,6 +134,9 @@ public class UserManagementController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteUser(string id)
     {
+        if (IsSelf(id))
+            return BadRequest(new { message = "You can't delete your own account" });
+
         var user = await _userManager.FindByIdAsync(id);
         if (user == null)
             return NotFound(new { message = "User not found" });
@@ -171,6 +156,9 @@ public class UserManagementController : ControllerBase
     [HttpPut("{id}/lock")]
     public async Task<IActionResult> LockUser(string id, [FromBody] LockUserRequest request)
     {
+        if (IsSelf(id))
+            return BadRequest(new { message = "You can't lock your own account" });
+
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
@@ -239,17 +227,23 @@ public class UserManagementController : ControllerBase
 
         var roles = await _userManager.GetRolesAsync(user);
 
-        return Ok(new UserResponse
-        {
-            Id = user.Id,
-            Email = user.Email!,
-            FirstName = user.FirstName,
-            LastName = user.LastName,
-            DateOfBirth = user.DateOfBirth,
-            Gender = user.Gender,
-            EmailConfirmed = user.EmailConfirmed,
-            Roles = roles.ToList(),
-            CreatedAt = user.CreatedAt
-        });
+        return Ok(ToResponse(user, roles));
     }
+
+    private static UserResponse ToResponse(ApplicationUser user, IList<string> roles) => new()
+    {
+        Id = user.Id,
+        Email = user.Email!,
+        FirstName = user.FirstName,
+        LastName = user.LastName,
+        DateOfBirth = user.DateOfBirth,
+        Gender = user.Gender,
+        EmailConfirmed = user.EmailConfirmed,
+        Roles = roles.ToList(),
+        CreatedAt = user.CreatedAt,
+        IsLocked = user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow
+    };
+
+    /// <summary>True when the request targets the signed-in admin's own account.</summary>
+    private bool IsSelf(string id) => User.FindFirstValue(ClaimTypes.NameIdentifier) == id;
 }
