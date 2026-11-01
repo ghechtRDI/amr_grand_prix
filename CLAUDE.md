@@ -110,5 +110,6 @@ dotnet ef database update
 - `GrandPrixCalculationService` has its own local scoring table that duplicates `GrandPrixConstants` — the constants file is the source of truth
 - `Runner.FullName` is a computed property; `entity.Ignore(r => r.FullName)` in `ApplicationDbContext`
 - New runners created during save use a birth year estimate from age; update once real DOB is known
-- `RaceSeedingService` seeds the known series/variant catalog (idempotent, no races) on startup in development
+- `RaceSeedingService` seeds the known series/variant catalog (idempotent, no races) on every startup in development, and elsewhere only when the database has no series yet (so admin renames/merges stick)
+- Production: `Dockerfile.production` builds the SPA into `wwwroot` (served by the API with an `index.html` fallback; unknown `/api/*` stays 404) plus an EF migrations bundle (`efbundle`); `docker-compose.prod.yml` runs Caddy → app → Postgres. Infra is Terraform in `terraform/`, CI/CD in `.github/workflows/`; setup steps in `DOCS/DEPLOYMENT_SETUP.md`
 - LLM audit data (raw JSON, model name, token counts) is stored on `UploadBatch` for every upload

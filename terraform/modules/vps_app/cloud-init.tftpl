@@ -1,0 +1,88 @@
+#cloud-config
+# First-boot setup for an AMR Grand Prix server, rendered by Terraform (modules/vps_app).
+# It prepares the host only; the app, compose file, and .env arrive with the first
+# GitHub Actions deploy (.github/workflows/_deploy.yml).
+package_update: true
+package_upgrade: true
+packages:
+  - age
+  - rclone
+  - fail2ban
+  - unattended-upgrades
+
+users:
+  - default
+  - name: deploy
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${deploy_ssh_public_key}
+
+write_files:
+  - path: /opt/amrgp/certs/origin.pem
+    permissions: "0644"
+    content: |
+      ${indent(6, origin_cert)}
+  - path: /opt/amrgp/certs/origin.key
+    permissions: "0600"
+    content: |
+      ${indent(6, origin_key)}
+  - path: /etc/ssh/sshd_config.d/90-amrgp.conf
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+%{ if backup != null ~}
+  - path: /etc/amrgp/backup.env
+    permissions: "0600"
+    content: |
+      B2_BUCKET=${backup.bucket}
+      AGE_RECIPIENT=${backup.age_recipient}
+      RCLONE_CONFIG_B2_TYPE=b2
+      RCLONE_CONFIG_B2_ACCOUNT=${backup.key_id}
+      RCLONE_CONFIG_B2_KEY=${backup.application_key}
+  - path: /usr/local/bin/amrgp-backup
+    permissions: "0755"
+    content: |
+      ${indent(6, backup_script)}
+  - path: /etc/systemd/system/amrgp-backup.service
+    content: |
+      [Unit]
+      Description=Encrypted AMR Grand Prix database backup to Backblaze B2
+      Requires=docker.service
+      After=docker.service
+
+      [Service]
+      Type=oneshot
+      EnvironmentFile=/etc/amrgp/backup.env
+      ExecStart=/usr/local/bin/amrgp-backup
+  - path: /etc/systemd/system/amrgp-backup.timer
+    content: |
+      [Unit]
+      Description=Nightly AMR Grand Prix database backup
+
+      [Timer]
+      OnCalendar=*-*-* 11:00:00 UTC
+      RandomizedDelaySec=15m
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+%{ endif ~}
+
+runcmd:
+  # 2GB swap absorbs spikes (and the one-off migration container) on small plans
+  - [sh, -c, "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab"]
+  - [sh, -c, "curl -fsSL https://get.docker.com | sh"]
+  - [usermod, --append, --groups, docker, deploy]
+  - [chown, "deploy:deploy", /opt/amrgp]
+%{ if data_volume ~}
+  # Block storage is attached after the instance is created, so wait for it. Format only
+  # when it has no filesystem yet; a reattached volume keeps its data.
+  - [sh, -c, "for i in $(seq 1 60); do [ -b /dev/vdb ] && break; sleep 5; done; blkid /dev/vdb || mkfs.ext4 -L pgdata /dev/vdb; mkdir -p /mnt/pgdata; echo 'LABEL=pgdata /mnt/pgdata ext4 defaults,nofail 0 2' >> /etc/fstab; mount /mnt/pgdata"]
+%{ endif ~}
+  - [systemctl, restart, ssh]
+%{ if backup != null ~}
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, amrgp-backup.timer]
+%{ endif ~}

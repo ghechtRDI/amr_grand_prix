@@ -1,0 +1,28 @@
+# Manually plan, apply, or destroy an environment's infrastructure. Prod apply/destroy
+# waits for approval on the prod-infra environment. Pull requests that touch terraform/
+# get a prod plan (once PROD_DEPLOY_ENABLED is set) so changes can be reviewed first.
+name: Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [sandbox, prod]
+      action:
+        type: choice
+        options: [plan, apply, destroy]
+  pull_request:
+    paths:
+      - terraform/**
+
+jobs:
+  terraform:
+    if: github.event_name == 'workflow_dispatch' || vars.PROD_DEPLOY_ENABLED == 'true'
+    uses: ./.github/workflows/_terraform.yml
+    permissions:
+      contents: read
+    with:
+      environment: ${{ inputs.environment || 'prod' }}
+      action: ${{ inputs.action || 'plan' }}
+    secrets: inherit # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit -- same-repo reusable workflow

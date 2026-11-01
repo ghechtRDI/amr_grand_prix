@@ -1,0 +1,106 @@
+# Reusable: plan, apply, or destroy one Terraform environment.
+#
+# The plan job always runs. Apply/destroy runs in a second job that targets the
+# "<environment>-infra" GitHub Environment; give prod-infra a required reviewer so
+# prod changes wait for approval after the plan is visible in the log.
+#
+# Repository secrets: VULTR_API_KEY, CLOUDFLARE_API_TOKEN, R2_ACCESS_KEY_ID,
+#   R2_SECRET_ACCESS_KEY, B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY
+# Repository variables: CLOUDFLARE_ACCOUNT_ID, ADMIN_SSH_CIDRS (optional, e.g. ["203.0.113.4/32"])
+name: Terraform
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: prod or sandbox
+        type: string
+        required: true
+      action:
+        description: plan, apply, or destroy
+        type: string
+        required: true
+    outputs:
+      server_ip:
+        value: ${{ jobs.apply.outputs.server_ip }}
+      firewall_group_id:
+        value: ${{ jobs.apply.outputs.firewall_group_id }}
+
+env:
+  TF_IN_AUTOMATION: "1"
+  AWS_ENDPOINT_URL_S3: https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  TF_VAR_admin_ssh_cidrs: ${{ vars.ADMIN_SSH_CIDRS || '[]' }}
+  ACTION: ${{ inputs.action }}
+
+concurrency: terraform-${{ inputs.environment }}
+
+# Provider and state credentials are scoped to the step that runs Terraform, so the
+# checkout/setup actions never see them.
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: terraform/environments/${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "~1.17"
+      - name: Plan
+        env:
+          VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          terraform init -input=false
+          if [ "$ACTION" = destroy ]; then terraform plan -input=false -destroy; else terraform plan -input=false; fi
+
+  apply:
+    needs: plan
+    if: inputs.action == 'apply' || inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}-infra
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: terraform/environments/${{ inputs.environment }}
+    outputs:
+      server_ip: ${{ steps.run.outputs.server_ip }}
+      firewall_group_id: ${{ steps.run.outputs.firewall_group_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "~1.17"
+          terraform_wrapper: false
+      - name: Apply or destroy
+        id: run
+        env:
+          VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          terraform init -input=false
+          case "$ACTION" in
+            apply)
+              terraform apply -input=false -auto-approve
+              echo "server_ip=$(terraform output -raw server_ipv4)" >> "$GITHUB_OUTPUT"
+              echo "firewall_group_id=$(terraform output -raw firewall_group_id)" >> "$GITHUB_OUTPUT"
+              ;;
+            destroy)
+              terraform destroy -input=false -auto-approve
+              ;;
+            *)
+              echo "Unknown action: $ACTION"; exit 1
+              ;;
+          esac
