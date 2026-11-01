@@ -45,6 +45,7 @@ export default function NavBar() {
 
   const authed = isAuthenticated();
   const isAdminOrManager = authed && hasAnyRole(['Admin', 'Manager']);
+  const isAdmin = authed && hasAnyRole(['Admin']);
   const isAdminSectionActive = location.pathname.startsWith('/admin');
 
   // Close the mobile menu on route change
@@ -120,6 +121,9 @@ export default function NavBar() {
                 <DropdownMenuItem className={dropdownItemClass} render={<NavLink to="/admin/results">Results Management</NavLink>} />
                 <DropdownMenuItem className={dropdownItemClass} render={<NavLink to="/admin/results/upload">Upload Results</NavLink>} />
                 <DropdownMenuItem className={dropdownItemClass} render={<NavLink to="/admin/runners">Racer Management</NavLink>} />
+                {isAdmin && (
+                  <DropdownMenuItem className={dropdownItemClass} render={<NavLink to="/admin/users">User Management</NavLink>} />
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -191,6 +195,11 @@ export default function NavBar() {
               <NavLink to="/admin/runners" className={navLinkClass}>
                 Racer Management
               </NavLink>
+              {isAdmin && (
+                <NavLink to="/admin/users" className={navLinkClass}>
+                  User Management
+                </NavLink>
+              )}
             </>
           )}
 
