@@ -1,5 +1,6 @@
-# Resend sending-domain records. These are DNS-only (not proxied); copy the values
-# exactly from the domain's page in the Resend dashboard into email_dns_records.
+# Optional Resend sending-domain records. Normally Resend's automatic DNS setup adds
+# them and email_dns_records is empty; if listed, copy them exactly from Resend's
+# domain page with fully qualified names. DNS-only (not proxied).
 resource "cloudflare_dns_record" "email" {
   for_each = { for r in var.email_dns_records : "${r.type} ${r.name}" => r }
 

@@ -70,7 +70,9 @@ You also need your own SSH public key (`~/.ssh/id_ed25519.pub`) for admin access
 
 1. Create an account.
 2. Domains → Add Domain → `grandprix.alaskamountainrunners.org` (region us-east-1 is fine).
-3. Copy every record Resend lists into `email_dns_records` in `terraform/environments/prod/terraform.tfvars`, using fully qualified names (the file has an example). Resend verifies the domain once the prod Terraform apply creates them.
+3. Leave **Receiving** off (the app only sends). Use Resend's automatic DNS setup for Cloudflare to add the domain's records, then click Verify.
+   - **Skip any DMARC record it offers.** Grand Prix mail is covered by the club's existing `_dmarc.alaskamountainrunners.org` record (receivers fall back to it when the subdomain has none), and its reports go to Brevo with the rest of the club's mail.
+   - These records aren't in Terraform (`email_dns_records = []`), so destroying or recreating the server doesn't touch them. If the club's DNS is ever rebuilt, rerun this setup.
 4. API Keys → create two keys with **Sending access**, restricted to that domain: `amrgp-prod` and `amrgp-sandbox`.
 
 ## 6. Fill in the tfvars
@@ -117,7 +119,7 @@ Environment secrets with `gh`: `gh secret set SSH_PRIVATE_KEY --env sandbox < am
 2. Check, per [DEPLOYMENT_PLAN.md § Verification](../DEPLOYMENT_PLAN.md#verification):
    - `https://grandprix-sandbox.alaskamountainrunners.org` loads with a valid certificate, including a deep link such as `/standings`
    - The origin refuses direct connections: `curl -m 5 http://<server ip>` times out
-   - Registering sends a confirmation email that lands in a Gmail inbox (not spam); "Show original" shows SPF, DKIM, and DMARC `PASS` (needs the prod apply in step 10 for the Resend DNS records, so you may come back to this one)
+   - Registering sends a confirmation email that lands in a Gmail inbox (not spam); "Show original" shows SPF, DKIM, and DMARC `PASS`
    - A result report reaches `CLUB_NOTIFICATION_EMAIL`, not the club inbox
 3. Make yourself an admin (see [First admin](#first-admin)) and try a results upload.
 4. Actions → **Sandbox down** when done. It stops billing; a stopped (not destroyed) server is still charged.
@@ -138,7 +140,7 @@ Environment secrets with `gh`: `gh secret set SSH_PRIVATE_KEY --env sandbox < am
    ```
 
 4. `gh variable set PROD_DEPLOY_ENABLED --body true`, then Actions → **Deploy app** → Run workflow. From now on every push to `main` that touches the app deploys automatically.
-5. Resend → Domains should now show the domain as verified.
+5. Check DMARC: `dig +short TXT _dmarc.alaskamountainrunners.org` returns exactly one `v=DMARC1` record, and `dig +short TXT _dmarc.grandprix.alaskamountainrunners.org` returns nothing.
 6. Make yourself an admin (below).
 
 ## 11. Backup drill

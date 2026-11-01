@@ -43,7 +43,7 @@ terraform/
     vps_app/                  # one Vultr instance + firewall + DNS + origin cert (+ optional block storage)
       main.tf                 # vultr_instance, vultr_firewall_group/_rule, vultr_ssh_key, vultr_block_storage
       dns.tf                  # cloudflare_dns_record (proxied A record), cloudflare_origin_ca_certificate
-      email_dns.tf            # Resend DKIM/SPF/return-path records + DMARC
+      email_dns.tf            # optional Resend + subdomain DMARC records (both normally unused)
       cloud-init.tftpl        # templated user-data
       files/amrgp-backup.sh   # nightly backup script installed by cloud-init
     b2_backup/
@@ -93,7 +93,7 @@ We don't run our own mail server: self-hosted mail from a fresh VPS IP lands in 
 
 - **Sending domain:** `grandprix.alaskamountainrunners.org` (from address `noreply@grandprix.alaskamountainrunners.org`, from name "Alaska Mountain Runners Grand Prix"). Using the subdomain keeps the app's sending reputation separate from the club's main domain and doesn't touch whatever mail setup `alaskamountainrunners.org` already has.
 - **One-time setup (manual, like the B2 bucket):** create the Resend account under a club-owned address, add the domain in Resend, and create one API key per environment (prod, sandbox) restricted to sending.
-- **DNS (Terraform, `email_dns.tf`):** the DKIM TXT record, SPF TXT + MX records on Resend's return-path subdomain, exactly as Resend's domain page lists them, plus `_dmarc.grandprix` TXT starting at `v=DMARC1; p=none; rua=mailto:<club address>` (tighten to `quarantine` once reports look clean). These are DNS-only (grey-cloud) records.
+- **DNS:** Resend's automatic Cloudflare setup adds its own records (DKIM, return path); they're set-once and Resend changes their format over time, so they aren't in Terraform (`email_dns_records` can still manage them if wanted). DMARC comes from the club's existing `_dmarc.alaskamountainrunners.org` record (`p=none`, reports to Brevo), which receivers fall back to for the subdomain; a separate subdomain record would split the policy, and reports to a Gmail address are mostly dropped because Gmail doesn't authorize external report destinations. `dmarc_rua` in prod tfvars can still create a `_dmarc.grandprix` record if the subdomain ever needs its own policy.
 - **App config (env vars from GitHub Secrets):** `Email__SmtpHost=smtp.resend.com`, `Email__SmtpPort=587`, `Email__EnableSsl=true`, `Email__SmtpUsername=resend`, `Email__SmtpPassword=<Resend API key>`, `Email__FromEmail=noreply@grandprix.alaskamountainrunners.org`. Port **587 (STARTTLS)** is required: `System.Net.Mail.SmtpClient` doesn't support implicit TLS, so port 465 won't work.
 - **Sandbox:** uses its own Resend API key, the same verified domain, and `Email__ClubNotificationEmail` pointed at a developer address so test reports never reach the club inbox.
 - MailHog stays dev-only — it is not part of `docker-compose.prod.yml`.
@@ -126,6 +126,6 @@ Hetzner Cloud was the original choice (~$7/month), but its cheap CX line is only
 2. Locally: `docker compose -f docker-compose.prod.yml up --build`, confirm the SPA loads at `http://localhost` (not just the API), `/health` returns 200, and login/JWT flow works against the local Postgres container.
 3. Infrastructure workflow, `sandbox` / `plan` — review the plan before ever applying against real Vultr/Cloudflare accounts.
 4. After first real `terraform apply` (sandbox first, not prod): confirm `grandprix-sandbox.alaskamountainrunners.org` resolves through Cloudflare, TLS is valid (Cloudflare Full/Strict mode via the origin cert), the origin refuses direct (non-Cloudflare) connections on 80/443, and `sandbox-up.yml` succeeds end-to-end (build → migrate → deploy → smoke test).
-5. Email (after the prod apply creates the Resend DNS records): Resend shows the domain as verified; registering a new account on the sandbox delivers a confirmation email to a Gmail inbox (not spam), and "Show original" in Gmail reports SPF, DKIM, and DMARC all `PASS`. Submit a result report on the sandbox and confirm it reaches the developer notification address, not the club inbox.
+5. Email (after Resend's DNS setup): Resend shows the domain as verified; registering a new account on the sandbox delivers a confirmation email to a Gmail inbox (not spam), and "Show original" in Gmail reports SPF, DKIM, and DMARC all `PASS`. Submit a result report on the sandbox and confirm it reaches the developer notification address, not the club inbox.
 6. Manually trigger the backup script once on prod (`systemctl start amrgp-backup`), confirm the encrypted dump lands in the B2 bucket and can be decrypted/restored to a scratch Postgres instance.
 7. Only then open production to users. The step-by-step order is in [DOCS/DEPLOYMENT_SETUP.md](DOCS/DEPLOYMENT_SETUP.md).
