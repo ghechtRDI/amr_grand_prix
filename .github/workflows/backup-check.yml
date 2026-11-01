@@ -1,0 +1,30 @@
+# Daily check that last night's production backup reached Backblaze B2. A failed run
+# emails the repository owner (GitHub's default for failed scheduled workflows).
+#
+# Repository secrets: BACKUP_MONITOR_KEY_ID / BACKUP_MONITOR_KEY (list-only B2 key,
+# from `terraform output` in terraform/environments/prod)
+name: Backup check
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # after the 11:00 UTC backup window
+  workflow_dispatch:
+
+jobs:
+  check:
+    if: vars.PROD_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      RCLONE_CONFIG_B2_TYPE: b2
+      RCLONE_CONFIG_B2_ACCOUNT: ${{ secrets.BACKUP_MONITOR_KEY_ID }}
+      RCLONE_CONFIG_B2_KEY: ${{ secrets.BACKUP_MONITOR_KEY }}
+    steps:
+      - run: sudo apt-get install -y -qq rclone
+      - name: Newest backup is under 36 hours old
+        run: |
+          newest=$(rclone lsjson b2:amrgp-backups/daily/ | jq -r 'map(.ModTime) | max // empty')
+          [ -n "$newest" ] || { echo "No backups found in daily/"; exit 1; }
+          age_hours=$(( ($(date +%s) - $(date -d "$newest" +%s)) / 3600 ))
+          echo "Newest backup: $newest ($age_hours hours old)"
+          [ "$age_hours" -lt 36 ]

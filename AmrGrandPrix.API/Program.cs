@@ -1,6 +1,7 @@
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -51,6 +52,11 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 // Configure JWT Authentication
 var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>();
 var key = Encoding.ASCII.GetBytes(jwtSettings?.Secret ?? throw new InvalidOperationException("JWT Secret not configured"));
+
+// appsettings.json ships a placeholder secret for local dev; anyone could forge tokens with it.
+if (builder.Environment.IsProduction() &&
+    (jwtSettings.Secret.StartsWith("YourSuperSecretKey") || jwtSettings.Secret.Length < 32))
+    throw new InvalidOperationException("Jwt:Secret must be set to a unique value of at least 32 characters in production");
 
 builder.Services.AddAuthentication(options =>
 {
@@ -151,18 +157,28 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.Converters.Add(
             new System.Text.Json.Serialization.JsonStringEnumConverter()));
 
-// CORS
+// CORS. Production serves the SPA from the API (same origin), so this mainly covers the
+// Vite dev/preview servers; extra origins can be added via Cors__AllowedOrigins__N env vars.
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("DevPolicy", policy =>
-        policy.WithOrigins(
-                "http://localhost:5173",
-                "http://client:5173",
-                "http://localhost:3000",
-                "http://localhost:4173")
+    options.AddPolicy("AppPolicy", policy =>
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials());
+});
+
+// In production, Caddy terminates TLS and proxies plain HTTP to this app. Honor its
+// X-Forwarded-Proto/For so Request.Scheme (used in email links) is https and the rate
+// limiter sees the real client IP. Caddy runs in a sibling container with no fixed
+// address, so any proxy is trusted; the app's port is never published outside the
+// compose network, so only Caddy can reach it.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
 });
 
 builder.Services.AddHealthChecks();
@@ -179,9 +195,11 @@ if (!app.Environment.IsEnvironment("Testing"))
         var logger      = scope.ServiceProvider.GetRequiredService<ILogger<RoleSeedingService>>();
         await new RoleSeedingService(roleManager, logger).SeedRolesAsync();
 
-        if (app.Environment.IsDevelopment())
+        // Development tops up the catalog on every start. Elsewhere only an empty database is
+        // seeded, so series that admins have renamed or merged aren't re-created.
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        if (app.Environment.IsDevelopment() || !await context.RaceSeries.AnyAsync())
         {
-            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var raceLogger = scope.ServiceProvider.GetRequiredService<ILogger<RaceSeedingService>>();
             await new RaceSeedingService(context, raceLogger).SeedRaceCatalogAsync();
         }
@@ -193,19 +211,29 @@ if (!app.Environment.IsEnvironment("Testing"))
     }
 }
 
+app.UseForwardedHeaders();
+
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
-if (!app.Environment.IsDevelopment())
-    app.UseHttpsRedirection();
+// No UseHttpsRedirection: the container only listens on HTTP, and Cloudflare/Caddy
+// redirect HTTP to HTTPS before a request reaches the app.
+
+// Serve the built React app from wwwroot (Dockerfile.production copies the Vite build there)
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.UseRouting();
-app.UseCors("DevPolicy");
+app.UseCors("AppPolicy");
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapHealthChecks("/health");
 app.MapControllers();
+
+// Client-side routes (e.g. /standings/2026) get index.html; unknown API routes stay 404
+app.MapFallback("/api/{**path}", () => Results.NotFound());
+app.MapFallbackToFile("index.html");
 
 app.Run();
 

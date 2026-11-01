@@ -17,6 +17,10 @@ RUN npm run build
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS api-build
 WORKDIR /api
 
+# EF Core CLI, for the migrations bundle below
+RUN dotnet tool install --global dotnet-ef --version 9.0.10
+ENV PATH="$PATH:/root/.dotnet/tools"
+
 # Copy API project file and restore
 COPY AmrGrandPrix.API/*.csproj ./
 RUN dotnet restore
@@ -24,6 +28,10 @@ RUN dotnet restore
 # Copy API source and publish
 COPY AmrGrandPrix.API/ ./
 RUN dotnet publish -c Release -o /app/publish --no-restore
+
+# Standalone migrations runner; the deploy workflow runs it as a one-off container
+# (docker compose run --rm --entrypoint ./efbundle app) since the runtime image has no SDK
+RUN dotnet ef migrations bundle --configuration Release --output /app/publish/efbundle
 
 # Stage 3: Runtime
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
@@ -50,9 +58,8 @@ RUN mkdir -p /app/logs && \
 # Switch to non-root user
 USER amrapp
 
-# Expose ports
+# Plain HTTP only; Caddy terminates TLS in front of the app
 EXPOSE 5000
-EXPOSE 5001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
@@ -63,6 +70,8 @@ ENV ASPNETCORE_ENVIRONMENT=Production
 ENV ASPNETCORE_URLS=http://+:5000
 ENV DOTNET_RUNNING_IN_CONTAINER=true
 ENV DOTNET_EnableDiagnostics=0
+# The migrations bundle (efbundle) unpacks itself at startup; amrapp has no home directory
+ENV DOTNET_BUNDLE_EXTRACT_BASE_DIR=/tmp/dotnet-bundle
 
 # Start application
 ENTRYPOINT ["dotnet", "AmrGrandPrix.API.dll"]

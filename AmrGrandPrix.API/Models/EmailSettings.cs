@@ -9,4 +9,7 @@ public class EmailSettings
     public bool EnableSsl { get; set; } = true;
     public string? SmtpUsername { get; set; }
     public string? SmtpPassword { get; set; }
+
+    /// <summary>Recipient for result-report notifications (the club inbox in production)</summary>
+    public string ClubNotificationEmail { get; set; } = string.Empty;
 }

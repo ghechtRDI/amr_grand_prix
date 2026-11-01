@@ -1,0 +1,15 @@
+# Reverse proxy in front of the app (see docker-compose.prod.yml).
+# Prod: SITE_ADDRESS is the hostname and CADDY_TLS loads the Cloudflare origin certificate
+# (Cloudflare SSL mode "Full (strict)"). Local: SITE_ADDRESS=http://localhost, CADDY_TLS empty.
+{$SITE_ADDRESS} {
+	{$CADDY_TLS}
+
+	encode zstd gzip
+
+	reverse_proxy app:5000 {
+		# The origin firewall only admits Cloudflare, so CF-Connecting-IP is the real
+		# client IP; without this the app would see Cloudflare's edge address and the
+		# per-IP rate limiter would lump all visitors together.
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+	}
+}

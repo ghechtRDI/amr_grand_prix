@@ -1,46 +1,73 @@
+# Production stack: Cloudflare -> Caddy (TLS) -> app (.NET API + built SPA) -> Postgres.
+# Settings and secrets come from .env next to this file; the deploy workflow renders it
+# from GitHub Secrets (see .env.example for every variable).
+#
+# Local check (serves http://localhost):
+#   cp .env.example .env   # fill in the blanks; leave the deployment section at its local values
+#   docker compose -f docker-compose.prod.yml up --build -d
+#   docker compose -f docker-compose.prod.yml run --rm --entrypoint ./efbundle app
+
+# Own project name so prod commands never touch the dev compose project (mailhog/ollama)
+name: amr-grand-prix-prod
+
 services:
-  # Production application (single container)
   app:
+    image: ${APP_IMAGE:-amr-grand-prix:local}
     build:
       context: .
       dockerfile: Dockerfile.production
-    container_name: amr-grand-prix-prod
-    ports:
-      - "80:5000"
-      - "443:5001"
+    env_file: .env
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:5000;https://+:5001
-      - ConnectionStrings__DefaultConnection=${CONNECTION_STRING}
-    networks:
-      - amr-network
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5000
+      ConnectionStrings__DefaultConnection: Host=db;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+    # No published ports: only Caddy, on the internal network, can reach the app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
-  # Production Database
   db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: amr-db-prod
+    image: postgres:16-alpine
     environment:
-      - ACCEPT_EULA=Y
-      - SA_PASSWORD=${DB_SA_PASSWORD}
-      - MSSQL_PID=Standard
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - mssql-prod-data:/var/opt/mssql
-    networks:
-      - amr-network
+      # Prod sets POSTGRES_DATA to the block-storage mount; otherwise a named volume
+      - ${POSTGRES_DATA:-pgdata}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-http://localhost}
+      CADDY_TLS: ${CADDY_TLS:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/etc/caddy/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [app]
+    networks: [internal]
     restart: unless-stopped
 
 networks:
-  amr-network:
-    driver: bridge
-    name: amr-grand-prix-prod-network
+  internal:
+    name: amr-grand-prix-prod
 
 volumes:
-  mssql-prod-data:
-    name: amr-mssql-prod-data
+  pgdata:
+    name: amr-grand-prix-pgdata
+  caddy-data:
+  caddy-config:

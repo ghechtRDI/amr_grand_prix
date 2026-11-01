@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
@@ -19,22 +20,23 @@ namespace AmrGrandPrix.API.Controllers;
 [Route("api/reports")]
 public class ReportsController : ControllerBase
 {
-    private const string ClubEmail = "akmtnrunners@gmail.com";
-
     private readonly ApplicationDbContext _context;
     private readonly IEmailService _emailService;
     private readonly ICaptchaService _captchaService;
+    private readonly EmailSettings _emailSettings;
     private readonly ILogger<ReportsController> _logger;
 
     public ReportsController(
         ApplicationDbContext context,
         IEmailService emailService,
         ICaptchaService captchaService,
+        IOptions<EmailSettings> emailSettings,
         ILogger<ReportsController> logger)
     {
         _context = context;
         _emailService = emailService;
         _captchaService = captchaService;
+        _emailSettings = emailSettings.Value;
         _logger = logger;
     }
 
@@ -91,7 +93,7 @@ public class ReportsController : ControllerBase
             {report.Description}
             """;
 
-        await _emailService.SendEmailAsync(ClubEmail, "Race result report submitted", body);
+        await _emailService.SendEmailAsync(_emailSettings.ClubNotificationEmail, "Race result report submitted", body);
 
         _logger.LogInformation("Result report {ReportId} submitted for runner '{RunnerName}'",
             report.ReportId, report.RunnerNameReported);

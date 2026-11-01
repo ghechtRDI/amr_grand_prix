@@ -1,0 +1,15 @@
+# Destroy the sandbox server and its DNS record. Its database is discarded.
+name: Sandbox down
+
+on:
+  workflow_dispatch:
+
+jobs:
+  infra:
+    uses: ./.github/workflows/_terraform.yml
+    permissions:
+      contents: read
+    with:
+      environment: sandbox
+      action: destroy
+    secrets: inherit # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit -- same-repo reusable workflow
