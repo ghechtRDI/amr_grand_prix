@@ -141,7 +141,8 @@ Environment secrets with `gh`: `gh secret set SSH_PRIVATE_KEY --env sandbox < am
 
 4. `gh variable set PROD_DEPLOY_ENABLED --body true`, then Actions → **Deploy app** → Run workflow. From now on every push to `main` that touches the app deploys automatically.
 5. Check DMARC: `dig +short TXT _dmarc.alaskamountainrunners.org` returns exactly one `v=DMARC1` record, and `dig +short TXT _dmarc.grandprix.alaskamountainrunners.org` returns nothing.
-6. Make yourself an admin (below).
+6. Optional: replace the empty production database with your local one (see [Copy the local database](#copy-the-local-database)). Do it now, before anyone registers, because the restore replaces every table.
+7. Make yourself an admin (below). Skip this if you restored a local database where your account is already an Admin.
 
 ## 11. Backup drill
 
@@ -160,6 +161,56 @@ psql amrgp_restore_test -c 'select count(*) from "RaceResults"'
 ```
 
 After a few days, confirm the scheduled **Backup check** workflow is passing.
+
+## Copy the local database
+
+Moves everything in your dev database (series, races, results, runners, standings, and user accounts) to production, replacing what the first deploy created there. The restore drops and recreates the production database, so do it only while production holds nothing you need. The same steps work for the sandbox.
+
+**1. Match the schema.** The dump carries its own migration history, and later deploys apply only the migrations it doesn't list. Your local database must therefore be at exactly the migrations of the commit you deployed: check out that commit (normally `main`) and run
+
+```bash
+cd AmrGrandPrix.API
+dotnet ef migrations list     # every migration should be applied, none "(Pending)"
+dotnet ef database update     # if any are pending
+```
+
+If your local database has migrations from an unmerged branch, merge them and deploy first, or roll the local database back with `dotnet ef database update <LastMigrationOnMain>`.
+
+**2. Dump it locally.** Add `-h`/`-U` to match your local connection string if needed:
+
+```bash
+pg_dump --format=custom --no-owner --no-privileges -d amr_grand_prix -f amrgp-local.dump
+```
+
+Production runs Postgres 16, and its `pg_restore` can't read dumps made by a newer `pg_dump` (`pg_dump --version` 17+). If yours is newer, dump with a 16 client instead, e.g. `docker run --rm -v "$PWD:/out" postgres:16-alpine pg_dump --format=custom --no-owner --no-privileges -h host.docker.internal -U <user> -d amr_grand_prix -f /out/amrgp-local.dump`.
+
+**3. Copy it to the server.** SSH needs `ADMIN_SSH_CIDRS` or a temporary port-22 rule in the Vultr firewall group.
+
+```bash
+scp amrgp-local.dump root@<server ip>:/opt/amrgp/
+```
+
+**4. Restore it on the server.** The app is stopped first so nothing writes while the database is replaced:
+
+```bash
+ssh root@<server ip>
+cd /opt/amrgp
+dc="docker compose -f docker-compose.prod.yml"
+$dc stop app
+$dc exec -T db sh -c 'dropdb -U "$POSTGRES_USER" "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+$dc exec -T db sh -c 'pg_restore --exit-on-error --no-owner --no-privileges -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < amrgp-local.dump
+$dc start app
+rm amrgp-local.dump
+```
+
+**5. Check it.** The site loads with your data, and:
+
+```bash
+$dc exec db psql -U amrgp -d amr_grand_prix -c 'select count(*) from "RaceResults"'
+systemctl start amrgp-backup    # take a backup of the restored data right away
+```
+
+Your local user accounts come along with their passwords and roles, so you can log in with your dev credentials. Delete any test accounts from the app's user management page. Delete `amrgp-local.dump` from your machine too: it contains password hashes and runners' personal details.
 
 ## First admin
 

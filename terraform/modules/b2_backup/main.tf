@@ -26,14 +26,14 @@ data "b2_bucket" "backups" {
 # hide files, so the bucket's Object Lock is what protects recent backups.
 resource "b2_application_key" "writer" {
   key_name     = "amrgp-${var.name}-backup-writer"
-  bucket_id    = data.b2_bucket.backups.bucket_id
+  bucket_ids   = [data.b2_bucket.backups.bucket_id]
   capabilities = ["listBuckets", "listFiles", "writeFiles"]
 }
 
 # Used by the backup-check workflow to confirm a recent backup exists
 resource "b2_application_key" "monitor" {
   key_name     = "amrgp-${var.name}-backup-monitor"
-  bucket_id    = data.b2_bucket.backups.bucket_id
+  bucket_ids   = [data.b2_bucket.backups.bucket_id]
   capabilities = ["listBuckets", "listFiles"]
 }
 
