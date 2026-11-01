@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs.RaceResults;
@@ -134,11 +135,11 @@ public class ResultsProcessingService : IResultsProcessingService
         if (m1.Success)
         {
             var ms = m1.Groups[4].Success
-                ? int.Parse(m1.Groups[4].Value.PadRight(3, '0')[..3])
+                ? int.Parse(m1.Groups[4].Value.PadRight(3, '0')[..3], CultureInfo.InvariantCulture)
                 : 0;
-            return new TimeSpan(0, int.Parse(m1.Groups[1].Value),
-                                   int.Parse(m1.Groups[2].Value),
-                                   int.Parse(m1.Groups[3].Value), ms);
+            return new TimeSpan(0, int.Parse(m1.Groups[1].Value, CultureInfo.InvariantCulture),
+                                   int.Parse(m1.Groups[2].Value, CultureInfo.InvariantCulture),
+                                   int.Parse(m1.Groups[3].Value, CultureInfo.InvariantCulture), ms);
         }
 
         // MM:SS[.fff]
@@ -146,10 +147,10 @@ public class ResultsProcessingService : IResultsProcessingService
         if (m2.Success)
         {
             var ms = m2.Groups[3].Success
-                ? int.Parse(m2.Groups[3].Value.PadRight(3, '0')[..3])
+                ? int.Parse(m2.Groups[3].Value.PadRight(3, '0')[..3], CultureInfo.InvariantCulture)
                 : 0;
-            return new TimeSpan(0, 0, int.Parse(m2.Groups[1].Value),
-                                         int.Parse(m2.Groups[2].Value), ms);
+            return new TimeSpan(0, 0, int.Parse(m2.Groups[1].Value, CultureInfo.InvariantCulture),
+                                         int.Parse(m2.Groups[2].Value, CultureInfo.InvariantCulture), ms);
         }
 
         // Bare seconds

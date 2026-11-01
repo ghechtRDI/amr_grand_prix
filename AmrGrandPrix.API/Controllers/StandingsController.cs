@@ -384,7 +384,7 @@ public class StandingsController : ControllerBase
         });
     }
 
-    private record GrandPrixRaceInfo(Guid RaceId, DateOnly Date, Guid RaceSeriesId, string SeriesName);
+    private sealed record GrandPrixRaceInfo(Guid RaceId, DateOnly Date, Guid RaceSeriesId, string SeriesName);
 
     private Task<List<GrandPrixRaceInfo>> GetGrandPrixRacesAsync(int year) => _context.Races
         .Where(r => r.Year == year && r.IsGrandPrixRace)
@@ -404,7 +404,7 @@ public class StandingsController : ControllerBase
         .OrderBy(c => c.Date)
         .ToList();
 
-    private static Gender? ParseGender(string gender) => gender.ToLower() switch
+    private static Gender? ParseGender(string gender) => gender.ToLowerInvariant() switch
     {
         "male" or "m" => Gender.Male,
         "female" or "f" => Gender.Female,

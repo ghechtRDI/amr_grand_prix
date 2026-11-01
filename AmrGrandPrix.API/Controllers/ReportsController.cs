@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -84,9 +85,9 @@ public class ReportsController : ControllerBase
             A new result report was submitted on the Grand Prix site.
 
             Runner name: {report.RunnerNameReported}
-            Date of birth: {report.DateOfBirthReported?.ToString() ?? "(not provided)"}
+            Date of birth: {report.DateOfBirthReported?.ToString(CultureInfo.InvariantCulture) ?? "(not provided)"}
             Race: {report.RaceName ?? "(not specified)"}
-            Race date: {report.RaceDate?.ToString() ?? "(not specified)"}
+            Race date: {report.RaceDate?.ToString(CultureInfo.InvariantCulture) ?? "(not specified)"}
             Reporter email: {report.ReporterEmail}
 
             Description:
