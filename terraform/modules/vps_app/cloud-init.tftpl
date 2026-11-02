@@ -6,7 +6,6 @@ package_update: true
 package_upgrade: true
 packages:
   - age
-  - rclone
   - fail2ban
   - unattended-upgrades
 
@@ -74,6 +73,8 @@ runcmd:
   # 2GB swap absorbs spikes (and the one-off migration container) on small plans
   - [sh, -c, "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab"]
   - [sh, -c, "curl -fsSL https://get.docker.com | sh"]
+  # rclone from rclone.org, not the Ubuntu package: B2 rejects the old package's API v1 sign-in
+  - [sh, -c, "curl -fsSL https://rclone.org/install.sh | bash"]
   - [usermod, --append, --groups, docker, deploy]
   - [chown, "deploy:deploy", /opt/amrgp]
 %{ if data_volume ~}

@@ -20,8 +20,12 @@ jobs:
       RCLONE_CONFIG_B2_ACCOUNT: ${{ secrets.BACKUP_MONITOR_KEY_ID }}
       RCLONE_CONFIG_B2_KEY: ${{ secrets.BACKUP_MONITOR_KEY }}
     steps:
-      - run: sudo apt-get install -y -qq rclone
+      # Not Ubuntu's rclone package: it's too old for B2, which rejects its API v1 sign-in
+      # ("This request is not currently supported on API version number 1").
+      - run: curl -fsSL https://rclone.org/install.sh | sudo bash
       - name: Newest backup is under 36 hours old
+        # Explicit bash adds pipefail, so an rclone error fails here instead of reading as "no backups"
+        shell: bash
         run: |
           newest=$(rclone lsjson b2:amrgp-backups/daily/ | jq -r 'map(.ModTime) | max // empty')
           [ -n "$newest" ] || { echo "No backups found in daily/"; exit 1; }
