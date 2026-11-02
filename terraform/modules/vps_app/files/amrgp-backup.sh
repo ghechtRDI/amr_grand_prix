@@ -22,9 +22,11 @@ docker compose -f docker-compose.prod.yml exec -T db \
   sh -c 'pg_dump --format=custom --username="$POSTGRES_USER" "$POSTGRES_DB"' \
   | age --recipient "$AGE_RECIPIENT" > "$tmp"
 
-rclone copyto "$tmp" "b2:$B2_BUCKET/daily/db-$stamp.dump.age"
+# --no-check-dest: copyto otherwise first HEADs the destination, a download the write-only
+# key isn't allowed (401); each night's file has a new name anyway
+rclone copyto --no-check-dest "$tmp" "b2:$B2_BUCKET/daily/db-$stamp.dump.age"
 if [ "$(date -u +%d)" = "01" ]; then
-  rclone copyto "$tmp" "b2:$B2_BUCKET/monthly/db-$stamp.dump.age"
+  rclone copyto --no-check-dest "$tmp" "b2:$B2_BUCKET/monthly/db-$stamp.dump.age"
 fi
 
 echo "Backed up db-$stamp.dump.age ($(stat -c %s "$tmp") bytes)"
