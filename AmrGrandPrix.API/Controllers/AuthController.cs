@@ -88,7 +88,7 @@ public class AuthController : ControllerBase
         // Send confirmation email
         await _emailService.SendEmailConfirmationAsync(user.Email!, confirmationLink);
 
-        _logger.LogInformation("User {Email} registered successfully", request.Email);
+        _logger.LogInformation("User {UserId} registered successfully", user.Id);
 
         return Ok(new
         {
@@ -149,7 +149,7 @@ public class AuthController : ControllerBase
         user.UpdatedAt = DateTime.UtcNow;
         await _userManager.UpdateAsync(user);
 
-        _logger.LogInformation("User {Email} logged in successfully", request.Email);
+        _logger.LogInformation("User {UserId} logged in successfully", user.Id);
 
         return Ok(new LoginResponse
         {
@@ -303,7 +303,7 @@ public class AuthController : ControllerBase
         // Send confirmation email
         await _emailService.SendEmailConfirmationAsync(user.Email!, confirmationLink);
 
-        _logger.LogInformation("Resent confirmation email to {Email}", request.Email);
+        _logger.LogInformation("Resent confirmation email to user {UserId}", user.Id);
 
         return Ok(new { message = "Confirmation email sent. Please check your inbox." });
     }
@@ -335,7 +335,7 @@ public class AuthController : ControllerBase
             $"Click the following link to reset your password: {resetLink}\n\nIf you did not request this, please ignore this email."
         );
 
-        _logger.LogInformation("Password reset requested for {Email}", request.Email);
+        _logger.LogInformation("Password reset requested for user {UserId}", user.Id);
 
         return Ok(new { message = "If the email exists, a password reset link has been sent." });
     }
@@ -358,7 +358,7 @@ public class AuthController : ControllerBase
         if (!result.Succeeded)
             return BadRequest(new { message = "Failed to reset password", errors = result.Errors.Select(e => e.Description) });
 
-        _logger.LogInformation("Password reset successfully for {Email}", request.Email);
+        _logger.LogInformation("Password reset successfully for user {UserId}", user.Id);
 
         return Ok(new { message = "Password reset successfully. You can now login with your new password." });
     }
