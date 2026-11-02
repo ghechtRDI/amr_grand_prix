@@ -33,13 +33,18 @@ public class RunnerMatchingService : IRunnerMatchingService
             return new List<RunnerMatch>();
         }
 
-        var effectiveAsOfDate = asOfDate ?? DateOnly.FromDateTime(DateTime.Today);
+        var allRunners = await _context.Runners.ToListAsync();
+        return ScoreMatches(allRunners, name, age, gender, ageCategory, asOfDate ?? DateOnly.FromDateTime(DateTime.Today));
+    }
 
+    /// <summary>
+    /// Scores every runner in <paramref name="allRunners"/> against the given name/age/gender.
+    /// Takes the runner list so batch callers can load it once instead of once per row.
+    /// </summary>
+    private List<RunnerMatch> ScoreMatches(IReadOnlyList<Runner> allRunners, string name, int? age, Gender? gender, string? ageCategory, DateOnly effectiveAsOfDate)
+    {
         _logger.LogDebug("Finding matches for: {Name}, Age: {Age}, AgeCategory: {AgeCategory}, Gender: {Gender}, AsOf: {AsOf}",
             name, age, ageCategory, gender, effectiveAsOfDate);
-
-        // Get all runners from database
-        var allRunners = await _context.Runners.ToListAsync();
 
         var matches = new List<RunnerMatch>();
 
@@ -116,12 +121,15 @@ public class RunnerMatchingService : IRunnerMatchingService
     {
         _logger.LogInformation("Finding runner matches for {Count} result rows", resultRows.Count);
 
+        // Load the runner table once for the whole batch rather than once per row
+        var allRunners = await _context.Runners.ToListAsync();
+
         foreach (var row in resultRows)
         {
             if (string.IsNullOrWhiteSpace(row.Name))
                 continue;
 
-            var matches = await FindMatchesAsync(row.Name, row.Age, row.Gender, row.AgeCategory, raceDate);
+            var matches = ScoreMatches(allRunners, row.Name, row.Age, row.Gender, row.AgeCategory, raceDate);
 
             // Only include matches with reasonable confidence (>= 0.70)
             row.RunnerMatches = matches
