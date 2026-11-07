@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -333,6 +334,8 @@ public class ResultsController : ControllerBase
             }
 
             var resultIds  = new List<Guid>();
+            var newResults = new List<RaceResult>();
+            var rowNames   = new Dictionary<Guid, string>();
             var newRunners = 0;
             var skipped    = new List<SkippedResultDto>();
 
@@ -356,13 +359,16 @@ public class ResultsController : ControllerBase
                 {
                     runnerId = resultRow.MatchedRunnerId.Value;
 
-                    // Admin opted to correct the stored age (e.g. it was estimated from a
-                    // previous upload that only reported an age category). Never overwrite a
+                    // Record the uploaded age on the runner when the admin opted to correct the
+                    // stored estimate (e.g. it came from a previous upload that only reported an
+                    // age category), or when the runner has no age on file at all - otherwise a
+                    // runner first created without an age would never get one. Never overwrite a
                     // runner's verified, self-reported date of birth this way.
-                    if (resultRow.UpdateRunnerAge && resultRow.Age.HasValue)
+                    if (resultRow.Age.HasValue)
                     {
                         var matchedRunner = await _context.Runners.FindAsync(runnerId);
-                        if (matchedRunner != null && !matchedRunner.DateOfBirth.HasValue)
+                        if (matchedRunner != null && !matchedRunner.DateOfBirth.HasValue
+                            && (resultRow.UpdateRunnerAge || !matchedRunner.EstimatedBirthYear.HasValue))
                         {
                             matchedRunner.EstimatedBirthYear = race.Date.Year - resultRow.Age.Value;
                             matchedRunner.UpdatedAt = DateTime.UtcNow;
@@ -402,18 +408,41 @@ public class ResultsController : ControllerBase
                     Gender       = resultRow.Gender.Value,
                     Status       = resultRow.Status,
                     Notes        = resultRow.Notes,
+                    IsNewRecord  = resultRow.IsCourseRecord,
                     CreatedAt    = DateTime.UtcNow,
                     UploadedBy   = user?.Id ?? "system",
                     UploadBatchId = uploadBatch.UploadBatchId
                 };
                 _context.RaceResults.Add(raceResult);
                 resultIds.Add(raceResult.ResultId);
+                newResults.Add(raceResult);
+                rowNames[raceResult.ResultId] = resultRow.Name;
             }
+
+            // Course records: checked against the race's existing results plus this upload's,
+            // before anything is written. An earlier record holder this upload beats loses the flag.
+            var raceResults = await _context.RaceResults
+                .Where(r => r.RaceId == request.RaceId)
+                .ToListAsync();
+            raceResults.AddRange(newResults);
+            var winners = CourseRecordRules.GenderWinnerIds(raceResults);
+            var notWinners = newResults.Where(r => r.IsNewRecord && !winners.Contains(r.ResultId)).ToList();
+            if (notWinners.Count > 0)
+            {
+                await transaction.RollbackAsync();
+                var names = notWinners.Select(r =>
+                    $"{rowNames[r.ResultId]} (not the {CourseRecordRules.GenderWord(r.Gender)} winner)");
+                return BadRequest(
+                    "Only the gender winner of a race can be marked as a course record: " + string.Join(", ", names));
+            }
+            foreach (var dethroned in CourseRecordRules.ClearNonWinnerRecords(raceResults))
+                _logger.LogInformation("Cleared course record on result {ResultId}: no longer the gender winner", dethroned.ResultId);
 
             await _context.SaveChangesAsync();
             await CalculateGenderPlacesAsync(request.RaceId);
 
             uploadBatch.Status = UploadStatus.Saved;
+            uploadBatch.ReviewDraftJson = null; // the draft has been superseded by the saved results
             await _context.SaveChangesAsync();
 
             if (race.IsGrandPrixRace)
@@ -525,6 +554,17 @@ public class ResultsController : ControllerBase
             result.Gender = request.Gender;
             result.Status = request.Status;
             result.Notes = request.Notes;
+            result.IsNewRecord = request.IsCourseRecord;
+
+            // Checked against the race with this edit applied (the tracked `result` is one of
+            // these). If the edit makes this result faster than a record holder, that flag goes.
+            var raceResults = await _context.RaceResults.Where(r => r.RaceId == result.RaceId).ToListAsync();
+            if (result.IsNewRecord && !CourseRecordRules.GenderWinnerIds(raceResults).Contains(result.ResultId))
+                return BadRequest(
+                    $"Only the gender winner of a race can be marked as a course record — this isn't the " +
+                    $"{CourseRecordRules.GenderWord(result.Gender)} winner.");
+            foreach (var dethroned in CourseRecordRules.ClearNonWinnerRecords(raceResults))
+                _logger.LogInformation("Cleared course record on result {ResultId}: no longer the gender winner", dethroned.ResultId);
 
             await _context.SaveChangesAsync();
             await CalculateGenderPlacesAsync(result.RaceId);
@@ -625,6 +665,7 @@ public class ResultsController : ControllerBase
 
             var includedVariants = RoutingVariants(uploadBatch, series);
             var processedResults = await ProcessStoredExtractionAsync(uploadBatch, includedVariants, raceDate);
+            var draft = ParseDraft(uploadBatch);
 
             return Ok(new ResumeBatchResponse
             {
@@ -646,7 +687,9 @@ public class ResultsController : ControllerBase
                 ParsedResults   = processedResults,
                 TotalRows       = processedResults.Count,
                 ValidRows       = processedResults.Count(r => r.ValidationIssues.Count == 0),
-                RowsWithIssues  = processedResults.Count(r => r.ValidationIssues.Count > 0)
+                RowsWithIssues  = processedResults.Count(r => r.ValidationIssues.Count > 0),
+                ReviewDraft     = draft,
+                ReviewDraftSavedAt = draft.HasValue ? uploadBatch.ReviewDraftSavedAt : null
             });
         }
         catch (Exception ex)
@@ -654,6 +697,33 @@ public class ResultsController : ControllerBase
             _logger.LogError(ex, "Error resuming upload batch {BatchId}", batchId);
             return BadRequest($"Error resuming upload batch: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Save the admin's in-progress Data Review state for a pending batch without saving any
+    /// results or touching Grand Prix points. The body is the client's draft document, stored
+    /// as-is and handed back by <see cref="ResumeBatch"/>.
+    /// </summary>
+    [HttpPut("batch/{batchId}/draft")]
+    [ProducesResponseType(typeof(SaveReviewDraftResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SaveReviewDraftResponse>> SaveReviewDraft(Guid batchId, [FromBody] JsonElement draft)
+    {
+        var uploadBatch = await _context.UploadBatches.FindAsync(batchId);
+        if (uploadBatch == null)
+            return NotFound($"Upload batch {batchId} not found");
+        if (uploadBatch.Status != UploadStatus.Pending)
+            return BadRequest($"Only pending uploads can be saved as a draft (batch is {uploadBatch.Status})");
+        if (draft.ValueKind != JsonValueKind.Object)
+            return BadRequest("The draft must be a JSON object");
+
+        uploadBatch.ReviewDraftJson = draft.GetRawText();
+        uploadBatch.ReviewDraftSavedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Saved review draft for upload batch {BatchId}", batchId);
+        return Ok(new SaveReviewDraftResponse { SavedAt = uploadBatch.ReviewDraftSavedAt.Value });
     }
 
     /// <summary>List upload batches, optionally filtered by year.</summary>
@@ -686,7 +756,8 @@ public class ResultsController : ControllerBase
                 UploadedBy      = b.UploadedBy,
                 UploadedAt      = b.UploadedAt,
                 Status          = b.Status,
-                ExtractionError = b.ExtractionError
+                ExtractionError = b.ExtractionError,
+                ReviewDraftSavedAt = b.ReviewDraftJson != null ? b.ReviewDraftSavedAt : null
             })
             .ToListAsync();
 
@@ -781,6 +852,23 @@ public class ResultsController : ControllerBase
         // A section labeled with a course outside routeTo stays unmatched so it stands out in Data Review.
         _resultsProcessingService.AssignVariants(results, routeTo);
         return await _runnerMatchingService.FindMatchesForResultsAsync(results, raceDate);
+    }
+
+    /// <summary>The batch's saved review draft, or null if none was saved (or it's unreadable).</summary>
+    private JsonElement? ParseDraft(UploadBatch batch)
+    {
+        if (string.IsNullOrEmpty(batch.ReviewDraftJson))
+            return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(batch.ReviewDraftJson);
+            return doc.RootElement.Clone();
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Ignoring unreadable review draft for upload batch {BatchId}", batch.UploadBatchId);
+            return null;
+        }
     }
 
     private static UploadResultsResponse BuildResponse(Guid batchId, List<ResultRow> results) =>

@@ -27,6 +27,7 @@ const toResultPayload = (row) => ({
   status: row.status,
   matchedRunnerId: row.matchedRunnerId || null,
   updateRunnerAge: !!row.updateRunnerAge,
+  isCourseRecord: !!row.isCourseRecord,
 });
 
 function StatBlock({ label, value, className }) {
