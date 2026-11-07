@@ -56,6 +56,13 @@ public class ResultRow
     /// whether to overwrite the runner's stored date of birth with this row's exact age.
     /// </summary>
     public bool UpdateRunnerAge { get; set; }
+
+    /// <summary>
+    /// Marks this result as a new course record (saved as <see cref="RaceResult.IsNewRecord"/>).
+    /// Only allowed on the gender winner of the race the row is saved to — see
+    /// <see cref="Services.ResultsProcessing.CourseRecordRules"/>.
+    /// </summary>
+    public bool IsCourseRecord { get; set; }
 }
 
 /// <summary>

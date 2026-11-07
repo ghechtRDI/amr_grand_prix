@@ -10,8 +10,9 @@ import {
   flexRender,
   createColumnHelper,
 } from '@tanstack/react-table';
-import { AlertTriangle, ArrowLeftRight, CheckCircle2, Sparkles, UserCheck, UserPlus, UserSearch, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, CheckCircle2, CircleHelp, Loader2, Save, Sparkles, Trophy, UserCheck, UserPlus, UserSearch, Trash2 } from 'lucide-react';
 import * as raceService from '../../services/raceService';
+import * as tokenService from '../../services/tokenService';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,6 +36,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { AGE_CATEGORIES } from '@/lib/ageCategories';
 
@@ -75,6 +84,91 @@ function shiftTimeFields(value) {
   if (parts.length === 2) return `0:${parts[0]}:${parts[1]}`;
   // 3-field "H:MM:SS" where the LLM fabricated a spurious seconds field - drop it.
   return `${parts[0]}:${parts[1]}`;
+}
+
+// Seconds for a time string, read the way the backend's ParseTime reads it (a bare 2-field
+// time is H:MM unless the first field can't be hours), or null if it isn't a time.
+function timeToSeconds(value) {
+  const parts = String(value ?? '').trim().split(':');
+  if (parts.length < 2 || parts.length > 3 || parts.some(p => !/^\d+(\.\d+)?$/.test(p))) return null;
+  const n = parts.map(Number);
+  if (n.length === 3) return n[0] * 3600 + n[1] * 60 + n[2];
+  return n[0] < 24 ? n[0] * 3600 + n[1] * 60 : n[0] * 60 + n[1];
+}
+
+// Data indices of the rows that may be marked as a course record: each gender's winner
+// (fastest Finished time) within each course-variant group. Mirrors the backend's
+// CourseRecordRules, which has the final say (it also sees results already in the race).
+function courseRecordEligibleIndices(rows) {
+  const best = new Map(); // "group|gender" -> { index, seconds, place }
+  rows.forEach((row, index) => {
+    if (row.status !== 'Finished' || !row.gender) return;
+    const seconds = timeToSeconds(row.time);
+    if (!seconds) return;
+    const place = row.place === '' || row.place == null ? Infinity : Number(row.place);
+    const key = `${(row.courseVariant || '').trim()}|${row.gender}`;
+    const current = best.get(key);
+    if (!current || seconds < current.seconds || (seconds === current.seconds && place < current.place)) {
+      best.set(key, { index, seconds, place });
+    }
+  });
+  return new Set(Array.from(best.values(), b => b.index));
+}
+
+function CourseRecordCell({ row, table }) {
+  const { recordEligible, updateData } = table.options.meta;
+  if (!recordEligible.has(row.index)) return null;
+  const checked = !!row.original.isCourseRecord;
+  return (
+    <label
+      className={cn(
+        'mx-auto flex w-fit cursor-pointer items-center gap-1 text-xs',
+        checked ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+      )}
+      title={`${row.original.gender} winner — mark as a new course record (+10 Open Division bonus in a Grand Prix race)`}
+    >
+      <input
+        type="checkbox"
+        className="size-3.5 rounded border-input accent-primary"
+        checked={checked}
+        onChange={(e) => updateData(row.index, 'isCourseRecord', e.target.checked)}
+      />
+      <Trophy className="size-3.5" />
+    </label>
+  );
+}
+
+// Version of the draft document saved via PUT /api/results/batch/{id}/draft. Bump (and handle
+// the old shape on load) if the row shape below changes incompatibly.
+const DRAFT_VERSION = 1;
+
+function selectedMatchOf(row) {
+  return (row.runnerMatches || []).find(m => m.runnerId === row.matchedRunnerId) || null;
+}
+
+function uploadedAgeOf(row) {
+  return row.age === '' || row.age == null ? null : Number(row.age);
+}
+
+// Required fields mirror handleSubmit's check (and the backend's ValidateRow()).
+function isMissingRequired(row) {
+  if (!row.name) return true;
+  if (!row.age && !row.ageCategory) return true;
+  return row.status === 'Finished' && (!row.place || !row.time);
+}
+
+// True when a row still needs the admin's attention - what the "Issues only" view shows:
+// a validation warning, a missing required field, a likely misread time, an unconfirmed
+// partial runner match, or an unresolved age disagreement with the matched runner.
+function rowHasIssue(row) {
+  if (row.validationIssues?.length > 0) return true;
+  if (isMissingRequired(row)) return true;
+  if (looksShifted(row.time)) return true;
+  if (row.matchStatus === 'needs-confirmation') return true;
+  const match = selectedMatchOf(row);
+  if (row.matchStatus === 'auto-matched' && match && match.confidence < 1) return true;
+  const uploadedAge = uploadedAgeOf(row);
+  return !!match && uploadedAge != null && match.age != null && uploadedAge !== match.age && !row.updateRunnerAge;
 }
 
 const STATUS_BADGE_CLASSES = {
@@ -296,10 +390,12 @@ function RunnerMatchCell({ row, table }) {
   const statusInfo = MATCH_STATUS[matchStatus];
   const StatusIcon = statusInfo?.icon;
 
-  const selectedMatch = matches.find(m => m.runnerId === selected);
-  const uploadedAge = row.original.age === '' ? null : Number(row.original.age);
+  const selectedMatch = selectedMatchOf(row.original);
+  const uploadedAge = uploadedAgeOf(row.original);
   const hasAgeDiscrepancy =
     !!selectedMatch && uploadedAge != null && selectedMatch.age != null && uploadedAge !== selectedMatch.age;
+  // The runner has no age on file at all: the backend records the uploaded age on save.
+  const willSetMissingAge = !!selectedMatch && uploadedAge != null && selectedMatch.age == null;
 
   const statusPill = statusInfo && (
     <span
@@ -358,6 +454,14 @@ function RunnerMatchCell({ row, table }) {
           </label>
         )
       )}
+      {willSetMissingAge && (
+        <span
+          className="text-xs text-muted-foreground"
+          title="This runner has no age on file, so the uploaded age will be saved to their record"
+        >
+          No age on file &mdash; will be set to {uploadedAge}
+        </span>
+      )}
     </div>
   );
 }
@@ -387,6 +491,9 @@ function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve
   const [autoMatched, setAutoMatched] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
+  // The choice this group already had when mounted - from a resumed draft, or from coming
+  // Back from Confirmation - restored instead of re-guessing the variant from the label.
+  const [initialResolved] = useState(resolved);
 
   const variantById = (id) => series?.variants.find(v => v.raceVariantId === id);
   // A multi-variant upload's sections can only go to the variants ticked in Step 1.
@@ -439,6 +546,27 @@ function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve
         const s = await raceService.getSeriesDetail(raceSeriesId);
         if (cancelled) return;
         setSeries(s);
+
+        const saved = initialResolved;
+        const savedVariantId = saved?.pendingRace?.raceVariantId
+          ?? (saved?.raceId ? s.races.find(r => r.raceId === saved.raceId)?.raceVariantId : null);
+        const savedVariant = savedVariantId
+          ? selectableVariants(s).find(v => v.raceVariantId === savedVariantId)
+          : null;
+        if (savedVariant) {
+          const race = raceFor(s, savedVariant.raceVariantId);
+          setVariantChoice(savedVariant.raceVariantId);
+          if (race) {
+            resolveTo(s, savedVariant, race);
+          } else if (saved.pendingRace && deferCreate) {
+            setDate(saved.pendingRace.date);
+            setIsGrandPrixRace(!!saved.pendingRace.isGrandPrixRace);
+            onResolve(saved);
+          } else {
+            chooseVariant(s, savedVariant.raceVariantId);
+          }
+          return;
+        }
 
         // Untagged rows belong to the Step 1 race's variant.
         const variant = groupKey
@@ -582,6 +710,151 @@ function GroupRaceSelector({ groupKey, primaryRaceSelection, resolved, onResolve
   );
 }
 
+// Per-section switch between every row and just the rows that still need attention.
+function IssueFilterToggle({ issuesOnly, onChange, total, issueCount }) {
+  const option = (active, label, onClick) => (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'rounded-md px-3 py-1 text-sm font-medium transition-colors',
+        active ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+      )}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div role="group" aria-label="Rows to show" className="inline-flex rounded-lg border border-border bg-background p-0.5">
+      {option(!issuesOnly, `All rows (${total})`, () => onChange(false))}
+      {option(issuesOnly, `Issues only (${issueCount})`, () => onChange(true))}
+    </div>
+  );
+}
+
+function HelpSection({ title, children }) {
+  return (
+    <section className="flex flex-col gap-1.5">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <div className="flex flex-col gap-1.5 text-sm text-muted-foreground">{children}</div>
+    </section>
+  );
+}
+
+function RowSwatch({ className, children }) {
+  return (
+    <li className="flex items-center gap-2">
+      <span className={cn('inline-block size-3.5 shrink-0 rounded-sm border border-border', className)} />
+      <span>{children}</span>
+    </li>
+  );
+}
+
+function DataReviewHelpDialog({ open, onOpenChange }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>How to review uploaded results</DialogTitle>
+          <DialogDescription>
+            Every row below was read from the uploaded file automatically. Check it against the
+            original before saving &mdash; nothing is written to the race or the Grand Prix
+            standings until you click Save Results on the Confirmation step.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-5">
+          <HelpSection title="1. Check each section's race">
+            <p>
+              When the file has more than one course (e.g. Adult and Junior), rows are grouped into
+              sections. Make sure each section is assigned to the right variant. If the file
+              repeated a section by mistake, use <strong>Remove section</strong>.
+            </p>
+          </HelpSection>
+
+          <HelpSection title="2. Focus on the rows with issues">
+            <p>
+              Each section has an <strong>All rows / Issues only</strong> toggle. Switch to
+              <strong> Issues only</strong> to see just the rows that still need attention. A row
+              leaves that view as soon as you fix it. Switch back to <strong>All rows</strong> for a
+              final look before moving on.
+            </p>
+            <p>Row colors:</p>
+            <ul className="flex flex-col gap-1">
+              <RowSwatch className="bg-amber-500/25">Amber: a validation warning (hover the warning icon in the Validation column for details)</RowSwatch>
+              <RowSwatch className="bg-purple-500/25">Purple: possible runner matches to confirm</RowSwatch>
+              <RowSwatch className="bg-sky-500/25">Blue: will be created as a new runner</RowSwatch>
+            </ul>
+          </HelpSection>
+
+          <HelpSection title="3. Fix misread times">
+            <p>
+              Times are shown as <strong>hh:mm:ss</strong>. A 34-minute finish sometimes gets read
+              as <code>34:21</code>, meaning 34 <em>hours</em>. These rows show an amber
+              <ArrowLeftRight className="mx-1 inline size-3.5 text-amber-600 dark:text-amber-400" />
+              button next to the time. Click it to change the value to <code>0:34:21</code>, or use
+              <strong> Shift All</strong> above the table to fix them all at once.
+            </p>
+          </HelpSection>
+
+          <HelpSection title="4. Confirm runner matches">
+            <ul className="flex list-disc flex-col gap-1 pl-5">
+              <li><strong>Auto-matched</strong>: a strong match was picked for you. Check it, especially if it&rsquo;s under 100%.</li>
+              <li><strong>Confirm match</strong>: one or more possible matches were found, but none was picked. Choose the right runner, or <strong>+ New Runner</strong> if none of them is this person.</li>
+              <li><strong>New runner</strong>: no existing runner looked similar, so a new record will be created.</li>
+            </ul>
+            <p>Each option in the dropdown shows the runner&rsquo;s age on file and the match confidence.</p>
+          </HelpSection>
+
+          <HelpSection title="5. Resolve age disagreements">
+            <p>
+              If the uploaded age doesn&rsquo;t match the selected runner&rsquo;s estimated age, tick
+              <strong> Update estimated age</strong> when the uploaded age is right. A runner who
+              entered their own date of birth can&rsquo;t be changed here. A runner with no age on file
+              gets the uploaded age automatically.
+            </p>
+          </HelpSection>
+
+          <HelpSection title="6. Edit or remove rows">
+            <p>
+              Click any cell to edit it. Press <kbd className="rounded border border-border px-1 text-xs">Enter</kbd> to
+              keep the change or <kbd className="rounded border border-border px-1 text-xs">Esc</kbd> to undo it.
+              Use the trash icon to remove a row that shouldn&rsquo;t be saved.
+            </p>
+            <p>
+              Every row needs a <strong>Name</strong> and an <strong>Age</strong> or
+              <strong> Age Category</strong>. Finished rows also need a <strong>Place</strong> and
+              <strong> Time</strong>. Rows without a <strong>Gender</strong> are skipped when saving.
+            </p>
+          </HelpSection>
+
+          <HelpSection title="7. Mark course records">
+            <p>
+              Each gender&rsquo;s winner in each section (the fastest Finished time) gets a checkbox in
+              the <strong>CR</strong> column. Tick it if that result set a new course record. In a Grand
+              Prix race it earns a +10 Open Division bonus.
+            </p>
+          </HelpSection>
+
+          <HelpSection title="8. Save a draft or continue">
+            <p>
+              <strong>Save Draft</strong> stores your edits without saving any results or recalculating
+              the Grand Prix. To pick up where you left off later, click <strong>Resume</strong> on
+              this upload in Results Management. When you&rsquo;re done, click <strong>Next</strong> to
+              go to Confirmation.
+            </p>
+          </HelpSection>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" onClick={() => onOpenChange(false)}>Got it</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const COLUMNS = [
   columnHelper.accessor('place',  { header: 'Place',  cell: EditableCell, size: 80 }),
   columnHelper.accessor('bib',    { header: 'Bib',    cell: EditableCell, size: 80 }),
@@ -589,8 +862,21 @@ const COLUMNS = [
   columnHelper.accessor('age',    { header: 'Age',    cell: EditableCell, size: 80 }),
   columnHelper.accessor('ageCategory', { header: 'Age Category', cell: EditableCell, size: 120 }),
   columnHelper.accessor('gender', { header: 'Gender', cell: EditableCell, size: 100 }),
-  columnHelper.accessor('time',   { header: 'Time',   cell: TimeCell, size: 120 }),
+  columnHelper.accessor('time', {
+    // The unit makes a misread obvious: "34:21:00" reads as 34 hours, not 34 minutes.
+    header: () => (
+      <>Time <span className="font-normal normal-case tracking-normal text-zinc-400">(hh:mm:ss)</span></>
+    ),
+    cell: TimeCell,
+    size: 140,
+  }),
   columnHelper.accessor('status', { header: 'Status', cell: EditableCell, size: 100 }),
+  columnHelper.display({
+    id: 'courseRecord',
+    header: () => <span title="Course record — available on each gender's winner">CR</span>,
+    cell: CourseRecordCell,
+    size: 60,
+  }),
   columnHelper.accessor('courseVariant', { header: 'Course Variant', cell: EditableCell, size: 140 }),
   columnHelper.display({
     id: 'runnerMatch',
@@ -654,7 +940,20 @@ const COLUMNS = [
 ];
 
 export default function DataReviewStep({ wizardData, onNext, onBack, onCancel }) {
+  // A draft saved earlier (handed over by Resume) is restored only on a fresh entry to this step;
+  // coming Back from Confirmation restores this session's own edits (reviewedData) instead.
+  const savedDraft = wizardData.reviewDraft?.version === DRAFT_VERSION ? wizardData.reviewDraft : null;
+
   const [data, setData] = useState(() => {
+    if (wizardData.reviewedData) return wizardData.reviewedData;
+    if (Array.isArray(savedDraft?.rows)) {
+      // Drafts saved before "no runner match" stopped being a validation issue still carry it.
+      return savedDraft.rows.map(row => ({
+        ...row,
+        validationIssues: (row.validationIssues || []).filter(i => i.field?.toLowerCase() !== 'runner'),
+      }));
+    }
+
     const parsedResults = wizardData.parsedResults || [];
 
     return parsedResults.map((row, idx) => ({
@@ -682,13 +981,41 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
       })(),
       matchedRunnerId: row.matchedRunnerId || null,
       updateRunnerAge: false,
+      isCourseRecord: false,
     }));
   });
 
   const [editingCell, setEditingCell] = useState(null);
   // Course-variant group key -> { raceId, raceName } chosen via GroupRaceSelector.
   // The "primary" group (pre-selected race from Step 1) never needs an entry here.
-  const [groupRaces, setGroupRaces] = useState(wizardData.groupRaces || {});
+  const [groupRaces, setGroupRaces] = useState(wizardData.groupRaces || savedDraft?.groupRaces || {});
+  // Group key -> true when that section shows only rows with issues. Default: all rows.
+  const [issuesOnly, setIssuesOnly] = useState({});
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [draftState, setDraftState] = useState({
+    saving: false,
+    savedAt: wizardData.reviewDraftSavedAt || null,
+    error: null,
+  });
+
+  const saveDraft = async () => {
+    setDraftState(prev => ({ ...prev, saving: true, error: null }));
+    try {
+      const res = await fetch(`/api/results/batch/${wizardData.uploadBatchId}/draft`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${tokenService.getAccessToken()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ version: DRAFT_VERSION, rows: data, groupRaces }),
+      });
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+      const { savedAt } = await res.json();
+      setDraftState({ saving: false, savedAt, error: null });
+    } catch (err) {
+      setDraftState(prev => ({ ...prev, saving: false, error: err.message }));
+    }
+  };
 
   const updateData = useCallback((rowIndex, columnId, value) => {
     setData(old =>
@@ -743,11 +1070,13 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     setDeleteTarget(null);
   }, [deleteTarget]);
 
+  const recordEligible = useMemo(() => courseRecordEligibleIndices(data), [data]);
+
   const table = useReactTable({
     data,
     columns: COLUMNS,
     getCoreRowModel: getCoreRowModel(),
-    meta: { editingCell, setEditingCell, updateData, updateRunnerMatch, requestDeleteRow },
+    meta: { editingCell, setEditingCell, updateData, updateRunnerMatch, requestDeleteRow, recordEligible },
   });
 
   const stats = useMemo(() => ({
@@ -757,6 +1086,18 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     needsReview: data.filter(row => row.matchStatus === 'needs-confirmation').length,
     shiftableTimes: data.filter(row => looksShifted(row.time)).length,
   }), [data]);
+
+  // Rows for one section, narrowed to the ones with issues when its toggle is on.
+  const visibleRows = (key, rows) => (issuesOnly[key] ? rows.filter(r => rowHasIssue(r.original)) : rows);
+  const issueCountOf = (rows) => rows.filter(r => rowHasIssue(r.original)).length;
+  const filterToggle = (key, rows) => (
+    <IssueFilterToggle
+      issuesOnly={!!issuesOnly[key]}
+      onChange={(value) => setIssuesOnly(prev => ({ ...prev, [key]: value }))}
+      total={rows.length}
+      issueCount={issueCountOf(rows)}
+    />
+  );
 
   const primaryRaceSelection = wizardData.raceSelection || {};
 
@@ -838,26 +1179,32 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     </TableBody>
   );
 
-  const renderTable = (rows) => (
-    <div className="overflow-hidden rounded-xl border border-border">
-      <div className="max-h-[32rem] overflow-y-auto">
-        <Table>
-          {tableHead}
-          {renderTableBody(rows)}
-        </Table>
+  const renderTable = (key, allRows) => {
+    const rows = visibleRows(key, allRows);
+    if (rows.length === 0 && issuesOnly[key]) {
+      return (
+        <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-8 text-sm text-muted-foreground">
+          <CheckCircle2 className="size-4 text-success" />
+          No rows in this section have issues. Switch to All rows to see everything.
+        </div>
+      );
+    }
+    return (
+      <div className="overflow-hidden rounded-xl border border-border">
+        <div className="max-h-[32rem] overflow-y-auto">
+          <Table>
+            {tableHead}
+            {renderTableBody(rows)}
+          </Table>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const handleSubmit = () => {
     // Place/Time are only required for Finished results - DNF/DNS/DQ rows legitimately
     // have neither, mirroring the backend's ValidateRow().
-    const invalidRows = data.filter(row => {
-      if (!row.name) return true;
-      if (!row.age && !row.ageCategory) return true;
-      if (row.status === 'Finished' && (!row.place || !row.time)) return true;
-      return false;
-    });
+    const invalidRows = data.filter(isMissingRequired);
 
     if (invalidRows.length > 0) {
       alert(
@@ -877,14 +1224,31 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
       return;
     }
 
-    onNext({ reviewedData: data, groupRaces, primaryGroupKey: primaryKey });
+    // A row marked as a course record and then edited out of first place (or into another
+    // variant) loses the mark - only a gender winner can hold one.
+    const reviewedData = data.map((row, i) =>
+      row.isCourseRecord && !recordEligible.has(i) ? { ...row, isCourseRecord: false } : row
+    );
+    onNext({ reviewedData, groupRaces, primaryGroupKey: primaryKey });
   };
 
   return (
     <div>
       <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
         <h2 className="text-xl font-semibold">Step 3: Data Review</h2>
-        <span className="text-sm text-muted-foreground">Step 3 of {wizardData.totalSteps || 4}</span>
+        <div className="flex items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            title="Click here to view instructions"
+            onClick={() => setHelpOpen(true)}
+          >
+            <CircleHelp className="size-4" />
+            Help
+          </Button>
+          <span className="text-sm text-muted-foreground">Step 3 of {wizardData.totalSteps || 4}</span>
+        </div>
       </div>
 
       <div className="mb-6">
@@ -931,7 +1295,12 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
         )}
       </div>
 
-      {!showGroups && renderTable(rowGroups[0]?.[1] || [])}
+      {!showGroups && (
+        <>
+          <div className="mb-3 flex justify-end">{filterToggle(primaryKey ?? '', rowGroups[0]?.[1] || [])}</div>
+          {renderTable(primaryKey ?? '', rowGroups[0]?.[1] || [])}
+        </>
+      )}
 
       {showGroups && rowGroups.map(([key, rows]) => (
         <div className="mb-8 rounded-xl border border-border bg-muted/20 p-4" key={key || '(primary)'}>
@@ -956,6 +1325,9 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
                 <Trash2 className="size-3.5" /> Remove section
               </Button>
             </div>
+            {filterToggle(key, rows)}
+          </div>
+          <div className="mb-3">
             {key === primaryKey ? (
               <span className="text-sm text-success">
                 &rarr; {primaryRaceSelection.raceName} (Step 1 selection)
@@ -976,15 +1348,38 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
               />
             )}
           </div>
-          {renderTable(rows)}
+          {renderTable(key, rows)}
         </div>
       ))}
 
-      <div className="mt-8 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">
-        <Button type="button" variant="outline" onClick={onBack}>&larr; Back</Button>
-        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button type="button" onClick={handleSubmit}>Next &rarr;</Button>
+      <div className="mt-8 flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm" aria-live="polite">
+          {draftState.error ? (
+            <span className="text-destructive">Couldn&rsquo;t save draft: {draftState.error}</span>
+          ) : draftState.savedAt ? (
+            <span className="text-muted-foreground">
+              Draft saved {new Date(draftState.savedAt).toLocaleString()} &mdash; resume it from Results Management
+            </span>
+          ) : null}
+        </div>
+        <div className="flex flex-col-reverse gap-3 sm:flex-row">
+          <Button type="button" variant="outline" onClick={onBack}>&larr; Back</Button>
+          <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={saveDraft}
+            disabled={draftState.saving || !wizardData.uploadBatchId}
+            title="Save your review edits without saving results or recalculating the Grand Prix"
+          >
+            {draftState.saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            {draftState.saving ? 'Saving…' : 'Save Draft'}
+          </Button>
+          <Button type="button" onClick={handleSubmit}>Next &rarr;</Button>
+        </div>
       </div>
+
+      <DataReviewHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
 
       <AlertDialog open={!!sectionDeleteTarget} onOpenChange={(open) => !open && setSectionDeleteTarget(null)}>
         <AlertDialogContent>

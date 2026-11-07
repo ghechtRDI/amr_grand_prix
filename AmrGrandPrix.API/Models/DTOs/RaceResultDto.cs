@@ -56,4 +56,6 @@ public class UploadBatchDto
     public UploadStatus Status { get; set; }
     /// <summary>Why extraction failed, for a <see cref="UploadStatus.Failed"/> batch.</summary>
     public string? ExtractionError { get; set; }
+    /// <summary>When the admin last saved a Data Review draft for this pending batch, if ever.</summary>
+    public DateTime? ReviewDraftSavedAt { get; set; }
 }

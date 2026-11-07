@@ -267,6 +267,100 @@ public class ResultsControllerTests : IDisposable
         updated.DateOfBirth.Should().BeNull();
     }
 
+    [Theory]
+    [InlineData(null, false, 1975)] // no age on file - filled in from the upload even without the flag
+    [InlineData(1980, false, 1980)] // estimate on file, admin didn't opt to update - left alone
+    public async Task SaveResults_MatchedRunner_FillsMissingAgeButKeepsExistingEstimateUnlessAsked(
+        int? existingBirthYear, bool updateRunnerAge, int expectedBirthYear)
+    {
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(), FirstName = "Existing", LastName = "Runner",
+            Gender = Gender.Male, EstimatedBirthYear = existingBirthYear
+        };
+        var race = new Race
+        {
+            RaceId = Guid.NewGuid(), RaceVariant = TestData.Variant("Race"),
+            Date = new DateOnly(2020, 6, 1), Year = 2020
+        };
+        var batch = new UploadBatch
+        {
+            UploadBatchId = Guid.NewGuid(), RaceId = race.RaceId,
+            FileName = "test.csv", FileType = FileType.CSV, Status = UploadStatus.Pending
+        };
+        _context.Runners.Add(runner);
+        _context.Races.Add(race);
+        _context.UploadBatches.Add(batch);
+        await _context.SaveChangesAsync();
+
+        await _controller.SaveResults(new SaveResultsRequest
+        {
+            UploadBatchId = batch.UploadBatchId,
+            RaceId = race.RaceId,
+            Results = new List<ResultRow>
+            {
+                new() { Name = "Existing Runner", Age = 45, Gender = Gender.Male, Place = 1,
+                        TimeString = "20:00", Status = ResultStatus.Finished,
+                        MatchedRunnerId = runner.RunnerId, UpdateRunnerAge = updateRunnerAge }
+            }
+        });
+
+        var updated = await _context.Runners.SingleAsync(r => r.RunnerId == runner.RunnerId);
+        updated.EstimatedBirthYear.Should().Be(expectedBirthYear);
+    }
+
+    [Fact]
+    public async Task SaveReviewDraft_PendingBatch_IsReturnedOnResumeAndClearedOnSave()
+    {
+        var race = new Race
+        {
+            RaceId = Guid.NewGuid(), RaceVariant = TestData.Variant("Race"),
+            Date = new DateOnly(2026, 6, 1), Year = 2026
+        };
+        var batch = new UploadBatch
+        {
+            UploadBatchId = Guid.NewGuid(), RaceId = race.RaceId, FileName = "r.pdf",
+            Status = UploadStatus.Pending, RawLlmJson = "{\"sections\":[]}"
+        };
+        _context.Races.Add(race);
+        _context.UploadBatches.Add(batch);
+        await _context.SaveChangesAsync();
+
+        var llm = new Mock<ILlmExtractionService>();
+        llm.Setup(l => l.RehydrateSections(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(new List<ExtractedSection>());
+        var controller = ControllerWithLlm(llm);
+
+        var draft = System.Text.Json.JsonDocument.Parse("{\"version\":1,\"rows\":[{\"name\":\"Edited Name\"}]}").RootElement;
+        var saved = await controller.SaveReviewDraft(batch.UploadBatchId, draft);
+        saved.Result.Should().BeOfType<OkObjectResult>();
+
+        var resumed = (await controller.ResumeBatch(batch.UploadBatchId)).Result
+            .Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<ResumeBatchResponse>().Subject;
+        resumed.ReviewDraft.Should().NotBeNull();
+        resumed.ReviewDraft!.Value.GetProperty("rows")[0].GetProperty("name").GetString().Should().Be("Edited Name");
+        resumed.ReviewDraftSavedAt.Should().NotBeNull();
+
+        await controller.SaveResults(new SaveResultsRequest { UploadBatchId = batch.UploadBatchId, RaceId = race.RaceId });
+        var after = await _context.UploadBatches.SingleAsync(b => b.UploadBatchId == batch.UploadBatchId);
+        after.Status.Should().Be(UploadStatus.Saved);
+        after.ReviewDraftJson.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SaveReviewDraft_BatchNotPending_ReturnsBadRequest()
+    {
+        var batch = new UploadBatch { UploadBatchId = Guid.NewGuid(), FileName = "r.pdf", Status = UploadStatus.Saved };
+        _context.UploadBatches.Add(batch);
+        await _context.SaveChangesAsync();
+
+        var draft = System.Text.Json.JsonDocument.Parse("{}").RootElement;
+        var result = await _controller.SaveReviewDraft(batch.UploadBatchId, draft);
+
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        (await _context.UploadBatches.SingleAsync()).ReviewDraftJson.Should().BeNull();
+    }
+
     [Fact]
     public async Task SaveResults_UpdateRunnerAge_NeverOverwritesVerifiedDateOfBirth()
     {
@@ -539,6 +633,104 @@ public class ResultsControllerTests : IDisposable
 
         var points = await _context.GrandPrixPoints.Where(p => p.RaceId == race.RaceId).ToListAsync();
         points.Should().NotBeEmpty("editing a result on a Grand Prix race should recalculate GP points");
+    }
+
+    private async Task<(Race Race, UploadBatch Batch)> SeedGrandPrixRaceWithPendingBatchAsync()
+    {
+        var race = new Race
+        {
+            RaceId = Guid.NewGuid(), RaceVariant = TestData.Variant("GP Race"), IsGrandPrixRace = true,
+            Date = new DateOnly(2026, 6, 1), Year = 2026
+        };
+        var batch = new UploadBatch
+        {
+            UploadBatchId = Guid.NewGuid(), RaceId = race.RaceId, FileName = "test.csv",
+            FileType = FileType.CSV, Status = UploadStatus.Pending
+        };
+        _context.Races.Add(race);
+        _context.UploadBatches.Add(batch);
+        await _context.SaveChangesAsync();
+        return (race, batch);
+    }
+
+    private static ResultRow Row(string name, Gender gender, int place, string time, bool courseRecord = false) =>
+        new() { Name = name, Age = 30, Gender = gender, Place = place, TimeString = time,
+                Status = ResultStatus.Finished, IsCourseRecord = courseRecord };
+
+    [Fact]
+    public async Task SaveResults_CourseRecordOnGenderWinner_SavesFlagAndAwardsBonus()
+    {
+        var (race, batch) = await SeedGrandPrixRaceWithPendingBatchAsync();
+
+        var result = await _controller.SaveResults(new SaveResultsRequest
+        {
+            UploadBatchId = batch.UploadBatchId,
+            RaceId = race.RaceId,
+            Results = [
+                Row("Bob Fast", Gender.Male, 1, "0:20:00"),
+                Row("Alice Fast", Gender.Female, 2, "0:21:00", courseRecord: true),
+                Row("Carol Slow", Gender.Female, 3, "0:25:00"),
+            ]
+        });
+
+        result.Result.Should().BeOfType<OkObjectResult>();
+        var record = await _context.RaceResults.Include(r => r.Runner).SingleAsync(r => r.IsNewRecord);
+        record.Runner.FirstName.Should().Be("Alice");
+        var openPoints = await _context.GrandPrixPoints
+            .SingleAsync(p => p.ResultId == record.ResultId && p.Division == Division.OpenFemale);
+        openPoints.IsRecordBonus.Should().BeTrue();
+        openPoints.Points.Should().Be(110);
+    }
+
+    [Fact]
+    public async Task SaveResults_CourseRecordOnNonWinner_ReturnsBadRequest()
+    {
+        var (race, batch) = await SeedGrandPrixRaceWithPendingBatchAsync();
+
+        var result = await _controller.SaveResults(new SaveResultsRequest
+        {
+            UploadBatchId = batch.UploadBatchId,
+            RaceId = race.RaceId,
+            Results = [
+                Row("Alice Fast", Gender.Female, 1, "0:21:00"),
+                Row("Carol Slow", Gender.Female, 2, "0:25:00", courseRecord: true),
+            ]
+        });
+
+        var bad = result.Result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        bad.Value.Should().BeOfType<string>().Which.Should().Contain("Carol Slow");
+    }
+
+    [Fact]
+    public async Task UpdateRaceResult_CourseRecord_AllowedOnlyForGenderWinner()
+    {
+        var (race, batch) = await SeedGrandPrixRaceWithPendingBatchAsync();
+        await _controller.SaveResults(new SaveResultsRequest
+        {
+            UploadBatchId = batch.UploadBatchId,
+            RaceId = race.RaceId,
+            Results = [Row("Alice Fast", Gender.Female, 1, "0:21:00"), Row("Carol Slow", Gender.Female, 2, "0:25:00")]
+        });
+        var results = await _context.RaceResults.Include(r => r.Runner).ToListAsync();
+        var alice = results.Single(r => r.Runner.FirstName == "Alice");
+        var carol = results.Single(r => r.Runner.FirstName == "Carol");
+        UpdateRaceResultRequest Edit(RaceResult r, string time, bool courseRecord) => new()
+        {
+            Place = r.Place, TimeString = time, Age = r.Age, Gender = r.Gender,
+            Status = r.Status, IsCourseRecord = courseRecord
+        };
+
+        (await _controller.UpdateRaceResult(carol.ResultId, Edit(carol, "0:25:00", true)))
+            .Result.Should().BeOfType<BadRequestObjectResult>();
+
+        var ok = (await _controller.UpdateRaceResult(alice.ResultId, Edit(alice, "0:21:00", true)))
+            .Result.Should().BeOfType<OkObjectResult>().Subject;
+        ok.Value.Should().BeOfType<RaceResultDto>().Which.IsNewRecord.Should().BeTrue();
+
+        // Carol's time corrected to beat Alice: Alice is no longer the winner, so her record is cleared.
+        (await _controller.UpdateRaceResult(carol.ResultId, Edit(carol, "0:20:00", false)))
+            .Result.Should().BeOfType<OkObjectResult>();
+        (await _context.RaceResults.FindAsync(alice.ResultId))!.IsNewRecord.Should().BeFalse();
     }
 
     [Fact]

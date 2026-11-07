@@ -356,7 +356,7 @@ public class RunnerMatchingServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task FindMatchesForResultsAsync_NewRunner_AddsInfoIssue()
+    public async Task FindMatchesForResultsAsync_NewRunner_AddsNoValidationIssue()
     {
         // Arrange
         var resultRows = new List<ResultRow>
@@ -374,10 +374,8 @@ public class RunnerMatchingServiceTests : IDisposable
         var results = await _service.FindMatchesForResultsAsync(resultRows, DateOnly.FromDateTime(DateTime.Today));
 
         // Assert
-        results.First().ValidationIssues.Should().Contain(i =>
-            i.Field == "Runner" &&
-            i.Severity == ValidationSeverity.Info &&
-            i.Message.Contains("New runner"));
+        results.First().RunnerMatches.Should().BeEmpty();
+        results.First().ValidationIssues.Should().BeEmpty();
     }
 
     [Fact]

@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronsUpDown, Trophy } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import * as tokenService from '../services/tokenService';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -143,6 +143,19 @@ function withComputedPlaces(results) {
   }));
 }
 
+function CourseRecordBadge() {
+  return (
+    <Badge
+      variant="outline"
+      title="New course record"
+      className="ml-2 gap-1 border-transparent bg-amber-500/15 align-middle text-amber-700 dark:text-amber-400"
+    >
+      <Trophy className="size-3" />
+      CR
+    </Badge>
+  );
+}
+
 function StatusBadge({ status }) {
   const s = typeof status === 'string' ? status : STATUS_OPTIONS[status] || status;
   return (
@@ -227,6 +240,7 @@ export default function RaceResults() {
       gender: toGenderLabel(r.gender) ?? '',
       status: toStatusLabel(r.status) ?? 'Finished',
       notes: r.notes ?? '',
+      isCourseRecord: !!r.isNewRecord,
     });
   };
 
@@ -254,6 +268,7 @@ export default function RaceResults() {
           gender: editValues.gender,
           status: editValues.status,
           notes: editValues.notes || null,
+          isCourseRecord: !!editValues.isCourseRecord,
         }),
       });
 
@@ -502,6 +517,23 @@ export default function RaceResults() {
                             <TableCell className="text-right tabular-nums">{r.computedGenderPlace ?? '—'}</TableCell>
                             <TableCell className="font-medium text-foreground">
                               <Link to={`/runners/${r.runnerId}`} className="hover:text-primary">{r.runnerName}</Link>
+                              {/* Only a gender winner can hold a course record; the server re-checks
+                                  against the edited time. */}
+                              {r.computedGenderPlace === 1 && (
+                                <label
+                                  className="mt-1 flex w-fit cursor-pointer items-center gap-1.5 text-xs font-normal text-muted-foreground"
+                                  title="Mark as a new course record (+10 Open Division bonus in a Grand Prix race)"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="size-3.5 rounded border-input accent-primary"
+                                    checked={!!editValues.isCourseRecord}
+                                    onChange={(e) => setEditValues(v => ({ ...v, isCourseRecord: e.target.checked }))}
+                                  />
+                                  <Trophy className="size-3.5" />
+                                  Course record
+                                </label>
+                              )}
                             </TableCell>
                             <TableCell>
                               <Input
@@ -564,6 +596,7 @@ export default function RaceResults() {
                           <TableCell className="text-right tabular-nums">{r.computedGenderPlace ?? '—'}</TableCell>
                           <TableCell className="font-medium text-foreground">
                             <Link to={`/runners/${r.runnerId}`} className="hover:text-primary">{r.runnerName}</Link>
+                            {r.isNewRecord && <CourseRecordBadge />}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">{r.age ?? r.ageCategory ?? '—'}</TableCell>
                           <TableCell>{genderLabel(r.gender)}</TableCell>

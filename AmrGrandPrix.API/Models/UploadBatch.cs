@@ -69,6 +69,17 @@ public class UploadBatch
     [MaxLength(2000)]
     public string? ExtractionError { get; set; }
 
+    /// <summary>
+    /// The admin's in-progress Data Review state (edited rows, runner-match choices, per-variant
+    /// race picks), saved as an opaque client JSON document so resuming the batch picks up where
+    /// they left off instead of re-deriving rows from <see cref="RawLlmJson"/>. Null until a draft
+    /// is saved; ignored once the batch is <see cref="UploadStatus.Saved"/>.
+    /// </summary>
+    public string? ReviewDraftJson { get; set; }
+
+    /// <summary>When <see cref="ReviewDraftJson"/> was last saved (UTC).</summary>
+    public DateTime? ReviewDraftSavedAt { get; set; }
+
     // LLM audit fields
     public string? RawLlmJson     { get; set; }
     public string? LlmModel       { get; set; }

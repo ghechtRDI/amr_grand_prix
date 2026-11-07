@@ -3,9 +3,11 @@
  * Multi-step wizard: Race Selection → File Upload → Data Review → Confirmation
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Check } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
+import { fetchResumeWizardData } from '../../components/upload/resumeBatch';
+import { Button } from '@/components/ui/button';
 import RaceSelectionStep from '../../components/upload/RaceSelectionStep';
 import FileUploadStep    from '../../components/upload/FileUploadStep';
 import DataReviewStep    from '../../components/upload/DataReviewStep';
@@ -37,12 +39,38 @@ const WIDE_STEP_IDS = new Set(['data-review']);
 
 export default function ResultsUpload() {
   const location = useLocation();
-  const resumeData = location.state?.resume || null;
-
-  const [currentStepId, setCurrentStepId] = useState(resumeData ? 'data-review' : 'race-selection');
-  const [wizardData, setWizardData]       = useState(resumeData || {});
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const navigate = useNavigate();
+  // Resume from Results Management hands over the fetched batch as `resume`. That snapshot is
+  // swapped for just its id below, because history state survives a page reload: keeping the
+  // snapshot would restore the review draft as it was when Resume was clicked, not the latest
+  // Save Draft. A reload (state holds only `resumeBatchId`) re-fetches the batch instead.
+  const resumeData = location.state?.resume || null;
+  const resumeBatchId = location.state?.resumeBatchId || resumeData?.uploadBatchId || null;
+  const isResume = !!resumeBatchId;
+
+  const [currentStepId, setCurrentStepId] = useState(isResume ? 'data-review' : 'race-selection');
+  const [wizardData, setWizardData]       = useState(resumeData || {});
+  const [resumeLoading, setResumeLoading] = useState(isResume && !resumeData);
+  const [resumeError, setResumeError]     = useState(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (resumeData) {
+      navigate(location.pathname, { replace: true, state: { resumeBatchId } });
+    }
+    // Run once on mount: the replace above changes location.state, which must not re-trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!resumeLoading) return;
+    let cancelled = false;
+    fetchResumeWizardData(resumeBatchId)
+      .then(data => { if (!cancelled) setWizardData(data); })
+      .catch(err => { if (!cancelled) setResumeError(err.message); })
+      .finally(() => { if (!cancelled) setResumeLoading(false); });
+    return () => { cancelled = true; };
+  }, [resumeLoading, resumeBatchId]);
 
   const currentIndex        = STEPS.findIndex(s => s.id === currentStepId);
   const CurrentStepComponent = STEPS[currentIndex]?.component;
@@ -56,7 +84,7 @@ export default function ResultsUpload() {
   const handleBack = () => {
     // Resumed batches skip race selection / file upload (already done in a prior session),
     // so there's no earlier step to go back to.
-    if (resumeData && currentStepId === 'data-review') {
+    if (isResume && currentStepId === 'data-review') {
       navigate('/admin/results');
       return;
     }
@@ -67,7 +95,7 @@ export default function ResultsUpload() {
 
   const handleConfirmCancel = () => {
     setCancelDialogOpen(false);
-    navigate(resumeData ? '/admin/results' : '/');
+    navigate(isResume ? '/admin/results' : '/');
   };
 
   if (!CurrentStepComponent) return null;
@@ -120,7 +148,20 @@ export default function ResultsUpload() {
 
         <Card>
           <CardContent className="p-6 md:p-8">
-            <CurrentStepComponent {...stepProps} />
+            {resumeLoading ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Loading upload…
+              </div>
+            ) : resumeError ? (
+              <div className="flex flex-col items-center gap-4 py-12 text-center">
+                <p className="text-destructive">Couldn&rsquo;t load this upload: {resumeError}</p>
+                <Button variant="outline" onClick={() => navigate('/admin/results')}>
+                  Back to Results Management
+                </Button>
+              </div>
+            ) : (
+              <CurrentStepComponent {...stepProps} />
+            )}
           </CardContent>
         </Card>
       </div>
@@ -130,7 +171,8 @@ export default function ResultsUpload() {
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel this upload?</AlertDialogTitle>
             <AlertDialogDescription>
-              All progress on this upload will be lost.
+              Any changes since your last Save Draft will be lost. The uploaded file stays
+              pending in Results Management, so you can resume it later.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

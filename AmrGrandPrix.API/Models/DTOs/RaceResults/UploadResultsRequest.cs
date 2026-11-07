@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 
 namespace AmrGrandPrix.API.Models.DTOs.RaceResults;
@@ -89,6 +90,18 @@ public class ResumeBatchResponse
     public int TotalRows { get; set; }
     public int ValidRows { get; set; }
     public int RowsWithIssues { get; set; }
+
+    /// <summary>
+    /// The admin's saved Data Review draft (see <see cref="UploadBatch.ReviewDraftJson"/>), returned
+    /// as-is for the client to restore; null when no draft has been saved.
+    /// </summary>
+    public JsonElement? ReviewDraft { get; set; }
+    public DateTime? ReviewDraftSavedAt { get; set; }
+}
+
+public class SaveReviewDraftResponse
+{
+    public DateTime SavedAt { get; set; }
 }
 
 public class ValidateResultsRequest
@@ -150,4 +163,7 @@ public class UpdateRaceResultRequest
     public Gender Gender { get; set; }
     public ResultStatus Status { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>Whether this result is a course record; only allowed for its gender's winner.</summary>
+    public bool IsCourseRecord { get; set; }
 }

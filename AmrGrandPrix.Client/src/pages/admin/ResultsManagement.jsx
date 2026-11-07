@@ -11,6 +11,7 @@ import * as tokenService from '../../services/tokenService';
 import * as raceService from '../../services/raceService';
 import * as standingsService from '../../services/standingsService';
 import { readError } from '../../services/api';
+import { fetchResumeWizardData } from '../../components/upload/resumeBatch';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -222,36 +223,8 @@ export default function ResultsManagement() {
     setResuming(batch.uploadBatchId);
     setMessage(null);
     try {
-      const res = await fetch(`/api/results/batch/${batch.uploadBatchId}/resume`, {
-        headers: { Authorization: `Bearer ${tokenService.getAccessToken()}` },
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      navigate('/admin/results/upload', {
-        state: {
-          resume: {
-            raceSelection: {
-              raceId: data.raceId,
-              raceName: data.raceName,
-              raceDate: data.raceDate,
-              isGrandPrixRace: data.isGrandPrixRace,
-              courseVariant: data.courseVariant || '',
-              raceSeriesId: data.raceSeriesId,
-              raceVariantId: data.raceVariantId,
-              includedVariantIds: data.includedVariantIds,
-              knownVariants: data.includedVariantNames,
-            },
-            uploadBatchId: data.uploadBatchId,
-            parsedResults: data.parsedResults,
-            totalRows: data.totalRows,
-            validRows: data.validRows,
-            rowsWithIssues: data.rowsWithIssues,
-          },
-        },
-      });
+      const resume = await fetchResumeWizardData(batch.uploadBatchId);
+      navigate('/admin/results/upload', { state: { resume } });
     } catch (e) {
       setMessage({ type: 'error', text: `Resume failed: ${e.message}` });
     } finally {
@@ -528,7 +501,19 @@ export default function ResultsManagement() {
                       <TableCell className="text-muted-foreground">
                         {new Date(b.uploadedAt).toLocaleString()}
                       </TableCell>
-                      <TableCell><BatchStatusBadge status={b.status} error={b.extractionError} /></TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <BatchStatusBadge status={b.status} error={b.extractionError} />
+                          {statusLabel(b.status) === 'Pending' && b.reviewDraftSavedAt && (
+                            <span
+                              className="text-xs text-muted-foreground"
+                              title={`Review draft saved ${new Date(b.reviewDraftSavedAt).toLocaleString()}`}
+                            >
+                              Draft saved
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right whitespace-nowrap">
                         <div className="flex justify-end gap-1.5">
                           {statusLabel(b.status) === 'Pending' && (

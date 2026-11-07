@@ -655,6 +655,12 @@ namespace AmrGrandPrix.API.Migrations
                     b.Property<int>("RecordsUploaded")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ReviewDraftJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ReviewDraftSavedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 

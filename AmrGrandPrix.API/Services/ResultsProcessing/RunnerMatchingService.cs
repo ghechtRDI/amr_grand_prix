@@ -146,16 +146,8 @@ public class RunnerMatchingService : IRunnerMatchingService
                     row.Name, topMatch.RunnerId, topMatch.Confidence);
             }
 
-            // Add info if this is a new runner
-            if (row.RunnerMatches?.Count == 0)
-            {
-                row.ValidationIssues.Add(new ValidationIssue
-                {
-                    Field = "Runner",
-                    Severity = ValidationSeverity.Info,
-                    Message = "New runner - not found in database"
-                });
-            }
+            // No candidates isn't a validation issue: the row is simply saved as a new runner,
+            // which Data Review already shows via its "New runner" match status.
         }
 
         return resultRows;
