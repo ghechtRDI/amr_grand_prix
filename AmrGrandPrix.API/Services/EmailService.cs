@@ -73,4 +73,25 @@ public class EmailService : IEmailService
 
         await SendEmailAsync(toEmail, subject, body);
     }
+
+    public async Task SendPasswordResetAsync(string toEmail, string resetLink)
+    {
+        var subject = "Reset your password - Alaska Mountain Runners Grand Prix";
+        var body = $@"
+            <html>
+            <body>
+                <h2>Reset your password</h2>
+                <p>We received a request to reset the password for your Alaska Mountain Runners Grand Prix account.
+                   Click the link below to choose a new one:</p>
+                <p><a href='{resetLink}'>Reset Password</a></p>
+                <p>This link expires in 24 hours. If you did not request a password reset, you can ignore this email;
+                   your password won't change.</p>
+                <br/>
+                <p>Best regards,<br/>Alaska Mountain Runners Grand Prix Team</p>
+            </body>
+            </html>
+        ";
+
+        await SendEmailAsync(toEmail, subject, body);
+    }
 }

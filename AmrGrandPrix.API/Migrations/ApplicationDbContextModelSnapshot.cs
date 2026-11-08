@@ -358,7 +358,8 @@ namespace AmrGrandPrix.API.Migrations
 
                     b.HasIndex("UploadBatchId");
 
-                    b.HasIndex("RaceId", "RunnerId");
+                    b.HasIndex("RaceId", "RunnerId")
+                        .IsUnique();
 
                     b.ToTable("RaceResults");
                 });

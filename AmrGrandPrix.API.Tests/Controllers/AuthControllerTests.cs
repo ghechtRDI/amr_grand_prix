@@ -203,4 +203,61 @@ public class AuthControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         content.GetProperty("refreshToken").GetString().Should().NotBeNullOrEmpty()
             .And.NotBe(loginData.RefreshToken);
     }
+
+    private async Task<string> CreateConfirmedUserAsync(string prefix, string password)
+    {
+        var email = $"{prefix}{Guid.NewGuid()}@example.com";
+        using var scope = _factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        await userManager.CreateAsync(new ApplicationUser
+        {
+            UserName = email, Email = email, FirstName = "Test", LastName = "User",
+            EmailConfirmed = true, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+        }, password);
+        return email;
+    }
+
+    [Fact]
+    public async Task ForgotPassword_ThenResetWithEmailedLink_LetsUserLogInWithNewPassword()
+    {
+        var email = await CreateConfirmedUserAsync("reset+tag", "Old@12345");
+
+        var forgot = await _client.PostAsJsonAsync("/api/auth/forgot-password", new ForgotPasswordRequest { Email = email });
+        forgot.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Pull the link out of the email the way the SPA's /reset-password page reads it.
+        var body = _factory.FakeEmailService.SentEmails.Last(e => e.To == email).Body;
+        var link = new Uri(System.Text.RegularExpressions.Regex.Match(body, @"https?://\S+").Value);
+        link.AbsolutePath.Should().Be("/reset-password");
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(link.Query);
+        query["email"].ToString().Should().Be(email, "a '+' in the address must survive the query string");
+
+        var reset = await _client.PostAsJsonAsync("/api/auth/reset-password", new ResetPasswordRequest
+        {
+            Email = query["email"].ToString(),
+            Token = query["token"].ToString(),
+            NewPassword = "New@12345",
+            ConfirmPassword = "New@12345"
+        });
+        reset.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var oldLogin = await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest { Email = email, Password = "Old@12345" });
+        oldLogin.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        var newLogin = await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest { Email = email, Password = "New@12345" });
+        newLogin.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task ResetPassword_WithInvalidToken_ReturnsBadRequestWithReason()
+    {
+        var email = await CreateConfirmedUserAsync("badtoken", "Old@12345");
+
+        var reset = await _client.PostAsJsonAsync("/api/auth/reset-password", new ResetPasswordRequest
+        {
+            Email = email, Token = "not-a-real-token", NewPassword = "New@12345", ConfirmPassword = "New@12345"
+        });
+
+        reset.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await reset.Content.ReadAsStringAsync()).Should().Contain("Invalid token");
+    }
 }

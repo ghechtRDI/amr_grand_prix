@@ -658,6 +658,95 @@ public class ResultsControllerTests : IDisposable
                 Status = ResultStatus.Finished, IsCourseRecord = courseRecord };
 
     [Fact]
+    public async Task SaveResults_RunnerAlreadyInRace_IsSkippedAndPointsNotDoubled()
+    {
+        var (race, batch) = await SeedGrandPrixRaceWithPendingBatchAsync();
+        var first = await _controller.SaveResults(new SaveResultsRequest
+        {
+            UploadBatchId = batch.UploadBatchId,
+            RaceId = race.RaceId,
+            Results = [Row("Alice Fast", Gender.Female, 1, "0:21:00"), Row("Carol Slow", Gender.Female, 2, "0:25:00")]
+        });
+        first.Result.Should().BeOfType<OkObjectResult>();
+        var saved = await _context.RaceResults.Include(r => r.Runner).ToListAsync();
+        var aliceId = saved.Single(r => r.Runner.FirstName == "Alice").RunnerId;
+        var carolId = saved.Single(r => r.Runner.FirstName == "Carol").RunnerId;
+
+        // The same file uploaded again: both rows match the runners the first upload created,
+        // plus one genuinely new finisher.
+        var secondBatch = new UploadBatch
+        {
+            UploadBatchId = Guid.NewGuid(), RaceId = race.RaceId, FileName = "test.csv",
+            FileType = FileType.CSV, Status = UploadStatus.Pending
+        };
+        _context.UploadBatches.Add(secondBatch);
+        await _context.SaveChangesAsync();
+        var alice = Row("Alice Fast", Gender.Female, 1, "0:21:00");
+        alice.RowNumber = 1;
+        alice.MatchedRunnerId = aliceId;
+        var carol = Row("Carol Slow", Gender.Female, 2, "0:25:00");
+        carol.RowNumber = 2;
+        carol.MatchedRunnerId = carolId;
+        var dana = Row("Dana Late", Gender.Female, 3, "0:30:00");
+        dana.RowNumber = 3;
+
+        var result = await _controller.SaveResults(new SaveResultsRequest
+        {
+            UploadBatchId = secondBatch.UploadBatchId,
+            RaceId = race.RaceId,
+            Results = [alice, carol, dana]
+        });
+
+        var response = result.Result.Should().BeOfType<OkObjectResult>().Subject
+            .Value.Should().BeOfType<SaveResultsResponse>().Subject;
+        response.ResultsSaved.Should().Be(1);
+        response.SkippedResults.Select(s => (s.RowNumber, s.Name, s.Reason)).Should().BeEquivalentTo([
+            (1, "Alice Fast", "Runner already has a result in this race"),
+            (2, "Carol Slow", "Runner already has a result in this race"),
+        ]);
+
+        (await _context.RaceResults.CountAsync(r => r.RaceId == race.RaceId)).Should().Be(3);
+        (await _context.RaceResults.CountAsync(r => r.RunnerId == aliceId)).Should().Be(1);
+        var aliceOpen = await _context.GrandPrixPoints
+            .Where(p => p.RunnerId == aliceId && p.Division == Division.OpenFemale).ToListAsync();
+        aliceOpen.Should().ContainSingle().Which.Points.Should().Be(100);
+    }
+
+    [Fact]
+    public async Task SaveResults_SameRunnerTwiceInOneUpload_SkipsTheRepeat()
+    {
+        var (race, batch) = await SeedGrandPrixRaceWithPendingBatchAsync();
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(), FirstName = "Alice", LastName = "Fast", Gender = Gender.Female,
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+        };
+        _context.Runners.Add(runner);
+        await _context.SaveChangesAsync();
+        var first = Row("Alice Fast", Gender.Female, 1, "0:21:00");
+        first.RowNumber = 1;
+        first.MatchedRunnerId = runner.RunnerId;
+        var repeat = Row("A. Fast", Gender.Female, 4, "0:28:00");
+        repeat.RowNumber = 4;
+        repeat.MatchedRunnerId = runner.RunnerId;
+
+        var result = await _controller.SaveResults(new SaveResultsRequest
+        {
+            UploadBatchId = batch.UploadBatchId,
+            RaceId = race.RaceId,
+            Results = [first, repeat]
+        });
+
+        var response = result.Result.Should().BeOfType<OkObjectResult>().Subject
+            .Value.Should().BeOfType<SaveResultsResponse>().Subject;
+        response.ResultsSaved.Should().Be(1);
+        var skip = response.SkippedResults.Should().ContainSingle().Subject;
+        skip.RowNumber.Should().Be(4);
+        skip.Reason.Should().Be("Matched to the same runner as row 1 (Alice Fast)");
+        (await _context.RaceResults.SingleAsync(r => r.RunnerId == runner.RunnerId)).Place.Should().Be(1);
+    }
+
+    [Fact]
     public async Task SaveResults_CourseRecordOnGenderWinner_SavesFlagAndAwardsBonus()
     {
         var (race, batch) = await SeedGrandPrixRaceWithPendingBatchAsync();

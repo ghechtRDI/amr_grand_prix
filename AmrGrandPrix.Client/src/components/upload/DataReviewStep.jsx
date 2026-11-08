@@ -142,6 +142,11 @@ function CourseRecordCell({ row, table }) {
 // the old shape on load) if the row shape below changes incompatibly.
 const DRAFT_VERSION = 1;
 
+// The course-variant group (section) a row belongs to.
+function groupKeyOf(row) {
+  return (row.courseVariant || '').trim();
+}
+
 function selectedMatchOf(row) {
   return (row.runnerMatches || []).find(m => m.runnerId === row.matchedRunnerId) || null;
 }
@@ -157,10 +162,19 @@ function isMissingRequired(row) {
   return row.status === 'Finished' && (!row.place || !row.time);
 }
 
+// "Already in this race" summary for a saved result: "3rd place, 1:02:03" / "DNF".
+function describeExistingResult(result) {
+  if (result.status && result.status !== 'Finished') return result.status;
+  const time = typeof result.time === 'string' ? result.time.replace(/\.\d+$/, '') : null;
+  return [result.place ? `place ${result.place}` : null, time].filter(Boolean).join(', ') || 'Finished';
+}
+
 // True when a row still needs the admin's attention - what the "Issues only" view shows:
-// a validation warning, a missing required field, a likely misread time, an unconfirmed
-// partial runner match, or an unresolved age disagreement with the matched runner.
-function rowHasIssue(row) {
+// its matched runner already has a result in the target race (`existingResult`), a validation
+// warning, a missing required field, a likely misread time, an unconfirmed partial runner
+// match, or an unresolved age disagreement with the matched runner.
+function rowHasIssue(row, existingResult) {
+  if (existingResult) return true;
   if (row.validationIssues?.length > 0) return true;
   if (isMissingRequired(row)) return true;
   if (looksShifted(row.time)) return true;
@@ -383,7 +397,8 @@ function matchStatusTooltip(matchStatus, matches, selectedMatch) {
 // Dropdown for confirming/selecting which existing runner a row matches.
 // Always shows "+ New Runner" plus any suggested matches, sorted by confidence.
 function RunnerMatchCell({ row, table }) {
-  const { updateRunnerMatch, updateData } = table.options.meta;
+  const { updateRunnerMatch, updateData, alreadyInRace } = table.options.meta;
+  const existingResult = alreadyInRace.get(row.index);
   const matches = row.original.runnerMatches || [];
   const selected = row.original.matchedRunnerId || '';
   const matchStatus = row.original.matchStatus;
@@ -460,6 +475,15 @@ function RunnerMatchCell({ row, table }) {
           title="This runner has no age on file, so the uploaded age will be saved to their record"
         >
           No age on file &mdash; will be set to {uploadedAge}
+        </span>
+      )}
+      {existingResult && (
+        <span
+          className="flex items-start gap-1 text-xs font-medium text-destructive"
+          title="A runner can only have one result per race, so this row won't be saved. Remove it, or pick + New Runner if this is a different person."
+        >
+          <AlertTriangle className="mt-px size-3 shrink-0" />
+          Already in this race ({describeExistingResult(existingResult)})
         </span>
       )}
     </div>
@@ -782,6 +806,7 @@ function DataReviewHelpDialog({ open, onOpenChange }) {
             </p>
             <p>Row colors:</p>
             <ul className="flex flex-col gap-1">
+              <RowSwatch className="bg-destructive/25">Red: the matched runner already has a result in this race (e.g. the file was uploaded before). Remove the row, or pick <strong>+ New Runner</strong> if it&rsquo;s a different person</RowSwatch>
               <RowSwatch className="bg-amber-500/25">Amber: a validation warning (hover the warning icon in the Validation column for details)</RowSwatch>
               <RowSwatch className="bg-purple-500/25">Purple: possible runner matches to confirm</RowSwatch>
               <RowSwatch className="bg-sky-500/25">Blue: will be created as a new runner</RowSwatch>
@@ -1072,11 +1097,67 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
 
   const recordEligible = useMemo(() => courseRecordEligibleIndices(data), [data]);
 
+  const primaryRaceSelection = wizardData.raceSelection || {};
+
+  // Rows are grouped by detected course variant. Only a single detected group (no variant
+  // ambiguity) is automatically the Step 1 selection. When multiple variants are detected, none
+  // of them can be assumed to match Step 1's race - which variant is which isn't derivable from
+  // upload order (e.g. a junior race section can appear before the main race in the source
+  // file), so the admin must explicitly resolve every group below, including whichever one is
+  // actually the Step 1 race. A multi-variant upload has no Step 1 race, so it's resolved per
+  // group even if only one variant came back.
+  const groupKeys = [...new Set(data.map(groupKeyOf))];
+  const includedVariantNames = primaryRaceSelection.includedVariantIds?.length
+    ? primaryRaceSelection.knownVariants || []
+    : null;
+  const showGroups = groupKeys.length > 1 || !!includedVariantNames;
+  const primaryKey = showGroups ? null : (groupKeys[0] ?? '');
+
+  // The existing race a group's rows will be saved to (none yet for a pending race).
+  const targetRaceIdOf = (key) => (key === primaryKey ? primaryRaceSelection.raceId : groupRaces[key]?.raceId) || null;
+
+  // Results already saved in each target race, to catch a runner being added to a race twice
+  // (e.g. the same file uploaded again): raceId -> Map(runnerId -> result), or 'error'.
+  const [existingByRace, setExistingByRace] = useState({});
+  const targetRaceIdsKey = [...new Set(groupKeys.map(targetRaceIdOf).filter(Boolean))].sort().join(',');
+  useEffect(() => {
+    if (!targetRaceIdsKey) return;
+    let cancelled = false;
+    for (const raceId of targetRaceIdsKey.split(',')) {
+      raceService.getRaceResults(raceId)
+        .then(results => new Map(results.map(r => [r.runnerId, r])))
+        .catch(() => 'error')
+        .then(value => {
+          if (!cancelled) setExistingByRace(prev => (raceId in prev ? prev : { ...prev, [raceId]: value }));
+        });
+    }
+    return () => { cancelled = true; };
+  }, [targetRaceIdsKey]);
+
+  // Row index -> the saved result its matched runner already has in the row's target race.
+  const alreadyInRace = new Map();
+  data.forEach((row, i) => {
+    if (!row.matchedRunnerId) return;
+    const existing = existingByRace[targetRaceIdOf(groupKeyOf(row))];
+    const result = existing instanceof Map ? existing.get(row.matchedRunnerId) : null;
+    if (result) alreadyInRace.set(i, result);
+  });
+  const duplicateCheckFailed = targetRaceIdsKey.split(',').some(id => existingByRace[id] === 'error');
+
+  const [removeAlreadyInRaceOpen, setRemoveAlreadyInRaceOpen] = useState(false);
+  const [confirmAlreadyInRaceOpen, setConfirmAlreadyInRaceOpen] = useState(false);
+
+  const confirmRemoveAlreadyInRace = () => {
+    setData(old => old.filter((_, i) => !alreadyInRace.has(i)));
+    setEditingCell(null); // row indices shift - see confirmDeleteRow
+    setRemoveAlreadyInRaceOpen(false);
+  };
+
   const table = useReactTable({
     data,
     columns: COLUMNS,
     getCoreRowModel: getCoreRowModel(),
-    meta: { editingCell, setEditingCell, updateData, updateRunnerMatch, requestDeleteRow, recordEligible },
+    meta: { editingCell, setEditingCell, updateData, updateRunnerMatch, requestDeleteRow, recordEligible, alreadyInRace },
   });
 
   const stats = useMemo(() => ({
@@ -1088,8 +1169,9 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
   }), [data]);
 
   // Rows for one section, narrowed to the ones with issues when its toggle is on.
-  const visibleRows = (key, rows) => (issuesOnly[key] ? rows.filter(r => rowHasIssue(r.original)) : rows);
-  const issueCountOf = (rows) => rows.filter(r => rowHasIssue(r.original)).length;
+  const tableRowHasIssue = (r) => rowHasIssue(r.original, alreadyInRace.get(r.index));
+  const visibleRows = (key, rows) => (issuesOnly[key] ? rows.filter(tableRowHasIssue) : rows);
+  const issueCountOf = (rows) => rows.filter(tableRowHasIssue).length;
   const filterToggle = (key, rows) => (
     <IssueFilterToggle
       issuesOnly={!!issuesOnly[key]}
@@ -1099,30 +1181,10 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
     />
   );
 
-  const primaryRaceSelection = wizardData.raceSelection || {};
-
-  // Group rows by detected course variant.
-  const rowGroupsMap = new Map();
-  for (const row of table.getRowModel().rows) {
-    const key = (row.original.courseVariant || '').trim();
-    if (!rowGroupsMap.has(key)) rowGroupsMap.set(key, []);
-    rowGroupsMap.get(key).push(row);
-  }
+  // Table rows grouped by detected course variant (see groupKeys above).
+  const rowGroupsMap = new Map(groupKeys.map(key => [key, []]));
+  for (const row of table.getRowModel().rows) rowGroupsMap.get(groupKeyOf(row.original)).push(row);
   const rowGroups = Array.from(rowGroupsMap.entries());
-  const hasMultipleGroups = rowGroups.length > 1;
-  // Only a single detected group (no variant ambiguity) is automatically the Step 1
-  // selection. When multiple variants are detected, none of them can be assumed to
-  // match Step 1's race - which variant is which isn't derivable from upload order
-  // (e.g. a junior race section can appear before the main race in the source file),
-  // so the admin must explicitly resolve every group below, including whichever one
-  // is actually the Step 1 race.
-  // A multi-variant upload has no Step 1 race, so it's resolved per group even if only one
-  // variant came back.
-  const includedVariantNames = primaryRaceSelection.includedVariantIds?.length
-    ? primaryRaceSelection.knownVariants || []
-    : null;
-  const showGroups = hasMultipleGroups || !!includedVariantNames;
-  const primaryKey = showGroups ? null : (rowGroups[0]?.[0] ?? '');
 
   const tableHead = (
     <TableHeader>
@@ -1148,7 +1210,9 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
   const renderTableBody = (rows) => (
     <TableBody>
       {rows.map(row => {
-        const rowState = row.original.validationIssues?.length > 0
+        const rowState = alreadyInRace.has(row.index)
+          ? 'already-in-race'
+          : row.original.validationIssues?.length > 0
           ? 'warning'
           : row.original.matchStatus === 'needs-confirmation'
             ? 'needs-confirmation'
@@ -1160,6 +1224,7 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
             key={row.id}
             className={cn(
               row.index % 2 === 1 && !rowState && 'bg-muted/20',
+              rowState === 'already-in-race' && 'bg-destructive/10 hover:bg-destructive/15',
               rowState === 'warning' && 'bg-amber-500/10 hover:bg-amber-500/15',
               rowState === 'needs-confirmation' && 'bg-purple-500/10 hover:bg-purple-500/15',
               rowState === 'new-runner' && 'bg-sky-500/10 hover:bg-sky-500/15'
@@ -1224,6 +1289,15 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
       return;
     }
 
+    if (alreadyInRace.size > 0) {
+      setConfirmAlreadyInRaceOpen(true);
+      return;
+    }
+    continueToConfirmation();
+  };
+
+  const continueToConfirmation = () => {
+    setConfirmAlreadyInRaceOpen(false);
     // A row marked as a course record and then edited out of first place (or into another
     // variant) loses the mark - only a gender winner can hold one.
     const reviewedData = data.map((row, i) =>
@@ -1257,6 +1331,12 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total Results</div>
             <div className="text-xl font-semibold tabular-nums">{stats.totalResults}</div>
           </div>
+          {alreadyInRace.size > 0 && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-destructive">Already in Race</div>
+              <div className="text-xl font-semibold tabular-nums text-destructive">{alreadyInRace.size}</div>
+            </div>
+          )}
           {stats.warnings > 0 && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2">
               <div className="text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">Warnings</div>
@@ -1282,6 +1362,32 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
           Click any cell to edit. Press Enter to save, Escape to cancel.
           {stats.needsReview > 0 && ' Use the Runner Match column to confirm or reject suggested matches.'}
         </p>
+        {alreadyInRace.size > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2">
+            <AlertTriangle className="size-4 shrink-0 text-destructive" />
+            <span className="text-sm text-destructive">
+              {alreadyInRace.size === 1 ? '1 runner already has' : `${alreadyInRace.size} runners already have`} a
+              result in this race, so {alreadyInRace.size === 1 ? 'that row' : 'those rows'} won&rsquo;t be
+              saved. Was this file uploaded before?
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setRemoveAlreadyInRaceOpen(true)}
+              className="gap-1.5 border-destructive/40"
+            >
+              <Trash2 className="size-3.5" />
+              Remove {alreadyInRace.size === 1 ? 'Row' : `All ${alreadyInRace.size}`}
+            </Button>
+          </div>
+        )}
+        {duplicateCheckFailed && (
+          <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">
+            Couldn&rsquo;t load the race&rsquo;s saved results, so runners already in the race
+            can&rsquo;t be flagged. Check Results Management before saving.
+          </p>
+        )}
         {stats.shiftableTimes > 0 && (
           <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2">
             <span className="text-sm text-amber-700 dark:text-amber-400">
@@ -1380,6 +1486,42 @@ export default function DataReviewStep({ wizardData, onNext, onBack, onCancel })
       </div>
 
       <DataReviewHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+
+      <AlertDialog open={removeAlreadyInRaceOpen} onOpenChange={setRemoveAlreadyInRaceOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove rows already in the race?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove the {alreadyInRace.size} row{alreadyInRace.size === 1 ? '' : 's'} whose runner already
+              has a result in this race? They won&rsquo;t be saved, and the results already in the race
+              stay as they are. This can&rsquo;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmRemoveAlreadyInRace}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmAlreadyInRaceOpen} onOpenChange={setConfirmAlreadyInRaceOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Skip rows already in the race?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {alreadyInRace.size === 1 ? '1 runner already has' : `${alreadyInRace.size} runners already have`} a
+              result in this race. A runner can only have one result per race, so
+              {alreadyInRace.size === 1 ? ' that row' : ' those rows'} won&rsquo;t be saved; the results already
+              in the race stay as they are. If one is actually a different person, go back and pick
+              <strong> + New Runner</strong> for it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Go Back</AlertDialogCancel>
+            <AlertDialogAction onClick={continueToConfirmation}>Continue Without Them</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!sectionDeleteTarget} onOpenChange={(open) => !open && setSectionDeleteTarget(null)}>
         <AlertDialogContent>

@@ -139,7 +139,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasIndex(r => r.RaceId);
             entity.HasIndex(r => r.RunnerId);
             entity.HasIndex(r => r.UploadBatchId);
-            entity.HasIndex(r => new { r.RaceId, r.RunnerId });
+            // One result per runner per race (SaveResults skips repeats; this is the backstop)
+            entity.HasIndex(r => new { r.RaceId, r.RunnerId }).IsUnique();
 
             entity.Property(r => r.Gender).IsRequired();
             entity.Property(r => r.Status).IsRequired();

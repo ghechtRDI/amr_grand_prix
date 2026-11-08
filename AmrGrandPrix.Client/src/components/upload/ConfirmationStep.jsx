@@ -16,7 +16,9 @@ import { cn, formatDateOnly } from '@/lib/utils';
 // Row's courseVariant, normalized the same way DataReviewStep groups rows.
 const groupKeyFor = (row) => (row.courseVariant || '').trim();
 
-const toResultPayload = (row) => ({
+// rowNumber: the row's 1-based position in its section, used by the server to identify skipped rows.
+const toResultPayload = (row, index) => ({
+  rowNumber: index + 1,
   name: row.name,
   age: row.age ? parseInt(row.age) : null,
   ageCategory: row.age ? null : (row.ageCategory || null),
@@ -127,7 +129,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
           raceId,
           uploadBatchId: group.uploadBatchId,
           sourceUploadBatchId: group.sourceUploadBatchId,
-          results: group.rows.map(toResultPayload),
+          results: group.rows.map((row, i) => toResultPayload(row, i)),
         };
 
         const response = await fetch('/api/results/save', {
@@ -216,7 +218,7 @@ export default function ConfirmationStep({ wizardData, onBack, onCancel }) {
                         <strong>{result.skippedResults.length} result(s) were not saved:</strong>
                         <ul className="mt-1 list-disc pl-5 text-sm">
                           {result.skippedResults.map((row) => (
-                            <li key={row.rowNumber}>
+                            <li key={`${row.rowNumber}-${row.name}`}>
                               Row {row.rowNumber} — {row.name || '(no name)'}: {row.reason}
                             </li>
                           ))}
