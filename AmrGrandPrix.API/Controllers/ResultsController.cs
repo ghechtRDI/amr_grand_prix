@@ -10,6 +10,7 @@ using AmrGrandPrix.API.Models.DTOs.RaceResults;
 using AmrGrandPrix.API.Services.LlmExtraction;
 using AmrGrandPrix.API.Services.ResultsProcessing;
 using AmrGrandPrix.API.Services.GrandPrix;
+using Npgsql;
 
 namespace AmrGrandPrix.API.Controllers;
 
@@ -277,6 +278,7 @@ public class ResultsController : ControllerBase
     [ProducesResponseType(typeof(SaveResultsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<SaveResultsResponse>> SaveResults([FromBody] SaveResultsRequest request)
     {
         using var transaction = await _context.Database.BeginTransactionAsync();
@@ -339,8 +341,41 @@ public class ResultsController : ControllerBase
             var newRunners = 0;
             var skipped    = new List<SkippedResultDto>();
 
+            // A runner has at most one result per race. Rows whose runner already has one (e.g.
+            // the same file uploaded twice), or that repeat a runner earlier in this upload, are
+            // skipped - saving them would double the runner's place and Grand Prix points.
+            var runnersInRace = (await _context.RaceResults
+                    .Where(r => r.RaceId == request.RaceId)
+                    .Select(r => r.RunnerId)
+                    .ToListAsync())
+                .ToHashSet();
+            var runnersInUpload = new Dictionary<Guid, ResultRow>();
+
             foreach (var resultRow in request.Results)
             {
+                if (resultRow.MatchedRunnerId is { } matchedId)
+                {
+                    string? duplicateReason = null;
+                    if (runnersInRace.Contains(matchedId))
+                        duplicateReason = "Runner already has a result in this race";
+                    else if (runnersInUpload.TryGetValue(matchedId, out var earlierRow))
+                        duplicateReason = $"Matched to the same runner as row {earlierRow.RowNumber} ({earlierRow.Name})";
+
+                    if (duplicateReason != null)
+                    {
+                        _logger.LogWarning("Skipping duplicate result for runner {RunnerId} in race {RaceId}: {Reason}",
+                            matchedId, request.RaceId, duplicateReason);
+                        skipped.Add(new SkippedResultDto
+                        {
+                            RowNumber = resultRow.RowNumber,
+                            Name      = resultRow.Name,
+                            Reason    = duplicateReason
+                        });
+                        continue;
+                    }
+                }
+
+
                 if (!resultRow.Gender.HasValue)
                 {
                     _logger.LogWarning("Skipping result with missing gender: {Name}", resultRow.Name);
@@ -358,6 +393,7 @@ public class ResultsController : ControllerBase
                 if (resultRow.MatchedRunnerId.HasValue)
                 {
                     runnerId = resultRow.MatchedRunnerId.Value;
+                    runnersInUpload[runnerId] = resultRow;
 
                     // Record the uploaded age on the runner when the admin opted to correct the
                     // stored estimate (e.g. it came from a previous upload that only reported an
@@ -470,6 +506,14 @@ public class ResultsController : ControllerBase
                                    (race.IsGrandPrixRace ? " and calculated Grand Prix points" : "") +
                                    (skipped.Count > 0 ? $"; skipped {skipped.Count} result(s) — see details" : "")
             });
+        }
+        catch (DbUpdateException ex) when (IsDuplicateRaceResult(ex))
+        {
+            // Another save added one of these runners to the race after the check above ran.
+            await transaction.RollbackAsync();
+            _logger.LogWarning(ex, "Concurrent save added a runner to race {RaceId} twice", request.RaceId);
+            return Conflict("One of these runners was given a result in this race by another save at the same time. " +
+                            "Nothing was saved; reload the race's results and try again.");
         }
         catch (Exception ex)
         {
@@ -817,6 +861,14 @@ public class ResultsController : ControllerBase
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>The unique (RaceId, RunnerId) index on RaceResults rejected an insert.</summary>
+    private static bool IsDuplicateRaceResult(DbUpdateException ex) =>
+        ex.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: "IX_RaceResults_RaceId_RunnerId"
+        };
 
     private Task<UploadBatch?> LoadBatchWithSeriesAsync(Guid batchId) =>
         _context.UploadBatches

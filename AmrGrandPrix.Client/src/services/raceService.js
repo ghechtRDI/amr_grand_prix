@@ -58,3 +58,6 @@ export const yearOf = (isoDate) => Number((isoDate || '').slice(0, 4)) || new Da
 /** "Mount Marathon Race – Junior", or just the series name for single-course series. */
 export const raceLabel = (series, variant) =>
   series.variants.length > 1 && variant ? `${series.name} – ${variant.name}` : series.name;
+
+/** A race's saved results: [{ resultId, runnerId, runnerName, place, time, status, ... }]. */
+export const getRaceResults = (raceId) => request(`/api/results/race/${raceId}`);
