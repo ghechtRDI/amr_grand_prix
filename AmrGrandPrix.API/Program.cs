@@ -111,6 +111,18 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(10),
                 QueueLimit = 0
             }));
+
+    // Forgot-password sends an email to whatever address is entered - cap it so it can't be
+    // used to flood someone's inbox. Its own bucket, so it doesn't eat into registration's.
+    options.AddPolicy("PasswordResetRequest", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(15),
+                QueueLimit = 0
+            }));
 });
 
 // LLM extraction services

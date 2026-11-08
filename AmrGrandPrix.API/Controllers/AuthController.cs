@@ -313,6 +313,7 @@ public class AuthController : ControllerBase
     /// </summary>
     [HttpPost("forgot-password")]
     [AllowAnonymous]
+    [EnableRateLimiting("PasswordResetRequest")]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
     {
         if (!ModelState.IsValid)
@@ -325,15 +326,18 @@ public class AuthController : ControllerBase
             return Ok(new { message = "If the email exists, a password reset link has been sent." });
 
         var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+        var resetLink = PasswordResetLink(user.Email!, token);
 
-        // In a real app, this would be a frontend URL
-        var resetLink = $"{Request.Scheme}://{Request.Host}/reset-password?email={user.Email}&token={Uri.EscapeDataString(token)}";
-
-        await _emailService.SendEmailAsync(
-            user.Email!,
-            "Reset Your Password - Alaska Mountain Runners Grand Prix",
-            $"Click the following link to reset your password: {resetLink}\n\nIf you did not request this, please ignore this email."
-        );
+        try
+        {
+            await _emailService.SendPasswordResetAsync(user.Email!, resetLink);
+        }
+        catch (Exception ex)
+        {
+            // Same response either way, so a mail outage doesn't reveal which emails have accounts.
+            _logger.LogError(ex, "Failed to send password reset email to user {UserId}", user.Id);
+            return Ok(new { message = "If the email exists, a password reset link has been sent." });
+        }
 
         _logger.LogInformation("Password reset requested for user {UserId}", user.Id);
 
@@ -494,6 +498,11 @@ public class AuthController : ControllerBase
     /// Link to the SPA's /confirm-email page, which calls the confirm-email endpoint and
     /// then offers a login button (linking the API directly would show raw JSON)
     /// </summary>
+    // Built from the request's host: in dev the Vite proxy keeps the browser's Host (see
+    // vite.config.js), and in prod the API serves the SPA itself, so both open the SPA route.
+    private string PasswordResetLink(string email, string token) =>
+        $"{Request.Scheme}://{Request.Host}/reset-password?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
+
     private string EmailConfirmationLink(string userId, string token) =>
         $"{Request.Scheme}://{Request.Host}/confirm-email?userId={Uri.EscapeDataString(userId)}&token={Uri.EscapeDataString(token)}";
 }
