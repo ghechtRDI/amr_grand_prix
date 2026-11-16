@@ -8,6 +8,23 @@ resource "cloudflare_dns_record" "app" {
   comment = "AMR Grand Prix ${var.name} (Terraform)"
 }
 
+# Former hostnames. Cloudflare only applies Redirect Rules to proxied hostnames, so each
+# keeps a proxied record; the redirect itself (old host -> var.hostname, path and query
+# kept) is a Single Redirect rule in the dashboard, because managing the zone's redirect
+# ruleset here would take over the club's other redirect rules too. Requests never reach
+# the origin, which has no certificate for these names.
+resource "cloudflare_dns_record" "legacy" {
+  for_each = toset(var.legacy_hostnames)
+
+  zone_id = var.cloudflare_zone_id
+  name    = each.value
+  type    = "A"
+  content = vultr_instance.app.main_ip
+  proxied = true
+  ttl     = 1
+  comment = "AMR Grand Prix ${var.name} former hostname, redirected by a Cloudflare rule (Terraform)"
+}
+
 # Cloudflare origin certificate for the Cloudflare -> Caddy leg. Trusted only by
 # Cloudflare, so the hostname's SSL mode must be Full (strict) or Full.
 resource "tls_private_key" "origin" {

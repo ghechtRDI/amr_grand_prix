@@ -1,10 +1,10 @@
-# Deploy AMR Grand Prix to `grandprix.alaskamountainrunners.org`
+# Deploy AMR Grand Prix to `results.alaskamountainrunners.org`
 
 ## Context
 
 The app (React/Vite client + .NET 9 API + Postgres) has never been deployed — there's a `Dockerfile.production` and a `docker-compose.prod.yml` in the repo suggesting a prior deployment attempt, but they're stale and currently non-functional (details below). The goal now is a real, low-maintenance deployment for a low-traffic, highly-seasonal site (~10k monthly visits at peak, much less in winter) that:
 
-- Serves securely at `grandprix.alaskamountainrunners.org` (DNS already on Cloudflare)
+- Serves securely at `results.alaskamountainrunners.org` (DNS already on Cloudflare)
 - Is provisioned via Terraform and deployed via CI/CD (GitHub Actions — repo is `github.com/ghechtRDI/amr_grand_prix`)
 - Can have a sandbox environment stood up on demand and torn down when not needed (cost ≈ $0 when off)
 - Backs up the Postgres database offsite, independent of the primary host, since this becomes the system of record for race results
@@ -26,7 +26,7 @@ Verified by running `docker-compose.prod.yml` locally: the SPA, client-side rout
 4. **CORS** reads `Cors:AllowedOrigins` (policy renamed `AppPolicy`). Production is same-origin, so it only matters for the Vite dev/preview servers.
 5. **Secrets out of git.** `.env.production` removed; `.gitignore` ignores `.env`/`.env.*` except `.env.example` and `AmrGrandPrix.Client/.env`.
 6. **No HTTPS listener in the container** (port 5001 gone).
-7. **Email.** `FromEmail` is `noreply@grandprix.alaskamountainrunners.org`; the report recipient is `Email:ClubNotificationEmail`.
+7. **Email.** `FromEmail` is `noreply@results.alaskamountainrunners.org`; the report recipient is `Email:ClubNotificationEmail`.
 8. **`Dockerfile.production`.** `npm ci` includes devDependencies; `Dockerfile.production.dockerignore` keeps host `node_modules`/`bin`/`obj`, `.git`, `ResultsArchive`, and `.env*` out of the build; `curl` is installed for the HEALTHCHECK; and an EF Core **migrations bundle** (`efbundle`) is built into the image, since the runtime image has no SDK to run `dotnet ef database update`.
 
 Also added along the way:
@@ -60,7 +60,7 @@ Key resources (`vultr/vultr` provider):
 - `vultr_instance` — region `sea` (Seattle, the closest Vultr region to Alaska). Prod: Regular Cloud Compute `vc2-1c-2gb` (1 vCPU / 2GB / 55GB SSD, $10/mo) with Vultr automatic backups enabled (+20%, ~$2/mo) as a second line of defense behind B2. Sandbox: `vc2-1c-1gb` ($5/mo), no automatic backups. Cloud-init adds a 2GB swap file on both — .NET + Postgres + Caddy fit in 2GB for this traffic, but swap absorbs spikes (and the one-off migration container).
 - `vultr_firewall_group` + `vultr_firewall_rule` — 80/443 using the rule's built-in `source = "cloudflare"` option so only Cloudflare's edge can reach the origin (no hand-maintained IP list). SSH is closed apart from optional `ADMIN_SSH_CIDRS`; since GitHub's runners have no fixed IPs, each deploy adds a port-22 rule for its runner through the Vultr API and removes it when the job ends.
 - `vultr_block_storage` (prod only, 40GB HDD minimum, `prevent_destroy`) for the Postgres data directory, mounted at `/mnt/pgdata`. Block storage is offered in `sea` (checked against the Vultr API).
-- `cloudflare_dns_record` (proxied, orange-cloud) + `cloudflare_origin_ca_certificate` consumed by Caddy for the edge-to-origin leg. The sandbox is `grandprix-sandbox.alaskamountainrunners.org`, not `sandbox.grandprix…`: Cloudflare's free Universal SSL certificate only covers one subdomain level.
+- `cloudflare_dns_record` (proxied, orange-cloud) + `cloudflare_origin_ca_certificate` consumed by Caddy for the edge-to-origin leg. The sandbox is `results-sandbox.alaskamountainrunners.org`, not `sandbox.results…`: Cloudflare's free Universal SSL certificate only covers one subdomain level.
 - The instance ignores `user_data` changes, since cloud-init only runs on first boot; replace the server deliberately (`terraform apply -replace`) to pick up cloud-init changes.
 
 Terraform state: **Cloudflare R2** (S3-compatible backend) rather than Terraform Cloud — avoids a second auth surface since Cloudflare's already in play for DNS, effectively free for this state size.
@@ -91,10 +91,10 @@ The API sends mail over SMTP through `EmailService` (`System.Net.Mail.SmtpClient
 
 We don't run our own mail server: self-hosted mail from a fresh VPS IP lands in spam, and Vultr blocks outbound port 25 by default anyway. Instead the app relays through **Resend** (free tier: 3,000 emails/month, 100/day — far above our volume).
 
-- **Sending domain:** `grandprix.alaskamountainrunners.org` (from address `noreply@grandprix.alaskamountainrunners.org`, from name "Alaska Mountain Runners Grand Prix"). Using the subdomain keeps the app's sending reputation separate from the club's main domain and doesn't touch whatever mail setup `alaskamountainrunners.org` already has.
+- **Sending domain:** `results.alaskamountainrunners.org` (from address `noreply@results.alaskamountainrunners.org`, from name "Alaska Mountain Runners Grand Prix"). Using the subdomain keeps the app's sending reputation separate from the club's main domain and doesn't touch whatever mail setup `alaskamountainrunners.org` already has.
 - **One-time setup (manual, like the B2 bucket):** create the Resend account under a club-owned address, add the domain in Resend, and create one API key per environment (prod, sandbox) restricted to sending.
-- **DNS:** Resend's automatic Cloudflare setup adds its own records (DKIM, return path); they're set-once and Resend changes their format over time, so they aren't in Terraform (`email_dns_records` can still manage them if wanted). DMARC comes from the club's existing `_dmarc.alaskamountainrunners.org` record (`p=none`, reports to Brevo), which receivers fall back to for the subdomain; a separate subdomain record would split the policy, and reports to a Gmail address are mostly dropped because Gmail doesn't authorize external report destinations. `dmarc_rua` in prod tfvars can still create a `_dmarc.grandprix` record if the subdomain ever needs its own policy.
-- **App config (env vars from GitHub Secrets):** `Email__SmtpHost=smtp.resend.com`, `Email__SmtpPort=587`, `Email__EnableSsl=true`, `Email__SmtpUsername=resend`, `Email__SmtpPassword=<Resend API key>`, `Email__FromEmail=noreply@grandprix.alaskamountainrunners.org`. Port **587 (STARTTLS)** is required: `System.Net.Mail.SmtpClient` doesn't support implicit TLS, so port 465 won't work.
+- **DNS:** Resend's automatic Cloudflare setup adds its own records (DKIM, return path); they're set-once and Resend changes their format over time, so they aren't in Terraform (`email_dns_records` can still manage them if wanted). DMARC comes from the club's existing `_dmarc.alaskamountainrunners.org` record (`p=none`, reports to Brevo), which receivers fall back to for the subdomain; a separate subdomain record would split the policy, and reports to a Gmail address are mostly dropped because Gmail doesn't authorize external report destinations. `dmarc_rua` in prod tfvars can still create a `_dmarc.results` record if the subdomain ever needs its own policy.
+- **App config (env vars from GitHub Secrets):** `Email__SmtpHost=smtp.resend.com`, `Email__SmtpPort=587`, `Email__EnableSsl=true`, `Email__SmtpUsername=resend`, `Email__SmtpPassword=<Resend API key>`, `Email__FromEmail=noreply@results.alaskamountainrunners.org`. Port **587 (STARTTLS)** is required: `System.Net.Mail.SmtpClient` doesn't support implicit TLS, so port 465 won't work.
 - **Sandbox:** uses its own Resend API key, the same verified domain, and `Email__ClubNotificationEmail` pointed at a developer address so test reports never reach the club inbox.
 - MailHog stays dev-only — it is not part of `docker-compose.prod.yml`.
 
@@ -125,7 +125,7 @@ Hetzner Cloud was the original choice (~$7/month), but its cheap CX line is only
 1. `dotnet build` / `dotnet test` and `npm run lint` / `npm run build` still pass after the Program.cs / compose / email-config fixes.
 2. Locally: `docker compose -f docker-compose.prod.yml up --build`, confirm the SPA loads at `http://localhost` (not just the API), `/health` returns 200, and login/JWT flow works against the local Postgres container.
 3. Infrastructure workflow, `sandbox` / `plan` — review the plan before ever applying against real Vultr/Cloudflare accounts.
-4. After first real `terraform apply` (sandbox first, not prod): confirm `grandprix-sandbox.alaskamountainrunners.org` resolves through Cloudflare, TLS is valid (Cloudflare Full/Strict mode via the origin cert), the origin refuses direct (non-Cloudflare) connections on 80/443, and `sandbox-up.yml` succeeds end-to-end (build → migrate → deploy → smoke test).
+4. After first real `terraform apply` (sandbox first, not prod): confirm `results-sandbox.alaskamountainrunners.org` resolves through Cloudflare, TLS is valid (Cloudflare Full/Strict mode via the origin cert), the origin refuses direct (non-Cloudflare) connections on 80/443, and `sandbox-up.yml` succeeds end-to-end (build → migrate → deploy → smoke test).
 5. Email (after Resend's DNS setup): Resend shows the domain as verified; registering a new account on the sandbox delivers a confirmation email to a Gmail inbox (not spam), and "Show original" in Gmail reports SPF, DKIM, and DMARC all `PASS`. Submit a result report on the sandbox and confirm it reaches the developer notification address, not the club inbox.
 6. Manually trigger the backup script once on prod (`systemctl start amrgp-backup`), confirm the encrypted dump lands in the B2 bucket and can be decrypted/restored to a scratch Postgres instance.
 7. Only then open production to users. The step-by-step order is in [DOCS/DEPLOYMENT_SETUP.md](DOCS/DEPLOYMENT_SETUP.md).

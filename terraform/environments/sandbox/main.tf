@@ -1,7 +1,7 @@
-# Sandbox: grandprix-sandbox.alaskamountainrunners.org, created and destroyed on demand
+# Sandbox: results-sandbox.alaskamountainrunners.org, created and destroyed on demand
 # (sandbox-up.yml / sandbox-down.yml). No backups or block storage: its data is disposable.
 # A first-level subdomain on purpose: Cloudflare's free Universal SSL certificate only
-# covers *.alaskamountainrunners.org, not sandbox.grandprix.alaskamountainrunners.org.
+# covers *.alaskamountainrunners.org, not sandbox.results.alaskamountainrunners.org.
 # Provider credentials come from the environment: VULTR_API_KEY, CLOUDFLARE_API_TOKEN.
 terraform {
   required_version = ">= 1.10"

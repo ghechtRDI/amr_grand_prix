@@ -2,6 +2,11 @@ variable "hostname" {
   type = string
 }
 
+variable "legacy_hostnames" {
+  type    = list(string)
+  default = []
+}
+
 variable "cloudflare_zone_id" {
   type = string
 }
