@@ -40,8 +40,8 @@ You also need your own SSH public key (`~/.ssh/id_ed25519.pub`) for admin access
    - Zone → Zone → Read
 
    If your existing token lacks one, edit it or create a new one (My Profile → API Tokens).
-3. **SSL mode:** SSL/TLS → Overview. If it's **Full** or **Full (strict)**, nothing to do. If it's **Flexible**, don't change the zone-wide setting (it would affect the club's WordPress site). Instead add Rules → Configuration Rules → a rule matching hostname `grandprix.alaskamountainrunners.org` or `grandprix-sandbox.alaskamountainrunners.org` that sets SSL to **Full (strict)**. Under Flexible, Cloudflare would talk to the server over plain HTTP and loop on Caddy's HTTPS redirect.
-4. **Existing records:** DNS → Records: confirm nothing already exists named `grandprix` or `grandprix-sandbox` (Terraform would fail to create them).
+3. **SSL mode:** SSL/TLS → Overview. If it's **Full** or **Full (strict)**, nothing to do. If it's **Flexible**, don't change the zone-wide setting (it would affect the club's WordPress site). Instead add Rules → Configuration Rules → a rule matching hostname `results.alaskamountainrunners.org` or `results-sandbox.alaskamountainrunners.org` that sets SSL to **Full (strict)**. Under Flexible, Cloudflare would talk to the server over plain HTTP and loop on Caddy's HTTPS redirect.
+4. **Existing records:** DNS → Records: confirm nothing already exists named `results` or `results-sandbox` (Terraform would fail to create them).
 5. **R2 (Terraform state):** R2 → enable it (free tier) → create bucket `amrgp-terraform-state`. Then R2 → Manage API tokens → create a token with **Object Read & Write** on that bucket only. Note the **Access Key ID**, **Secret Access Key**, and your **Account ID** (shown on the R2 overview page).
 6. **Turnstile:** Turnstile → the widget whose site key is in `AmrGrandPrix.Client/.env` → add both hostnames above to its hostname list. Note the widget's **Secret Key**.
 
@@ -69,7 +69,7 @@ You also need your own SSH public key (`~/.ssh/id_ed25519.pub`) for admin access
 ## 5. Resend
 
 1. Create an account.
-2. Domains → Add Domain → `grandprix.alaskamountainrunners.org` (region us-east-1 is fine).
+2. Domains → Add Domain → `results.alaskamountainrunners.org` (region us-east-1 is fine).
 3. Leave **Receiving** off (the app only sends). Use Resend's automatic DNS setup for Cloudflare to add the domain's records, then click Verify.
    - **Skip any DMARC record it offers.** Grand Prix mail is covered by the club's existing `_dmarc.alaskamountainrunners.org` record (receivers fall back to it when the subdomain has none), and its reports go to Brevo with the rest of the club's mail.
    - These records aren't in Terraform (`email_dns_records = []`), so destroying or recreating the server doesn't touch them. If the club's DNS is ever rebuilt, rerun this setup.
@@ -102,8 +102,8 @@ Create the environments (Settings → Environments → New environment):
 
 | Environment | Protection | Variables | Secrets |
 |---|---|---|---|
-| `sandbox` | none | `SITE_HOST=grandprix-sandbox.alaskamountainrunners.org`, `CLUB_NOTIFICATION_EMAIL=<your address>` | `SSH_PRIVATE_KEY` (amrgp-deploy-sandbox), `POSTGRES_PASSWORD`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `TURNSTILE_SECRET_KEY`, `RESEND_API_KEY` (sandbox key) |
-| `production` | none | `SITE_HOST=grandprix.alaskamountainrunners.org`, `CLUB_NOTIFICATION_EMAIL=akmtnrunners@gmail.com`, `POSTGRES_DATA=/mnt/pgdata/data`, and after step 10: `SERVER_IP`, `FIREWALL_GROUP_ID` | same names, prod values (amrgp-deploy-prod key, prod Resend key) |
+| `sandbox` | none | `SITE_HOST=results-sandbox.alaskamountainrunners.org`, `CLUB_NOTIFICATION_EMAIL=<your address>` | `SSH_PRIVATE_KEY` (amrgp-deploy-sandbox), `POSTGRES_PASSWORD`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `TURNSTILE_SECRET_KEY`, `RESEND_API_KEY` (sandbox key) |
+| `production` | none | `SITE_HOST=results.alaskamountainrunners.org`, `CLUB_NOTIFICATION_EMAIL=akmtnrunners@gmail.com`, `POSTGRES_DATA=/mnt/pgdata/data`, and after step 10: `SERVER_IP`, `FIREWALL_GROUP_ID` | same names, prod values (amrgp-deploy-prod key, prod Resend key) |
 | `sandbox-infra` | none | | |
 | `prod-infra` | **Required reviewers: you** | | |
 
@@ -117,7 +117,7 @@ Environment secrets with `gh`: `gh secret set SSH_PRIVATE_KEY --env sandbox < am
 
 1. Actions → **Sandbox up** → Run workflow (pick the branch to deploy). It creates the server, builds the image, and deploys. The first run takes ~10 minutes, mostly cloud-init installing Docker.
 2. Check, per [DEPLOYMENT_PLAN.md § Verification](../DEPLOYMENT_PLAN.md#verification):
-   - `https://grandprix-sandbox.alaskamountainrunners.org` loads with a valid certificate, including a deep link such as `/standings`
+   - `https://results-sandbox.alaskamountainrunners.org` loads with a valid certificate, including a deep link such as `/standings`
    - The origin refuses direct connections: `curl -m 5 http://<server ip>` times out
    - Registering sends a confirmation email that lands in a Gmail inbox (not spam); "Show original" shows SPF, DKIM, and DMARC `PASS`
    - A result report reaches `CLUB_NOTIFICATION_EMAIL`, not the club inbox
@@ -140,7 +140,7 @@ Environment secrets with `gh`: `gh secret set SSH_PRIVATE_KEY --env sandbox < am
    ```
 
 4. `gh variable set PROD_DEPLOY_ENABLED --body true`, then Actions → **Deploy app** → Run workflow. From now on every push to `main` that touches the app deploys automatically.
-5. Check DMARC: `dig +short TXT _dmarc.alaskamountainrunners.org` returns exactly one `v=DMARC1` record, and `dig +short TXT _dmarc.grandprix.alaskamountainrunners.org` returns nothing.
+5. Check DMARC: `dig +short TXT _dmarc.alaskamountainrunners.org` returns exactly one `v=DMARC1` record, and `dig +short TXT _dmarc.results.alaskamountainrunners.org` returns nothing.
 6. Optional: replace the empty production database with your local one (see [Copy the local database](#copy-the-local-database)). Do it now, before anyone registers, because the restore replaces every table.
 7. Make yourself an admin (below). Skip this if you restored a local database where your account is already an Admin.
 
@@ -211,6 +211,40 @@ systemctl start amrgp-backup    # take a backup of the restored data right away
 ```
 
 Your local user accounts come along with their passwords and roles, so you can log in with your dev credentials. Delete any test accounts from the app's user management page. Delete `amrgp-local.dump` from your machine too: it contains password hashes and runners' personal details.
+
+## Changing the hostname
+
+How the site moved from `grandprix.` to `results.alaskamountainrunners.org`; the same steps apply to any future rename. The old hostname keeps working as a redirect.
+
+**Before merging the rename:**
+
+1. **Resend:** Domains → Add Domain → the new sending domain, automatic Cloudflare DNS setup (skip DMARC, as in [step 5](#5-resend)), then Verify. The API keys are restricted to the old domain, so create new **Sending access** keys restricted to the new one (`amrgp-prod`, `amrgp-sandbox`) and update `RESEND_API_KEY` in both GitHub environments. Revoke the old keys after the move. Merging deploys the new `Email:FromEmail`, and Resend rejects mail from an unverified domain.
+2. **Turnstile:** add the new hostnames to the widget's hostname list. Keep the old ones until the move is done.
+3. **SSL rule:** if the zone is on Flexible and you added a Configuration Rule for the Grand Prix hostnames ([step 2](#2-cloudflare)), add the new hostnames to it.
+4. **DNS:** confirm no record already exists for the new names.
+
+**Cutover** (the site is unreachable for a few minutes between steps 6 and 8):
+
+5. Merge. The app redeploys with the new from address while still on the old hostname.
+6. Actions → **Infrastructure** → `prod` → `apply`. Check the plan: it creates the new DNS record and replaces the origin certificate, and the old record only moves to `legacy` (no destroy). The server itself isn't touched (`user_data` is ignored).
+7. Copy the new origin certificate to the server, because cloud-init installed the old one only at first boot. Use the local Terraform setup from [step 10](#10-production), plus SSH access (`ADMIN_SSH_CIDRS` or a temporary port-22 rule):
+
+   ```bash
+   cd terraform/environments/prod   # with the AWS_* R2 variables exported, after terraform init
+   terraform output -raw origin_certificate | ssh root@<server ip> 'cat > /opt/amrgp/certs/origin.pem'
+   terraform output -raw origin_private_key | ssh root@<server ip> 'umask 077; cat > /opt/amrgp/certs/origin.key'
+   ```
+
+8. `gh variable set SITE_HOST --env production --body <new hostname>`, then Actions → **Deploy app** → Run workflow. That points Caddy at the new name, restarts it with the new certificate, and smoke-tests `https://<new hostname>/health`.
+
+**After:**
+
+9. **Redirect:** Rules → Redirect Rules → Create (Single Redirect). Match: hostname equals the old hostname. Action: dynamic, expression `concat("https://<new hostname>", http.request.uri.path)`, status 301, **Preserve query string** on (confirmation and reset links carry their tokens in the query string).
+10. Check it: the new hostname loads with a valid certificate; `https://<old hostname>/standings?year=2026` redirects to the same path and query on the new one; a password reset email arrives from the new address with SPF/DKIM/DMARC `PASS` and a link to the new hostname.
+11. Everyone is signed out once: login tokens are stored per site, so they don't carry over to the new hostname.
+12. Later, once Resend's dashboard shows no more mail from it, remove the old sending domain from Resend and delete its DNS records (`resend._domainkey.<old>`, `send.<old>`). Remove the old hostnames from Turnstile.
+
+The sandbox has no legacy hostname. Run **Sandbox down** before applying a rename to it, and set its `SITE_HOST` before the next **Sandbox up**.
 
 ## First admin
 

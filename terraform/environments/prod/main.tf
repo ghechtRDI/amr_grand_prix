@@ -1,4 +1,4 @@
-# Production: grandprix.alaskamountainrunners.org
+# Production: results.alaskamountainrunners.org (formerly grandprix.alaskamountainrunners.org)
 # Provider credentials come from the environment: VULTR_API_KEY, CLOUDFLARE_API_TOKEN,
 # B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY.
 terraform {
@@ -40,6 +40,7 @@ module "app" {
 
   name               = "prod"
   hostname           = var.hostname
+  legacy_hostnames   = var.legacy_hostnames
   cloudflare_zone_id = var.cloudflare_zone_id
   plan               = "vc2-1c-2gb" # 1 vCPU / 2GB / 55GB, $10/mo
   automatic_backups  = true         # +$2/mo; second line of defense behind B2
@@ -60,6 +61,14 @@ module "app" {
   dmarc_rua         = var.dmarc_rua
 }
 
+# The site moved from grandprix. to results.: keep the existing grandprix DNS record (now a
+# redirect-only hostname) instead of renaming it, so old links never lose DNS, and create
+# a new record for results.
+moved {
+  from = module.app.cloudflare_dns_record.app
+  to   = module.app.cloudflare_dns_record.legacy["grandprix.alaskamountainrunners.org"]
+}
+
 output "server_ipv4" {
   value = module.app.server_ipv4
 }
@@ -74,5 +83,15 @@ output "backup_monitor_key_id" {
 
 output "backup_monitor_key" {
   value     = module.backup.monitor_key
+  sensitive = true
+}
+
+output "origin_certificate" {
+  value     = module.app.origin_certificate
+  sensitive = true
+}
+
+output "origin_private_key" {
+  value     = module.app.origin_private_key
   sensitive = true
 }

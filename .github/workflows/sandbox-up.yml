@@ -1,5 +1,5 @@
 # Create the sandbox server (~$5/month while it exists) and deploy the selected branch to
-# https://grandprix-sandbox.alaskamountainrunners.org. Starts with an empty database.
+# https://results-sandbox.alaskamountainrunners.org. Starts with an empty database.
 # Run sandbox-down.yml when finished: Vultr bills stopped instances, so only destroying
 # the server stops the charges.
 name: Sandbox up
