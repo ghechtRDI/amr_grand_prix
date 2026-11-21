@@ -63,7 +63,7 @@ module "app" {
 
 # The site moved from grandprix. to results.: keep the existing grandprix DNS record (now a
 # redirect-only hostname) instead of renaming it, so old links never lose DNS, and create
-# a new record for results.
+# a new record for results (module.app.cloudflare_dns_record.site).
 moved {
   from = module.app.cloudflare_dns_record.app
   to   = module.app.cloudflare_dns_record.legacy["grandprix.alaskamountainrunners.org"]

@@ -1,4 +1,6 @@
-resource "cloudflare_dns_record" "app" {
+# Named "site" rather than "app" so a hostname change can move the old record to "legacy"
+# (a moved block can't leave its source address still declared).
+resource "cloudflare_dns_record" "site" {
   zone_id = var.cloudflare_zone_id
   name    = var.hostname
   type    = "A"
