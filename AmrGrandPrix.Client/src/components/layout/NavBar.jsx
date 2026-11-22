@@ -111,6 +111,10 @@ export default function NavBar() {
             Race Results
           </NavLink>
 
+          <NavLink to="/athletes" className={navLinkClass}>
+            Athletes
+          </NavLink>
+
           {isAdminOrManager && (
             <DropdownMenu>
               <DropdownMenuTrigger className={dropdownTriggerClass(isAdminSectionActive)}>
@@ -178,6 +182,10 @@ export default function NavBar() {
 
           <NavLink to="/race-results" className={navLinkClass}>
             Race Results
+          </NavLink>
+
+          <NavLink to="/athletes" className={navLinkClass}>
+            Athletes
           </NavLink>
 
           {isAdminOrManager && (

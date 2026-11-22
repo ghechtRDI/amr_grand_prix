@@ -31,42 +31,6 @@ public class StandingsController : ControllerBase
     }
 
     /// <summary>
-    /// Get all standings for a specific year
-    /// </summary>
-    [HttpGet("{year}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(List<StandingDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<StandingDto>>> GetStandingsByYear(int year)
-    {
-        var standings = await _context.GrandPrixStandings
-            .Include(s => s.Runner)
-            .Where(s => s.Year == year)
-            .OrderByDescending(s => s.TotalPoints)
-            .ThenByDescending(s => s.BestRacePoints)
-            .ThenByDescending(s => s.SecondBestRacePoints)
-            .Select(s => new StandingDto
-            {
-                StandingId = s.StandingId,
-                RunnerId = s.RunnerId,
-                RunnerName = $"{s.Runner.FirstName} {s.Runner.LastName}",
-                Year = s.Year,
-                Division = s.Division,
-                AgeCategory = s.AgeCategory,
-                TotalPoints = s.TotalPoints,
-                RacesCompleted = s.RacesCompleted,
-                RacesCounted = s.RacesCounted,
-                BestRacePoints = s.BestRacePoints,
-                SecondBestRacePoints = s.SecondBestRacePoints,
-                RunTheGamutQualified = s.RunTheGamutQualified,
-                Rank = s.Rank,
-                LastUpdated = s.LastUpdated
-            })
-            .ToListAsync();
-
-        return Ok(standings);
-    }
-
-    /// <summary>
     /// Get standings for a specific division (Open Male or Open Female)
     /// </summary>
     [HttpGet("{year}/open/{gender}")]
@@ -111,8 +75,7 @@ public class StandingsController : ControllerBase
                     RunnerId = s.Runner.RunnerId,
                     FirstName = s.Runner.FirstName,
                     LastName = s.Runner.LastName,
-                    Gender = s.Runner.Gender,
-                    DateOfBirth = s.Runner.DateOfBirth
+                    Gender = s.Runner.Gender
                 },
                 PointsBreakdown = new List<GrandPrixPointsDto>()
             })
@@ -201,8 +164,7 @@ public class StandingsController : ControllerBase
                     RunnerId = s.Runner.RunnerId,
                     FirstName = s.Runner.FirstName,
                     LastName = s.Runner.LastName,
-                    Gender = s.Runner.Gender,
-                    DateOfBirth = s.Runner.DateOfBirth
+                    Gender = s.Runner.Gender
                 },
                 PointsBreakdown = new List<GrandPrixPointsDto>()
             })
@@ -413,48 +375,6 @@ public class StandingsController : ControllerBase
     };
 
     /// <summary>
-    /// Get all Grand Prix history for a specific runner
-    /// </summary>
-    [HttpGet("runner/{runnerId}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(List<StandingDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<List<StandingDto>>> GetRunnerHistory(Guid runnerId)
-    {
-        var runner = await _context.Runners.FindAsync(runnerId);
-        if (runner == null)
-        {
-            return NotFound($"Runner with ID {runnerId} not found");
-        }
-
-        var standings = await _context.GrandPrixStandings
-            .Include(s => s.Runner)
-            .Where(s => s.RunnerId == runnerId)
-            .OrderByDescending(s => s.Year)
-            .ThenBy(s => s.Division)
-            .Select(s => new StandingDto
-            {
-                StandingId = s.StandingId,
-                RunnerId = s.RunnerId,
-                RunnerName = $"{s.Runner.FirstName} {s.Runner.LastName}",
-                Year = s.Year,
-                Division = s.Division,
-                AgeCategory = s.AgeCategory,
-                TotalPoints = s.TotalPoints,
-                RacesCompleted = s.RacesCompleted,
-                RacesCounted = s.RacesCounted,
-                BestRacePoints = s.BestRacePoints,
-                SecondBestRacePoints = s.SecondBestRacePoints,
-                RunTheGamutQualified = s.RunTheGamutQualified,
-                Rank = s.Rank,
-                LastUpdated = s.LastUpdated
-            })
-            .ToListAsync();
-
-        return Ok(standings);
-    }
-
-    /// <summary>
     /// Manually recalculate standings for a specific year. Not allowed once the year is finalized.
     /// </summary>
     [HttpPost("{year}/recalculate")]
@@ -604,23 +524,5 @@ public class StandingsController : ControllerBase
             .ToListAsync();
 
         return Ok(years);
-    }
-
-    /// <summary>
-    /// Get all age categories for a specific year
-    /// </summary>
-    [HttpGet("{year}/categories")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<string>>> GetAgeCategories(int year)
-    {
-        var categories = await _context.GrandPrixStandings
-            .Where(s => s.Year == year && s.AgeCategory != null)
-            .Select(s => s.AgeCategory!)
-            .Distinct()
-            .OrderBy(c => c)
-            .ToListAsync();
-
-        return Ok(categories);
     }
 }

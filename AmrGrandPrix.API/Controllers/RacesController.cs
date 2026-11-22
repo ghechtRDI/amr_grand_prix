@@ -46,40 +46,6 @@ public class RacesController : ControllerBase
     }
 
     /// <summary>
-    /// Get races for a specific year
-    /// </summary>
-    [HttpGet("{year}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(List<RaceDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<RaceDto>>> GetRacesByYear(int year)
-    {
-        var races = await _context.Races
-            .Where(r => r.Year == year)
-            .OrderBy(r => r.Date)
-            .Select(RaceProjections.ToDto)
-            .ToListAsync();
-
-        return Ok(races);
-    }
-
-    /// <summary>
-    /// Get Grand Prix races for a specific year
-    /// </summary>
-    [HttpGet("grandprix/{year}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(List<RaceDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<RaceDto>>> GetGrandPrixRacesByYear(int year)
-    {
-        var races = await _context.Races
-            .Where(r => r.Year == year && r.IsGrandPrixRace)
-            .OrderBy(r => r.Date)
-            .Select(RaceProjections.ToDto)
-            .ToListAsync();
-
-        return Ok(races);
-    }
-
-    /// <summary>
     /// Get a specific race by ID
     /// </summary>
     [HttpGet("detail/{id}")]

@@ -36,228 +36,6 @@ public class RunnersController : ControllerBase
     }
 
     /// <summary>
-    /// Search and list runners
-    /// </summary>
-    [HttpGet]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(List<RunnerDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<RunnerDto>>> GetRunners(
-        [FromQuery] string? search = null,
-        [FromQuery] int? limit = 100,
-        [FromQuery] int? offset = 0)
-    {
-        var query = _context.Runners.AsQueryable();
-
-        // Apply search filter
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var searchLower = search.ToLowerInvariant();
-            // Translated to SQL lower(...) LIKE; the culture/StringComparison overloads the
-            // analyzers suggest can't be translated by EF.
-#pragma warning disable CA1304, CA1311, CA1862
-            query = query.Where(r =>
-                r.FirstName.ToLower().Contains(searchLower) ||
-                r.LastName.ToLower().Contains(searchLower));
-#pragma warning restore CA1304, CA1311, CA1862
-        }
-
-        // Apply pagination
-        query = query.OrderBy(r => r.LastName).ThenBy(r => r.FirstName);
-
-        if (offset.HasValue && offset.Value > 0)
-        {
-            query = query.Skip(offset.Value);
-        }
-
-        if (limit.HasValue && limit.Value > 0)
-        {
-            query = query.Take(limit.Value);
-        }
-
-        var runners = await query
-            .Select(r => new RunnerDto
-            {
-                RunnerId = r.RunnerId,
-                FirstName = r.FirstName,
-                LastName = r.LastName,
-                Gender = r.Gender,
-                DateOfBirth = r.DateOfBirth
-            })
-            .ToListAsync();
-
-        return Ok(runners);
-    }
-
-    /// <summary>
-    /// Get a specific runner by ID
-    /// </summary>
-    [HttpGet("{id}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(RunnerDetailDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<RunnerDetailDto>> GetRunner(Guid id)
-    {
-        var runner = await _context.Runners
-            .Include(r => r.Results)
-                .ThenInclude(rr => rr.Race)
-                .ThenInclude(r => r.RaceVariant).ThenInclude(v => v.RaceSeries).ThenInclude(s => s.Variants)
-            .Include(r => r.GrandPrixStandings)
-            .FirstOrDefaultAsync(r => r.RunnerId == id);
-
-        if (runner == null)
-        {
-            return NotFound($"Runner with ID {id} not found");
-        }
-
-        var runnerDto = new RunnerDetailDto
-        {
-            RunnerId = runner.RunnerId,
-            FirstName = runner.FirstName,
-            LastName = runner.LastName,
-            Gender = runner.Gender,
-            DateOfBirth = runner.DateOfBirth,
-            TotalRaces = runner.Results.Count,
-            GrandPrixYears = runner.GrandPrixStandings
-                .Select(s => s.Year)
-                .Distinct()
-                .OrderByDescending(y => y)
-                .ToList(),
-            RecentResults = runner.Results
-                .OrderByDescending(rr => rr.Race.Date)
-                .Take(10)
-                .Select(rr => new RaceResultDto
-                {
-                    ResultId = rr.ResultId,
-                    RaceId = rr.RaceId,
-                    RaceName = RaceProjections.DisplayName(rr.Race),
-                    RaceDate = rr.Race.Date,
-                    Place = rr.Place,
-                    PlaceGender = rr.PlaceGender,
-                    Time = rr.Time,
-                    Age = rr.Age,
-                    Gender = rr.Gender,
-                    Status = rr.Status
-                })
-                .ToList()
-        };
-
-        return Ok(runnerDto);
-    }
-
-    /// <summary>
-    /// Check for potential duplicate runners before creating
-    /// </summary>
-    [HttpPost("check-duplicates")]
-    [Authorize(Roles = "Admin,Manager")]
-    [ProducesResponseType(typeof(CheckDuplicatesResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult<CheckDuplicatesResponse>> CheckDuplicates([FromBody] CheckDuplicatesRequest request)
-    {
-        var fullName = $"{request.FirstName} {request.LastName}";
-
-        // Calculate age if date of birth provided
-        int? age = request.DateOfBirth.HasValue
-            ? AgeCalculator.CalculateAge(request.DateOfBirth.Value, DateOnly.FromDateTime(DateTime.Today))
-            : null;
-
-        // Find potential matches using fuzzy matching
-        var matches = await _runnerMatchingService.FindMatchesAsync(
-            fullName,
-            age,
-            request.Gender);
-
-        var matchDtos = matches.Select(m => RunnerMatchDto.FromRunnerMatch(m)).ToList();
-
-        var response = new CheckDuplicatesResponse
-        {
-            HasPotentialDuplicates = matchDtos.Count > 0,
-            PotentialMatches = matchDtos,
-            HighConfidenceMatch = matches.Any(m => m.Confidence >= 0.95)
-        };
-
-        return Ok(response);
-    }
-
-    /// <summary>
-    /// Create a new runner
-    /// </summary>
-    [HttpPost]
-    [Authorize(Roles = "Admin,Manager")]
-    [ProducesResponseType(typeof(RunnerDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(typeof(CreateRunnerConflictResponse), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<RunnerDto>> CreateRunner([FromBody] CreateRunnerRequest request)
-    {
-        try
-        {
-            // Check for potential duplicates using fuzzy matching (unless explicitly skipped)
-            if (!request.SkipDuplicateCheck)
-            {
-                var fullName = $"{request.FirstName} {request.LastName}";
-
-                int? age = request.DateOfBirth.HasValue
-                    ? AgeCalculator.CalculateAge(request.DateOfBirth.Value, DateOnly.FromDateTime(DateTime.Today))
-                    : null;
-
-                var matches = await _runnerMatchingService.FindMatchesAsync(
-                    fullName,
-                    age,
-                    request.Gender);
-
-                // If we found potential duplicates, return them
-                if (matches.Count > 0)
-                {
-                    var matchDtos = matches.Select(m => RunnerMatchDto.FromRunnerMatch(m)).ToList();
-
-                    var conflictResponse = new CreateRunnerConflictResponse
-                    {
-                        Message = "Potential duplicate runners found. Review matches or set skipDuplicateCheck=true to force creation.",
-                        PotentialMatches = matchDtos,
-                        HighConfidenceMatch = matches.Any(m => m.Confidence >= 0.95)
-                    };
-
-                    return Conflict(conflictResponse);
-                }
-            }
-
-            // No duplicates found or check was skipped, create the runner
-            var runner = new Runner
-            {
-                RunnerId = Guid.NewGuid(),
-                FirstName = request.FirstName,
-                LastName = request.LastName,
-                Gender = request.Gender,
-                DateOfBirth = request.DateOfBirth,
-                Email = request.Email,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            _context.Runners.Add(runner);
-            await _context.SaveChangesAsync();
-
-            var runnerDto = new RunnerDto
-            {
-                RunnerId = runner.RunnerId,
-                FirstName = runner.FirstName,
-                LastName = runner.LastName,
-                Gender = runner.Gender,
-                DateOfBirth = runner.DateOfBirth
-            };
-
-            _logger.LogInformation(
-                "Created new runner: {FirstName} {LastName} ({RunnerId})",
-                runner.FirstName, runner.LastName, runner.RunnerId);
-
-            return CreatedAtAction(nameof(GetRunner), new { id = runner.RunnerId }, runnerDto);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating runner");
-            return BadRequest($"Error creating runner: {ex.Message}");
-        }
-    }
-
-    /// <summary>
     /// Update an existing runner
     /// </summary>
     [HttpPut("{id}")]
@@ -299,8 +77,7 @@ public class RunnersController : ControllerBase
                 RunnerId = runner.RunnerId,
                 FirstName = runner.FirstName,
                 LastName = runner.LastName,
-                Gender = runner.Gender,
-                DateOfBirth = runner.DateOfBirth
+                Gender = runner.Gender
             };
 
             _logger.LogInformation(
@@ -317,46 +94,76 @@ public class RunnersController : ControllerBase
     }
 
     /// <summary>
-    /// Delete a runner (only if no results exist)
+    /// Public athlete directory: every runner with their current age, result count, and best
+    /// Open-division Grand Prix season total. Sorting and searching happen client-side — the
+    /// runner table is a few thousand rows. Deliberately excludes date of birth, birth year,
+    /// email, and alternate names.
     /// </summary>
-    [HttpDelete("{id}")]
-    [Authorize(Roles = "Admin")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> DeleteRunner(Guid id)
+    [HttpGet("directory")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<AthleteDirectoryEntryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<AthleteDirectoryEntryDto>>> GetAthleteDirectory()
     {
-        try
-        {
-            var runner = await _context.Runners
-                .Include(r => r.Results)
-                .FirstOrDefaultAsync(r => r.RunnerId == id);
+        var runners = await _context.Runners
+            .AsNoTracking()
+            .Select(r => new { r.RunnerId, r.FirstName, r.LastName, r.Gender, r.DateOfBirth, r.EstimatedBirthYear })
+            .ToListAsync();
 
-            if (runner == null)
+        var resultCounts = await _context.RaceResults
+            .GroupBy(rr => rr.RunnerId)
+            .Select(g => new { RunnerId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.RunnerId, g => g.Count);
+
+        // Open division only: age-division totals are on a 5/4/3/2/1 scale and would rank
+        // alongside Open totals misleadingly. Includes the in-progress (unfinalized) season.
+        var topScores = (await _context.GrandPrixStandings
+                .Where(s => s.AgeCategory == null)
+                .Select(s => new { s.RunnerId, s.Year, s.TotalPoints })
+                .ToListAsync())
+            .GroupBy(s => s.RunnerId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(s => s.TotalPoints).ThenByDescending(s => s.Year).First());
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+
+        return Ok(runners
+            .Select(r =>
             {
-                return NotFound($"Runner with ID {id} not found");
-            }
+                var ageSource = new Runner { DateOfBirth = r.DateOfBirth, EstimatedBirthYear = r.EstimatedBirthYear };
+                var top = topScores.GetValueOrDefault(r.RunnerId);
+                return new AthleteDirectoryEntryDto
+                {
+                    RunnerId = r.RunnerId,
+                    FullName = $"{r.FirstName} {r.LastName}",
+                    Gender = r.Gender,
+                    CurrentAge = AgeCalculator.GetRunnerAge(ageSource, today),
+                    IsAgeEstimated = AgeCalculator.IsAgeEstimated(ageSource),
+                    ResultCount = resultCounts.GetValueOrDefault(r.RunnerId),
+                    TopGrandPrixScore = top?.TotalPoints,
+                    TopGrandPrixYear = top?.Year
+                };
+            })
+            .OrderByDescending(a => a.TopGrandPrixScore.HasValue)
+            .ThenByDescending(a => a.TopGrandPrixScore)
+            .ThenBy(a => a.FullName)
+            .ToList());
+    }
 
-            // Prevent deletion if results exist
-            if (runner.Results.Count > 0)
-            {
-                return BadRequest("Cannot delete runner with existing race results");
-            }
-
-            _context.Runners.Remove(runner);
-            await _context.SaveChangesAsync();
-
-            _logger.LogInformation(
-                "Deleted runner: {FirstName} {LastName} ({RunnerId})",
-                runner.FirstName, runner.LastName, runner.RunnerId);
-
-            return NoContent();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting runner {RunnerId}", id);
-            return BadRequest($"Error deleting runner: {ex.Message}");
-        }
+    /// <summary>
+    /// One runner's admin record (the same shape as the <c>manage</c> list), for opening the edit
+    /// dialog from public pages.
+    /// </summary>
+    [HttpGet("{id}/manage")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(typeof(RunnerAdminDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RunnerAdminDto>> GetRunnerForManagement(Guid id)
+    {
+        var summaries = await _runnerMergeService.GetAdminSummariesAsync([id]);
+        return summaries.TryGetValue(id, out var runner)
+            ? Ok(runner)
+            : NotFound($"Runner with ID {id} not found");
     }
 
     /// <summary>
@@ -447,46 +254,6 @@ public class RunnersController : ControllerBase
         }
 
         return Ok(await _runnerMergeService.MergeAsync(id, request.SourceRunnerId));
-    }
-
-    /// <summary>
-    /// Get all race results for a specific runner
-    /// </summary>
-    [HttpGet("{id}/results")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(List<RaceResultDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<List<RaceResultDto>>> GetRunnerResults(Guid id)
-    {
-        var runner = await _context.Runners.FindAsync(id);
-        if (runner == null)
-        {
-            return NotFound($"Runner with ID {id} not found");
-        }
-
-        var results = await _context.RaceResults
-            .Include(rr => rr.Race)
-            .Where(rr => rr.RunnerId == id)
-            .OrderByDescending(rr => rr.Race.Date)
-            .Select(rr => new RaceResultDto
-            {
-                ResultId = rr.ResultId,
-                RaceId = rr.RaceId,
-                RaceName = RaceProjections.DisplayName(rr.Race.RaceVariant.RaceSeries.Name, rr.Race.RaceVariant.Name, rr.Race.RaceVariant.RaceSeries.Variants.Count),
-                RaceDate = rr.Race.Date,
-                Place = rr.Place,
-                PlaceGender = rr.PlaceGender,
-                PlaceAgeCategory = rr.PlaceAgeCategory,
-                Time = rr.Time,
-                Age = rr.Age,
-                Gender = rr.Gender,
-                Status = rr.Status,
-                Bib = rr.Bib,
-                Notes = rr.Notes
-            })
-            .ToListAsync();
-
-        return Ok(results);
     }
 
     /// <summary>
@@ -769,47 +536,22 @@ public class RunnerProfileResultDto
 }
 
 /// <summary>
-/// Request for checking duplicate runners
+/// One row of the public athlete directory — no contact details, date of birth, or birth year.
 /// </summary>
-public class CheckDuplicatesRequest
+public class AthleteDirectoryEntryDto
 {
-    public string FirstName { get; set; } = string.Empty;
-    public string LastName { get; set; } = string.Empty;
+    public Guid RunnerId { get; set; }
+    public string FullName { get; set; } = string.Empty;
     public Gender Gender { get; set; }
-    public DateOnly? DateOfBirth { get; set; }
-}
+    public int? CurrentAge { get; set; }
+    public bool IsAgeEstimated { get; set; }
+    public int ResultCount { get; set; }
 
-/// <summary>
-/// Response from duplicate check
-/// </summary>
-public class CheckDuplicatesResponse
-{
-    public bool HasPotentialDuplicates { get; set; }
-    public List<RunnerMatchDto> PotentialMatches { get; set; } = new();
-    public bool HighConfidenceMatch { get; set; }
-}
+    /// <summary>Best Open-division Grand Prix season total; null if the runner never scored.</summary>
+    public int? TopGrandPrixScore { get; set; }
 
-/// <summary>
-/// Response when creating a runner finds potential duplicates
-/// </summary>
-public class CreateRunnerConflictResponse
-{
-    public string Message { get; set; } = string.Empty;
-    public List<RunnerMatchDto> PotentialMatches { get; set; } = new();
-    public bool HighConfidenceMatch { get; set; }
-}
-
-/// <summary>
-/// Request for creating a new runner
-/// </summary>
-public class CreateRunnerRequest
-{
-    public string FirstName { get; set; } = string.Empty;
-    public string LastName { get; set; } = string.Empty;
-    public Gender Gender { get; set; }
-    public DateOnly? DateOfBirth { get; set; }
-    public string? Email { get; set; }
-    public bool SkipDuplicateCheck { get; set; }
+    /// <summary>The season <see cref="TopGrandPrixScore"/> was earned in.</summary>
+    public int? TopGrandPrixYear { get; set; }
 }
 
 /// <summary>
@@ -834,14 +576,4 @@ public class UpdateRunnerRequest
 
     /// <summary>Null leaves them unchanged; an empty list clears them.</summary>
     public List<string>? AlternateNames { get; set; }
-}
-
-/// <summary>
-/// Detailed runner information with results
-/// </summary>
-public class RunnerDetailDto : RunnerDto
-{
-    public new int TotalRaces { get; set; }
-    public List<int> GrandPrixYears { get; set; } = new();
-    public List<RaceResultDto> RecentResults { get; set; } = new();
 }

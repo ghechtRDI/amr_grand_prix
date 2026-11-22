@@ -92,6 +92,81 @@ public class RunnersControllerTests : IDisposable
             .Should().BeOfType<RunnerProfileDto>().Subject;
     }
 
+    private async Task<List<AthleteDirectoryEntryDto>> GetDirectory()
+    {
+        var result = await _controller.GetAthleteDirectory();
+        return result.Result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<List<AthleteDirectoryEntryDto>>().Subject;
+    }
+
+    private void AddStanding(Runner runner, int year, int points, string? ageCategory = null) =>
+        _context.GrandPrixStandings.Add(new GrandPrixStanding
+        {
+            StandingId = Guid.NewGuid(),
+            RunnerId = runner.RunnerId,
+            Year = year,
+            Division = ageCategory == null
+                ? (runner.Gender == Gender.Male ? Division.OpenMale : Division.OpenFemale)
+                : (runner.Gender == Gender.Male ? Division.AgeMale : Division.AgeFemale),
+            AgeCategory = ageCategory,
+            TotalPoints = points
+        });
+
+    [Fact]
+    public async Task GetAthleteDirectory_TopScoreIsBestOpenSeason_IgnoringAgeDivisions()
+    {
+        var runner = AddRunner("Ada", Gender.Female);
+        AddStanding(runner, 2023, 250);
+        AddStanding(runner, 2024, 310);
+        AddStanding(runner, 2025, 280);
+        AddStanding(runner, 2024, 900, ageCategory: "30-39"); // age-division totals never count
+        await _context.SaveChangesAsync();
+
+        var entry = (await GetDirectory()).Single();
+
+        entry.TopGrandPrixScore.Should().Be(310);
+        entry.TopGrandPrixYear.Should().Be(2024);
+    }
+
+    [Fact]
+    public async Task GetAthleteDirectory_SortsByTopScoreDescending_UnscoredLast()
+    {
+        var low = AddRunner("Low", Gender.Male);
+        var none = AddRunner("Aaron", Gender.Male);
+        var high = AddRunner("High", Gender.Female);
+        AddStanding(low, 2024, 100);
+        AddStanding(high, 2024, 400);
+        await _context.SaveChangesAsync();
+
+        (await GetDirectory()).Select(a => a.RunnerId).Should().Equal(high.RunnerId, low.RunnerId, none.RunnerId);
+    }
+
+    [Fact]
+    public async Task GetAthleteDirectory_CountsResultsAndFlagsEstimatedAges()
+    {
+        var estimated = AddRunner("Est", Gender.Female, estimatedBirthYear: 1990);
+        var verified = AddRunner("Ver", Gender.Male);
+        verified.DateOfBirth = new DateOnly(1980, 1, 1);
+        var unknown = AddRunner("Unk", Gender.Male);
+        var race = AddRace(2024);
+        var race2 = AddRace(2025);
+        AddResult(race, estimated, "1:00:00");
+        AddResult(race2, estimated, null, status: ResultStatus.DNF);
+        await _context.SaveChangesAsync();
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var byId = (await GetDirectory()).ToDictionary(a => a.RunnerId);
+
+        byId[estimated.RunnerId].ResultCount.Should().Be(2);
+        byId[estimated.RunnerId].CurrentAge.Should().Be(today.Year - 1990);
+        byId[estimated.RunnerId].IsAgeEstimated.Should().BeTrue();
+        byId[verified.RunnerId].CurrentAge.Should().Be(AgeCalculator.CalculateAge(new DateOnly(1980, 1, 1), today));
+        byId[verified.RunnerId].IsAgeEstimated.Should().BeFalse();
+        byId[unknown.RunnerId].CurrentAge.Should().BeNull();
+        byId[unknown.RunnerId].IsAgeEstimated.Should().BeFalse();
+        byId[unknown.RunnerId].ResultCount.Should().Be(0);
+    }
+
     [Fact]
     public async Task GetRunnerProfile_UnknownRunner_ReturnsNotFound()
     {

@@ -87,6 +87,7 @@ function ChartTitle({ children, legend }) {
  *  1. Finish time, with an age-graded line (dashed) for results at age 45+.
  *  2. Percent behind the gender winner — a separate chart rather than a second y-axis, since it's
  *     a different unit; it normalizes for year-to-year course conditions.
+ * Both y-axes are reversed (smaller = higher) so getting faster reads as an upward trend.
  */
 export function RunnerTimeChart({ results }) {
   const data = useMemo(
@@ -140,6 +141,7 @@ export function RunnerTimeChart({ results }) {
             <CartesianGrid vertical={false} stroke="var(--color-border)" />
             {xAxis}
             <YAxis
+              reversed
               domain={[
                 (min) => Math.max(0, Math.floor((min * 0.95) / 60) * 60),
                 (max) => Math.ceil((max * 1.05) / 60) * 60,
@@ -183,6 +185,7 @@ export function RunnerTimeChart({ results }) {
             <CartesianGrid vertical={false} stroke="var(--color-border)" />
             {xAxis}
             <YAxis
+              reversed
               domain={[0, (max) => Math.max(5, Math.ceil(max / 5) * 5)]}
               tickFormatter={(v) => `+${v}%`}
               tick={AXIS_TICK}

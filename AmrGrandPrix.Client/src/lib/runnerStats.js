@@ -37,6 +37,7 @@ function longestStreak(results) {
 export function computeRunnerStats(results) {
   const years = [...new Set(results.map((r) => r.year))].sort((a, b) => a - b);
   const bestAgeGroup = best(results, 'ageGroupPlace');
+  const bestGender = best(results, 'genderPlace');
 
   return {
     races: results.length,
@@ -46,6 +47,8 @@ export function computeRunnerStats(results) {
     lastYear: years[years.length - 1],
     streak: longestStreak(results),
     bestOverall: best(results, 'overallPlace'),
+    bestGender,
+    genderWins: results.filter((r) => r.genderPlace === 1).length,
     bestAgeGroup,
     ageGroupWins: results.filter((r) => r.ageGroupPlace === 1).length,
   };
