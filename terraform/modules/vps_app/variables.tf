@@ -4,8 +4,14 @@ variable "name" {
 }
 
 variable "hostname" {
-  description = "Public hostname served through Cloudflare (e.g. grandprix.alaskamountainrunners.org)"
+  description = "Public hostname served through Cloudflare (e.g. results.alaskamountainrunners.org)"
   type        = string
+}
+
+variable "legacy_hostnames" {
+  description = "Former hostnames kept as proxied DNS records so a Cloudflare Redirect Rule (set up in the dashboard) can send old links to hostname"
+  type        = list(string)
+  default     = []
 }
 
 variable "cloudflare_zone_id" {
