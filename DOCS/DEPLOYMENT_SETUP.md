@@ -227,10 +227,17 @@ How the site moved from `grandprix.` to `results.alaskamountainrunners.org`; the
 
 5. Merge. The app redeploys with the new from address while still on the old hostname.
 6. Actions → **Infrastructure** → `prod` → `apply`. Check the plan: it creates the new DNS record and replaces the origin certificate, and the old record only moves to `legacy` (no destroy). The server itself isn't touched (`user_data` is ignored).
-7. Copy the new origin certificate to the server, because cloud-init installed the old one only at first boot. Use the local Terraform setup from [step 10](#10-production), plus SSH access (`ADMIN_SSH_CIDRS` or a temporary port-22 rule):
+7. Copy the new origin certificate to the server, because cloud-init installed the old one only at first boot. You'll need SSH access (`ADMIN_SSH_CIDRS` or a temporary port-22 rule) and the R2 state credentials. GitHub can't show the `R2_*` secrets back, so use the keys you saved in [step 2](#2-cloudflare). If you don't have them, create a temporary R2 API token with **Object Read & Write** on `amrgp-terraform-state` and delete it afterward. Without these variables, Terraform falls back to looking for AWS credentials and fails with `No valid credential sources found`. `terraform output` only reads state, so the Cloudflare and Vultr tokens aren't needed.
 
    ```bash
-   cd terraform/environments/prod   # with the AWS_* R2 variables exported, after terraform init
+   cd terraform/environments/prod
+   read -s "AWS_ACCESS_KEY_ID?R2 access key id: "; echo          # read -s keeps keys out of shell history (zsh syntax)
+   read -s "AWS_SECRET_ACCESS_KEY?R2 secret access key: "; echo
+   export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+   export AWS_ENDPOINT_URL_S3=https://<account id>.r2.cloudflarestorage.com
+   terraform init -reconfigure                                    # -reconfigure in case of an earlier init -backend=false
+   terraform output -raw origin_certificate | head -1             # should print -----BEGIN CERTIFICATE-----
+
    terraform output -raw origin_certificate | ssh root@<server ip> 'cat > /opt/amrgp/certs/origin.pem'
    terraform output -raw origin_private_key | ssh root@<server ip> 'umask 077; cat > /opt/amrgp/certs/origin.key'
    ```
