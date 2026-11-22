@@ -1,10 +1,20 @@
 /**
  * Runner Service
- * Admin racer management: listing/editing runner records, finding likely duplicates, and merging
- * one runner record into another.
+ * The public athlete directory, plus admin racer management: listing/editing runner records,
+ * finding likely duplicates, and merging one runner record into another.
  */
 
 import { authHeaders, request } from './api';
+
+/**
+ * Public. AthleteDirectoryEntryDto[]: { runnerId, fullName, gender, currentAge, isAgeEstimated,
+ * resultCount, topGrandPrixScore, topGrandPrixYear } — no contact details or birth dates.
+ */
+export const getAthleteDirectory = () => request('/api/runners/directory');
+
+/** One RunnerAdminDto (Admin/Manager only) — the record EditRunnerDialog edits. */
+export const getRunnerForManagement = (runnerId) =>
+  request(`/api/runners/${runnerId}/manage`, { headers: authHeaders() });
 
 /** RunnerAdminDto[] — matches legal, preferred, and alternate names. */
 export const getRunnersForManagement = (search = '', limit = 100) =>

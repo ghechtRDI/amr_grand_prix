@@ -20,10 +20,10 @@ export function RunnerStats({ results }) {
   const stats = useMemo(() => computeRunnerStats(results), [results]);
   if (results.length === 0) return null;
 
-  const { bestOverall, bestAgeGroup, streak } = stats;
+  const { bestOverall, bestGender, bestAgeGroup, streak } = stats;
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
       <Stat
         label="Races"
         value={stats.races}
@@ -43,6 +43,15 @@ export function RunnerStats({ results }) {
         label="Best Overall"
         value={bestOverall ? ordinal(bestOverall.overallPlace) : '—'}
         detail={bestOverall && raceDetail(bestOverall)}
+      />
+      <Stat
+        label="Best Gender"
+        value={bestGender ? ordinal(bestGender.genderPlace) : '—'}
+        detail={
+          stats.genderWins > 1
+            ? `${stats.genderWins} gender wins`
+            : bestGender && raceDetail(bestGender)
+        }
       />
       <Stat
         label="Best Age Group"

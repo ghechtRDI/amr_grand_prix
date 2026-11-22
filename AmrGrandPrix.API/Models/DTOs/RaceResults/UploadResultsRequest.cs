@@ -104,12 +104,6 @@ public class SaveReviewDraftResponse
     public DateTime SavedAt { get; set; }
 }
 
-public class ValidateResultsRequest
-{
-    public Guid UploadBatchId { get; set; }
-    public List<ResultRow> Results { get; set; } = new();
-}
-
 public class SaveResultsRequest
 {
     /// <summary>

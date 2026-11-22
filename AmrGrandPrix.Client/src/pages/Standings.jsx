@@ -32,6 +32,14 @@ const DIVISION_AGE = 'age';
 const VIEW_BREAKDOWN = 'breakdown';
 const VIEW_GAMUT = 'gamut';
 
+// Main tabs; `short` is the label shown on phone-width screens.
+const MAIN_TABS = [
+  { value: DIVISION_OPEN, label: 'Open Division', short: 'Open' },
+  { value: DIVISION_AGE, label: 'Age Divisions', short: 'Age Groups' },
+  { value: VIEW_BREAKDOWN, label: 'Points Breakdown', short: 'Points' },
+  { value: VIEW_GAMUT, label: 'Run the Gamut', short: 'Gamut' },
+];
+
 // Tabs that fetch their own data rather than a standings list
 const isStandingsTab = (tab) => tab === DIVISION_OPEN || tab === DIVISION_AGE;
 
@@ -197,19 +205,18 @@ export default function Standings() {
         </div>
 
         <Tabs value={mainTab} onValueChange={setMainTab}>
-          <TabsList variant="line" className="mb-6 h-auto gap-4 border-b border-border p-0">
-            <TabsTrigger value={DIVISION_OPEN} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
-              Open Division
-            </TabsTrigger>
-            <TabsTrigger value={DIVISION_AGE} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
-              Age Divisions
-            </TabsTrigger>
-            <TabsTrigger value={VIEW_BREAKDOWN} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
-              Points Breakdown
-            </TabsTrigger>
-            <TabsTrigger value={VIEW_GAMUT} className="rounded-none px-1 py-2 text-base data-active:font-semibold">
-              Run the Gamut
-            </TabsTrigger>
+          {/* Short labels on phones so all four tabs fit without scrolling. */}
+          <TabsList variant="line" className="mb-6 h-auto w-full justify-start gap-3 border-b border-border p-0 sm:w-fit sm:gap-4">
+            {MAIN_TABS.map(({ value, label, short }) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="flex-none rounded-none px-1 py-2 text-sm data-active:font-semibold sm:text-base"
+              >
+                <span className="sm:hidden">{short}</span>
+                <span className="hidden sm:inline">{label}</span>
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           <TabsContent value={DIVISION_OPEN}>

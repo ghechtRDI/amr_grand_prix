@@ -24,6 +24,7 @@ const Profile = lazy(() => import('./pages/Profile'));
 const Standings = lazy(() => import('./pages/Standings'));
 const RaceResults = lazy(() => import('./pages/RaceResults'));
 const ResultsBrowser = lazy(() => import('./pages/ResultsBrowser'));
+const Athletes = lazy(() => import('./pages/Athletes'));
 const RaceSeriesDetail = lazy(() => import('./pages/RaceSeriesDetail'));
 const RunnerProfile = lazy(() => import('./pages/RunnerProfile'));
 const RunnerSeries = lazy(() => import('./pages/RunnerSeries'));
@@ -80,10 +81,11 @@ function App() {
                 }
               />
 
-              {/* Public routes - standings and race results */}
+              {/* Public routes - standings, race results, and athletes */}
               <Route path="/standings" element={<Standings />} />
               <Route path="/standings/:year" element={<Standings />} />
               <Route path="/race-results" element={<ResultsBrowser />} />
+              <Route path="/athletes" element={<Athletes />} />
               <Route path="/race-series/:seriesId" element={<RaceSeriesDetail />} />
               <Route path="/races/:raceId/results" element={<RaceResults />} />
               <Route path="/runners/:runnerId" element={<RunnerProfile />} />

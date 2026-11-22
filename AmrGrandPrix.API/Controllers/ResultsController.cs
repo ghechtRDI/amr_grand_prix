@@ -245,34 +245,6 @@ public class ResultsController : ControllerBase
         }
     }
 
-    [HttpPost("validate")]
-    [ProducesResponseType(typeof(UploadResultsResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UploadResultsResponse>> ValidateResults(
-        [FromBody] ValidateResultsRequest request)
-    {
-        try
-        {
-            var uploadBatch = await _context.UploadBatches.FindAsync(request.UploadBatchId);
-            if (uploadBatch == null)
-                return NotFound($"Upload batch {request.UploadBatchId} not found");
-
-            foreach (var result in request.Results)
-                result.ValidationIssues = _resultsProcessingService.ValidateRow(result);
-
-            _logger.LogInformation(
-                "Validated {TotalRows} results for batch {BatchId}",
-                request.Results.Count, request.UploadBatchId);
-
-            return Ok(BuildResponse(request.UploadBatchId, request.Results));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error validating results");
-            return BadRequest($"Error validating results: {ex.Message}");
-        }
-    }
-
     /// <summary>Save validated results to the database.</summary>
     [HttpPost("save")]
     [ProducesResponseType(typeof(SaveResultsResponse), StatusCodes.Status200OK)]

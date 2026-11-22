@@ -4,9 +4,11 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   getFilteredRowModel,
+  getPaginationRowModel,
   flexRender,
 } from '@tanstack/react-table';
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { SearchInput } from '@/components/ui/search-input';
 import { cn } from '@/lib/utils';
@@ -16,6 +18,9 @@ import { cn } from '@/lib/utils';
  * used elsewhere in the app (see components/upload/DataReviewStep.jsx). Pass `columns` built with
  * `createColumnHelper()` and `data`; sorting and the search box are wired up here so callers don't
  * each hand-roll their own sort state (see the pre-existing pattern in pages/RaceResults.jsx).
+ *
+ * `initialSorting` sets the starting sort (TanStack `SortingState`, e.g. `[{ id: 'points', desc: true }]`).
+ * `pageSize` turns on client-side paging for long tables; leave it unset to show every row.
  */
 export function DataTable({
   columns,
@@ -23,10 +28,13 @@ export function DataTable({
   searchable = true,
   searchPlaceholder = 'Search…',
   emptyMessage = 'No results.',
+  initialSorting = [],
+  pageSize,
   className,
 }) {
-  const [sorting, setSorting] = useState([]);
+  const [sorting, setSorting] = useState(initialSorting);
   const [globalFilter, setGlobalFilter] = useState('');
+  const paginated = pageSize > 0;
 
   const table = useReactTable({
     data,
@@ -37,7 +45,16 @@ export function DataTable({
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    ...(paginated && {
+      getPaginationRowModel: getPaginationRowModel(),
+      initialState: { pagination: { pageIndex: 0, pageSize } },
+    }),
   });
+
+  const filteredCount = table.getFilteredRowModel().rows.length;
+  const { pageIndex } = table.getState().pagination;
+  const firstRow = filteredCount === 0 ? 0 : pageIndex * pageSize + 1;
+  const lastRow = Math.min((pageIndex + 1) * pageSize, filteredCount);
 
   return (
     <div className={cn('flex flex-col gap-3', className)}>
@@ -93,6 +110,22 @@ export function DataTable({
           )}
         </TableBody>
       </Table>
+
+      {paginated && filteredCount > pageSize && (
+        <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+          <span className="tabular-nums">
+            {firstRow}–{lastRow} of {filteredCount}
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+              <ChevronLeft /> Previous
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+              Next <ChevronRight />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

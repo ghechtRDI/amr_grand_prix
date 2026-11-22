@@ -1,18 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 /**
  * Loads the public runner page payload (GET /api/runners/:id/profile) shared by the runner
  * landing page and the per-series page: basic info, series summaries, and every result with
- * computed places and PR flags.
+ * computed places and PR flags. `reload()` refetches in place (e.g. after an admin edit) without
+ * blanking the page.
  */
 export function useRunnerProfile(runnerId) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    if (reloadKey === 0) setLoading(true);
     setError(null);
 
     fetch(`/api/runners/${runnerId}/profile`)
@@ -28,7 +30,9 @@ export function useRunnerProfile(runnerId) {
     return () => {
       cancelled = true;
     };
-  }, [runnerId]);
+  }, [runnerId, reloadKey]);
 
-  return { profile, loading, error };
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  return { profile, loading, error, reload };
 }

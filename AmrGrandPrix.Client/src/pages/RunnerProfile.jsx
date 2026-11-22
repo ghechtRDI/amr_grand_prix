@@ -5,8 +5,11 @@
  */
 
 import { Link, useParams } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { AlertCircle, ChevronRight, Loader2, Pencil } from 'lucide-react';
 import { useRunnerProfile } from '../hooks/useRunnerProfile';
+import { useEditRacer } from '../hooks/useEditRacer';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { RunnerHeader, RunnerPageShell } from '@/components/runner/RunnerHeader';
 import { RunnerResultsTable } from '@/components/runner/RunnerResultsTable';
 import { RunnerStats } from '@/components/runner/RunnerStats';
@@ -51,7 +54,8 @@ function SeriesCard({ runnerId, series }) {
 
 export default function RunnerProfile() {
   const { runnerId } = useParams();
-  const { profile, loading, error } = useRunnerProfile(runnerId);
+  const { profile, loading, error, reload } = useRunnerProfile(runnerId);
+  const editor = useEditRacer({ onSaved: reload });
 
   return (
     <RunnerPageShell loading={loading} error={error}>
@@ -60,10 +64,25 @@ export default function RunnerProfile() {
           <div className="mb-2 text-sm text-muted-foreground">
             <Link to="/" className="hover:text-foreground">Home</Link>
             <span className="mx-1.5">/</span>
-            <span>Runners</span>
+            <Link to="/athletes" className="hover:text-foreground">Athletes</Link>
           </div>
 
-          <RunnerHeader profile={profile} />
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <RunnerHeader profile={profile} />
+            {editor.canEdit && (
+              <Button variant="outline" onClick={() => editor.openEditor(runnerId)} disabled={editor.loadingId === runnerId}>
+                {editor.loadingId === runnerId ? <Loader2 className="animate-spin" /> : <Pencil />}
+                Edit Racer
+              </Button>
+            )}
+          </div>
+
+          {editor.error && (
+            <Alert variant="destructive" className="mt-4">
+              <AlertCircle />
+              <AlertDescription>Couldn&apos;t open the racer record: {editor.error}</AlertDescription>
+            </Alert>
+          )}
 
           <div className="mt-6">
             <RunnerStats results={profile.results} />
@@ -98,6 +117,7 @@ export default function RunnerProfile() {
           </div>
         </>
       )}
+      {editor.dialog}
     </RunnerPageShell>
   );
 }

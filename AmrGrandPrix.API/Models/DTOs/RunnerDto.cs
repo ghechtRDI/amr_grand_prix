@@ -9,7 +9,6 @@ public class RunnerDto
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string FullName { get; set; } = string.Empty;
-    public DateOnly? DateOfBirth { get; set; }
     public Gender Gender { get; set; }
     public int TotalRaces { get; set; }
 }
