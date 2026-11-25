@@ -4,12 +4,13 @@
  */
 
 import { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import NavBar from './components/layout/NavBar';
+import Footer from './components/layout/Footer';
 
 // Route-level code splitting: each page (and its dependencies, e.g. the
 // upload wizard's LLM/dropzone code or TanStack Table) ships in its own
@@ -19,7 +20,8 @@ const RegisterForm = lazy(() => import('./components/auth/RegisterForm'));
 const EmailConfirmation = lazy(() => import('./components/auth/EmailConfirmation'));
 const ForgotPassword = lazy(() => import('./components/auth/ForgotPassword'));
 const ResetPassword = lazy(() => import('./components/auth/ResetPassword'));
-const Home = lazy(() => import('./pages/Home'));
+const Landing = lazy(() => import('./pages/Landing'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Standings = lazy(() => import('./pages/Standings'));
 const RaceResults = lazy(() => import('./pages/RaceResults'));
@@ -71,17 +73,8 @@ function App() {
                 }
               />
 
-              {/* Protected routes */}
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <Home />
-                  </ProtectedRoute>
-                }
-              />
-
-              {/* Public routes - standings, race results, and athletes */}
+              {/* Public routes - landing, standings, race results, and athletes */}
+              <Route path="/" element={<Landing />} />
               <Route path="/standings" element={<Standings />} />
               <Route path="/standings/:year" element={<Standings />} />
               <Route path="/race-results" element={<ResultsBrowser />} />
@@ -126,10 +119,10 @@ function App() {
                 }
               />
 
-              {/* Redirect unknown routes to home */}
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
+          <Footer />
         </AuthProvider>
       </ThemeProvider>
     </Router>

@@ -19,7 +19,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
-const CURRENT_YEAR = new Date().getFullYear();
 
 const navLinkClass = ({ isActive }) =>
   cn(
@@ -67,7 +66,7 @@ export default function NavBar() {
 
   const handleLogout = async () => {
     await logout();
-    navigate('/login');
+    navigate('/');
   };
 
   const ThemeToggle = (
@@ -88,7 +87,7 @@ export default function NavBar() {
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 md:grid md:grid-cols-[1fr_auto_1fr]">
         <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
           <Mountain className="size-5" aria-hidden="true" />
-          <span>AMR Grand Prix</span>
+          <span>AMR Race Results</span>
         </Link>
 
         <button
@@ -103,7 +102,7 @@ export default function NavBar() {
 
         {/* Desktop: centered nav */}
         <nav className="hidden items-center gap-1 md:flex md:justify-self-center">
-          <NavLink to={`/standings/${CURRENT_YEAR}`} className={navLinkClass}>
+          <NavLink to="/standings" className={navLinkClass}>
             Grand Prix Standings
           </NavLink>
 
@@ -176,7 +175,7 @@ export default function NavBar() {
             mobileOpen ? 'flex' : 'hidden'
           )}
         >
-          <NavLink to={`/standings/${CURRENT_YEAR}`} className={navLinkClass}>
+          <NavLink to="/standings" className={navLinkClass}>
             Grand Prix Standings
           </NavLink>
 

@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { AlertCircle } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -19,6 +19,10 @@ export const LoginForm = () => {
 
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Set by ProtectedRoute when it bounced the user here; otherwise land on the home page
+  const from = location.state?.from;
+  const returnTo = from ? `${from.pathname}${from.search || ''}${from.hash || ''}` : '/';
 
   const {
     register,
@@ -33,7 +37,7 @@ export const LoginForm = () => {
       const result = await login(data);
 
       if (result.success) {
-        navigate('/', { replace: true });
+        navigate(returnTo, { replace: true });
       } else {
         setLoginError(result.error || 'Login failed. Please check your credentials.');
       }

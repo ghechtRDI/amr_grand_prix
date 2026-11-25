@@ -199,6 +199,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 builder.Services.AddHealthChecks();
 
+// Short-lived caches for hot public reads (e.g. the landing page's site totals)
+builder.Services.AddMemoryCache();
+
 var app = builder.Build();
 
 // Seed roles on startup (skip in test environment)
