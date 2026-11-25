@@ -3,7 +3,7 @@
  * HOC for route protection with optional role checking
  */
 
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -16,6 +16,7 @@ import { useAuth } from '../../hooks/useAuth';
  */
 export const ProtectedRoute = ({ children, roles, redirectTo = '/login' }) => {
   const { isAuthenticated, hasRole, hasAnyRole, loading } = useAuth();
+  const location = useLocation();
 
   // Show loading state while checking authentication
   if (loading) {
@@ -29,7 +30,8 @@ export const ProtectedRoute = ({ children, roles, redirectTo = '/login' }) => {
 
   // Check if user is authenticated
   if (!isAuthenticated()) {
-    return <Navigate to={redirectTo} replace />;
+    // Remember where the user was headed so login can send them back
+    return <Navigate to={redirectTo} replace state={{ from: location }} />;
   }
 
   // If roles are specified, check if user has required role(s)

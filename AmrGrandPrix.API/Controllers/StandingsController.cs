@@ -31,15 +31,22 @@ public class StandingsController : ControllerBase
     }
 
     /// <summary>
-    /// Get standings for a specific division (Open Male or Open Female)
+    /// Get standings for a specific division (Open Male or Open Female). <paramref name="top"/>
+    /// limits the list to the first N ranks (the landing page's leader snapshot).
     /// </summary>
     [HttpGet("{year}/open/{gender}")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(StandingsLeaderboardResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<StandingsLeaderboardResponse>> GetOpenDivisionStandings(
         int year,
-        string gender)
+        string gender,
+        [FromQuery] int? top = null)
     {
+        if (top is <= 0)
+        {
+            return BadRequest("top must be a positive number");
+        }
+
         // Parse gender
         var genderEnum = ParseGender(gender);
 
@@ -50,10 +57,18 @@ public class StandingsController : ControllerBase
 
         var division = GrandPrixConstants.GetOpenDivision(genderEnum.Value);
 
-        var standings = await _context.GrandPrixStandings
+        var query = _context.GrandPrixStandings
             .Include(s => s.Runner)
             .Where(s => s.Year == year && s.Division == division)
             .OrderBy(s => s.Rank)
+            .ThenBy(s => s.Runner.LastName)
+            .AsQueryable();
+        if (top.HasValue)
+        {
+            query = query.Take(top.Value);
+        }
+
+        var standings = await query
             .Select(s => new StandingDetailDto
             {
                 StandingId = s.StandingId,
@@ -110,7 +125,9 @@ public class StandingsController : ControllerBase
             Division = division,
             AgeCategory = null,
             Standings = standings,
-            TotalRunners = standings.Count
+            TotalRunners = top.HasValue
+                ? await _context.GrandPrixStandings.CountAsync(s => s.Year == year && s.Division == division)
+                : standings.Count
         };
 
         return Ok(response);
