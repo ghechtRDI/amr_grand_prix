@@ -1,7 +1,7 @@
 /**
  * MountainRidge
  * Decorative layered ridgeline for the landing-page hero: two tinted back ranges, a dashed trail
- * climbing to a flag on the high peak, and a front range filled with the page background so the
+ * climbing to the snow-capped high peak, and a front range filled with the page background so the
  * next section appears to rest on the mountains. Colors come from theme tokens, so it re-tints
  * for light/dark mode with no assets.
  */
@@ -33,7 +33,7 @@ export default function MountainRidge({ className }) {
       />
       <path d="M1120 120 L1093 145 L1108 141 L1120 152 L1134 140 L1149 146 Z" className="fill-white/85" />
 
-      {/* Trail to the summit flag */}
+      {/* Trail to the summit */}
       <path
         d="M760 300 C 840 280, 870 250, 940 238 S 1040 200, 1070 172 S 1105 140, 1120 124"
         fill="none"
@@ -42,8 +42,6 @@ export default function MountainRidge({ className }) {
         strokeDasharray="2 10"
         className="stroke-foreground/45"
       />
-      <line x1="1120" y1="124" x2="1120" y2="88" strokeWidth="3" strokeLinecap="round" className="stroke-foreground/70" />
-      <path d="M1121 89 L1148 97 L1121 106 Z" className="fill-secondary" />
 
       {/* Near range: page background, so the following section sits on the ridge */}
       <path

@@ -109,14 +109,16 @@ export default function Standings() {
   const navigate = useNavigate();
 
   const [availableYears, setAvailableYears] = useState([]);
-  const [selectedYear, setSelectedYear] = useState(parseInt(yearParam) || CURRENT_YEAR);
+  // With no year in the URL, wait for the year list and open the latest year with standings
+  // (null until then, so the calendar year is never fetched in the meantime)
+  const [selectedYear, setSelectedYear] = useState(parseInt(yearParam) || null);
   const [mainTab, setMainTab] = useState(DIVISION_OPEN);
   // One gender for all tabs, so switching tabs keeps the selection
   const [gender, setGender] = useState('female');
   const [ageCategory, setAgeCategory] = useState(AGE_CATEGORIES[2]); // default 30-39
 
   const [standings, setStandings] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // until the first standings load (or year list) lands
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -130,16 +132,21 @@ export default function Standings() {
       .then((years) => {
         if (years.length === 0) {
           setAvailableYears([CURRENT_YEAR]);
+          setSelectedYear((y) => y ?? CURRENT_YEAR);
         } else {
           setAvailableYears(years);
           if (!yearParam) setSelectedYear(years[0]);
         }
       })
-      .catch(() => setAvailableYears([CURRENT_YEAR]));
+      .catch(() => {
+        setAvailableYears([CURRENT_YEAR]);
+        setSelectedYear((y) => y ?? CURRENT_YEAR);
+      });
   }, [yearParam]);
 
   const loadStandings = useCallback(async () => {
     if (!isStandingsTab(mainTab)) return; // PointsBreakdown / GamutFinishers fetch their own data
+    if (!selectedYear) return; // year list still loading
     setLoading(true);
     setError(null);
     try {
@@ -191,7 +198,7 @@ export default function Standings() {
           </h1>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Year:</span>
-            <Select value={String(selectedYear)} onValueChange={handleYearChange}>
+            <Select value={selectedYear ? String(selectedYear) : null} onValueChange={handleYearChange}>
               <SelectTrigger className="w-28">
                 <SelectValue>{(value) => value}</SelectValue>
               </SelectTrigger>
@@ -253,7 +260,7 @@ export default function Standings() {
 
         <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold">{selectedYear} — {divisionLabel()}</h2>
+            <h2 className="text-lg font-semibold">{selectedYear && `${selectedYear} — `}{divisionLabel()}</h2>
             {isStandingsTab(mainTab) && (
               <p className="text-sm text-muted-foreground">
                 Best 4 races count toward total. <Check className="inline size-3.5" /> = Run the Gamut (7+ events).
@@ -268,10 +275,10 @@ export default function Standings() {
           />
         </div>
 
-        {mainTab === VIEW_BREAKDOWN && (
+        {mainTab === VIEW_BREAKDOWN && selectedYear && (
           <PointsBreakdown year={selectedYear} gender={gender} searchTerm={searchTerm} />
         )}
-        {mainTab === VIEW_GAMUT && <GamutFinishers year={selectedYear} searchTerm={searchTerm} />}
+        {mainTab === VIEW_GAMUT && selectedYear && <GamutFinishers year={selectedYear} searchTerm={searchTerm} />}
         {isStandingsTab(mainTab) && loading && (
           <div className="space-y-2">
             <Skeleton className="h-9 w-full" />
