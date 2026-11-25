@@ -1,10 +1,13 @@
 /**
  * usePageMeta - per-page <title>, meta description, canonical link, and robots noindex.
  *
- * Updates the tags already in <head> (index.html ships a title and description, and the server
- * may fill in more) rather than rendering new ones, so there is never a duplicate tag for a
- * crawler to pick the wrong one from. Unmounting restores the site defaults, so a page that
- * forgets to call this never inherits the previous page's title or noindex.
+ * Updates the tags already in <head> (the server fills in the same title, description, and
+ * canonical for each page, plus Open Graph tags) rather than rendering new ones, so there is never
+ * a duplicate tag for a crawler to pick the wrong one from. Unmounting restores the site defaults,
+ * so a page that forgets to call this never inherits the previous page's title or noindex.
+ *
+ * The client's robots tag is its own (marked data-page-meta): it never removes a noindex the
+ * server sent, e.g. for a runner under 18, whose age the client doesn't know.
  */
 
 import { useEffect } from 'react';
@@ -42,6 +45,21 @@ function setMeta(name, content) {
   el.setAttribute('content', content);
 }
 
+function setNoIndex(noindex) {
+  const selector = 'meta[name="robots"][data-page-meta]';
+  if (!noindex) {
+    document.head.querySelector(selector)?.remove();
+    return;
+  }
+  upsertHeadTag(selector, () => {
+    const m = document.createElement('meta');
+    m.setAttribute('name', 'robots');
+    m.setAttribute('content', 'noindex');
+    m.setAttribute('data-page-meta', '');
+    return m;
+  });
+}
+
 function setCanonical(href) {
   if (href == null) {
     document.head.querySelector('link[rel="canonical"]')?.remove();
@@ -71,7 +89,7 @@ export function usePageMeta({ title, rawTitle, description, canonical, noindex =
   useEffect(() => {
     document.title = rawTitle ?? pageTitle(title);
     setMeta('description', description ?? DEFAULT_DESCRIPTION);
-    setMeta('robots', noindex ? 'noindex' : null);
+    setNoIndex(noindex);
     setCanonical(noindex ? null : new URL(canonical ?? pathname, window.location.origin).href);
   }, [title, rawTitle, description, canonical, noindex, pathname]);
 
@@ -80,7 +98,7 @@ export function usePageMeta({ title, rawTitle, description, canonical, noindex =
     () => () => {
       document.title = DEFAULT_TITLE;
       setMeta('description', DEFAULT_DESCRIPTION);
-      setMeta('robots', null);
+      setNoIndex(false);
       setCanonical(null);
     },
     []

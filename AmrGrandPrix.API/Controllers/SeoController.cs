@@ -53,12 +53,5 @@ public class SeoController : ControllerBase
         return Content(xml!, "application/xml; charset=utf-8");
     }
 
-    /// <summary>
-    /// The public origin, from <c>Site:PublicUrl</c> rather than the request's Host header so a
-    /// spoofed Host can't end up in the cached sitemap. Falls back to the request when unset.
-    /// </summary>
-    private string SiteUrl() =>
-        (_config["Site:PublicUrl"] is { Length: > 0 } configured
-            ? configured
-            : $"{Request.Scheme}://{Request.Host}").TrimEnd('/');
+    private string SiteUrl() => SiteMeta.SiteUrl(_config, Request);
 }

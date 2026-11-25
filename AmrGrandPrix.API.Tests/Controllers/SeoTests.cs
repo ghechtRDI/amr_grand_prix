@@ -1,4 +1,6 @@
 using System.Net;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
@@ -6,7 +8,10 @@ using AmrGrandPrix.API.Services.Seo;
 using AmrGrandPrix.API.Tests.Infrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using Moq;
 
 namespace AmrGrandPrix.API.Tests.Controllers;
 
@@ -124,7 +129,11 @@ public class SpaFallbackHttpTests : IClassFixture<CustomWebApplicationFactory>, 
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
-    private Guid _seriesId, _raceId, _adultId, _minorId;
+    // Seeded once per fixture (xUnit runs InitializeAsync for every test), so the standings
+    // leaders don't repeat
+    private static Guid _seriesId, _raceId, _adultId, _minorId;
+    private static string _seriesName = "";
+    private static readonly SemaphoreSlim SeedLock = new(1, 1);
 
     public SpaFallbackHttpTests(CustomWebApplicationFactory factory)
     {
@@ -136,11 +145,20 @@ public class SpaFallbackHttpTests : IClassFixture<CustomWebApplicationFactory>, 
     {
         await _factory.InitializeDatabaseAsync();
 
+        await SeedLock.WaitAsync();
+        try { await SeedAsync(); }
+        finally { SeedLock.Release(); }
+    }
+
+    private async Task SeedAsync()
+    {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        if (await db.Runners.AnyAsync(r => r.RunnerId == _adultId))
+            return;
 
         var variant = TestData.Variant($"Series {Guid.NewGuid()}");
-        var race = new Race { RaceId = Guid.NewGuid(), RaceVariant = variant, Year = 2031, Date = new DateOnly(2031, 7, 4) };
+        var race = new Race { RaceId = Guid.NewGuid(), RaceVariant = variant, Year = 2031, Date = new DateOnly(2031, 7, 4), Location = "Seward" };
         var adult = new Runner { RunnerId = Guid.NewGuid(), FirstName = "A", LastName = "Adult", Gender = Gender.Male, EstimatedBirthYear = 1985 };
         var minor = new Runner { RunnerId = Guid.NewGuid(), FirstName = "M", LastName = "Minor", Gender = Gender.Male, EstimatedBirthYear = DateTime.Today.Year - 12 };
         db.Races.Add(race);
@@ -158,6 +176,7 @@ public class SpaFallbackHttpTests : IClassFixture<CustomWebApplicationFactory>, 
         await db.SaveChangesAsync();
 
         (_seriesId, _raceId, _adultId, _minorId) = (variant.RaceSeriesId, race.RaceId, adult.RunnerId, minor.RunnerId);
+        _seriesName = variant.RaceSeries.Name;
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -253,5 +272,133 @@ public class SpaFallbackHttpTests : IClassFixture<CustomWebApplicationFactory>, 
         var xml = await response.Content.ReadAsStringAsync();
         xml.Should().Contain($"https://results.alaskamountainrunners.org/runners/{_adultId}")
             .And.NotContain(_minorId.ToString());
+    }
+
+    private const string Site = "https://results.alaskamountainrunners.org";
+
+    private async Task<string> GetHtmlAsync(string path) =>
+        WebUtility.HtmlDecode(await (await _client.GetAsync(path)).Content.ReadAsStringAsync());
+
+    private static string? Tag(string html, string attr, string key) =>
+        Regex.Match(html, $"<meta {attr}=\"{Regex.Escape(key)}\" content=\"([^\"]*)\"") is { Success: true } m
+            ? m.Groups[1].Value
+            : null;
+
+    private static List<JsonElement> JsonLd(string html) =>
+        Regex.Matches(html, "<script type=\"application/ld\\+json\">(.*?)</script>")
+            .Select(m => JsonDocument.Parse(m.Groups[1].Value).RootElement)
+            .ToList();
+
+    [Fact]
+    public async Task Landing_HasSiteMetadata_AndOrganizationJsonLd()
+    {
+        var html = await GetHtmlAsync("/");
+
+        html.Should().Contain("<title>Alaska Mountain Runners Race Results</title>")
+            .And.Contain($"<link rel=\"canonical\" href=\"{Site}/\" />");
+        Tag(html, "property", "og:image").Should().Be($"{Site}/og-image.png");
+        Tag(html, "name", "twitter:card").Should().Be("summary_large_image");
+        Regex.Matches(html, "<title>").Should().HaveCount(1);
+        Regex.Matches(html, "<meta name=\"description\"").Should().HaveCount(1);
+        JsonLd(html).Select(j => j.GetProperty("@type").GetString()).Should().Equal("Organization", "WebSite");
+    }
+
+    [Fact]
+    public async Task RacePage_HasRaceTitle_AndSportsEventJsonLd()
+    {
+        var html = await GetHtmlAsync($"/races/{_raceId.ToString().ToUpperInvariant()}/results");
+
+        html.Should().Contain($"<title>{_seriesName} 2031 Results | Alaska Mountain Runners</title>");
+        Tag(html, "name", "description").Should()
+            .Be($"Full results for {_seriesName} 2031, run July 4, 2031: 2 results with times, places, and age groups.");
+        Tag(html, "property", "og:url").Should().Be($"{Site}/races/{_raceId}/results"); // canonical form of the ID
+
+        var ev = JsonLd(html).Single();
+        ev.GetProperty("@type").GetString().Should().Be("SportsEvent");
+        ev.GetProperty("startDate").GetString().Should().Be("2031-07-04");
+        ev.GetProperty("location").GetProperty("name").GetString().Should().Be("Seward");
+    }
+
+    [Fact]
+    public async Task StandingsPages_NameTheLeaders_AndCanonicalizeToTheYear()
+    {
+        var html = await GetHtmlAsync("/standings");
+
+        html.Should().Contain("<title>2031 Grand Prix Standings | Alaska Mountain Runners</title>")
+            .And.Contain($"<link rel=\"canonical\" href=\"{Site}/standings/2031\" />");
+        Tag(html, "name", "description").Should().EndWith("Leading: A Adult (men).");
+    }
+
+    [Fact]
+    public async Task AdultRunnerPages_UseTheirName()
+    {
+        var html = await GetHtmlAsync($"/runners/{_adultId}");
+        html.Should().Contain("<title>A Adult – Race Results | Alaska Mountain Runners</title>");
+        Tag(html, "property", "og:title").Should().Be("A Adult – Race Results | Alaska Mountain Runners");
+
+        var seriesHtml = await GetHtmlAsync($"/runners/{_adultId}/series/{_seriesId}");
+        seriesHtml.Should().Contain($"<title>A Adult – {_seriesName} Results | Alaska Mountain Runners</title>");
+    }
+
+    [Fact]
+    public async Task MinorRunnerPages_NeverIncludeTheirName()
+    {
+        foreach (var path in new[] { $"/runners/{_minorId}", $"/runners/{_minorId}/series/{_seriesId}" })
+        {
+            var html = await GetHtmlAsync(path);
+            html.Should().Contain("<title>Runner Profile | Alaska Mountain Runners</title>")
+                .And.NotContain("M Minor")
+                .And.NotContain("rel=\"canonical\"");
+        }
+    }
+
+    [Fact]
+    public async Task NotFound_HasNotFoundTitle_AndNoCanonical()
+    {
+        var html = await GetHtmlAsync("/no-such-page");
+
+        html.Should().Contain("<title>Page Not Found | Alaska Mountain Runners</title>").And.NotContain("rel=\"canonical\"");
+        Tag(html, "property", "og:url").Should().BeNull();
+    }
+}
+
+/// <summary>Filled-in values can't break out of their attribute or script tag.</summary>
+public class SpaIndexHtmlTests
+{
+    private static SpaIndexHtml Create()
+    {
+        var env = new Mock<IWebHostEnvironment>();
+        env.Setup(e => e.WebRootFileProvider).Returns(new NullFileProvider());
+        return new SpaIndexHtml(env.Object);
+    }
+
+    [Fact]
+    public void Render_EscapesValues()
+    {
+        const string evil = "Bob \"/><script>alert(1)</script>";
+        var page = new SpaPage
+        {
+            Title = evil,
+            Description = evil,
+            CanonicalPath = "/x",
+            JsonLd = [new Dictionary<string, object> { ["name"] = evil }]
+        };
+
+        var html = Create().Render(page, "https://example.org");
+
+        html.Should().NotContain("<script>alert").And.NotContain("\"/>&lt;");
+        html.Should().Contain("<script type=\"application/ld+json\">");
+        Regex.Matches(html, "</script>").Should().HaveCount(1); // only the JSON-LD script's own
+    }
+
+    [Fact]
+    public void Render_ReplacesTheShellTitle_AndAddsTagsInHead()
+    {
+        var html = Create().Render(new SpaPage { Title = "Athletes", CanonicalPath = "/athletes" }, "https://example.org");
+
+        html.Should().Contain("<title>Athletes | Alaska Mountain Runners</title>")
+            .And.NotContain("<title>Alaska Mountain Runners Race Results</title>");
+        html.IndexOf("rel=\"canonical\"", StringComparison.Ordinal).Should()
+            .BeLessThan(html.IndexOf("</head>", StringComparison.Ordinal));
     }
 }

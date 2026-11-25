@@ -260,18 +260,20 @@ app.MapControllers();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 // The default fallback pattern skips file-like paths, so a missing /assets/x.js is a bare 404.
 // Unknown pages and missing IDs still get the app shell (it renders NotFound) but with a 404.
-app.MapFallback(async (HttpContext http, SpaPageResolver resolver, SpaIndexHtml indexHtml) =>
+// Each page's title, description, Open Graph tags, and JSON-LD are filled in for link previews.
+app.MapFallback(async (HttpContext http, SpaPageResolver resolver, SpaIndexHtml indexHtml, IConfiguration config) =>
 {
     if (!HttpMethods.IsGet(http.Request.Method) && !HttpMethods.IsHead(http.Request.Method))
         return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
 
-    var page = await resolver.ResolveAsync(http.Request.Path.Value ?? "/", http.RequestAborted);
+    var siteUrl = SiteMeta.SiteUrl(config, http.Request);
+    var page = await resolver.ResolveAsync(http.Request.Path.Value ?? "/", siteUrl, http.RequestAborted);
     if (page.NoIndex)
         http.Response.Headers["X-Robots-Tag"] = "noindex";
     // Always revalidate, so a deploy's new asset hashes are picked up right away
     http.Response.Headers.CacheControl = "no-cache";
 
-    return Results.Content(indexHtml.Render(page), "text/html; charset=utf-8", statusCode: page.StatusCode);
+    return Results.Content(indexHtml.Render(page, siteUrl), "text/html; charset=utf-8", statusCode: page.StatusCode);
 });
 
 app.Run();
