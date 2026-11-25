@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
+import { usePageMeta } from '@/hooks/usePageMeta';
 import { AlertCircle, Check } from 'lucide-react';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -121,6 +122,15 @@ export default function Standings() {
   const [loading, setLoading] = useState(true); // until the first standings load (or year list) lands
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  usePageMeta({
+    title: selectedYear ? `${selectedYear} Grand Prix Standings` : 'Grand Prix Standings',
+    description: selectedYear
+      ? `${selectedYear} AMR Grand Prix standings: Open and age-division points for every runner, the race-by-race breakdown, and Run the Gamut finishers.`
+      : undefined,
+    // /standings opens the latest year; point search engines at that year's own URL
+    canonical: selectedYear ? `/standings/${selectedYear}` : undefined,
+  });
 
   const filteredStandings = standings.filter((s) =>
     s.runnerName?.toLowerCase().includes(searchTerm.trim().toLowerCase())

@@ -11,6 +11,8 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import NavBar from './components/layout/NavBar';
 import Footer from './components/layout/Footer';
+import PageMeta from './components/layout/PageMeta';
+import { DEFAULT_TITLE } from './hooks/usePageMeta';
 
 // Route-level code splitting: each page (and its dependencies, e.g. the
 // upload wizard's LLM/dropzone code or TanStack Table) ships in its own
@@ -55,30 +57,59 @@ function App() {
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               {/* Public routes - auth flows (migrated to shadcn/Tailwind) */}
-              <Route path="/login" element={<LoginForm />} />
-              <Route path="/register" element={<RegisterForm />} />
-              <Route path="/confirm-email" element={<EmailConfirmation />} />
-              <Route path="/forgot-password" element={<ForgotPassword />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
-              <Route path="/unauthorized" element={<Unauthorized />} />
-              <Route path="/report" element={<ReportIssue />} />
+              <Route path="/login" element={<PageMeta title="Login" noindex><LoginForm /></PageMeta>} />
+              <Route path="/register" element={<PageMeta title="Register" noindex><RegisterForm /></PageMeta>} />
+              <Route path="/confirm-email" element={<PageMeta title="Confirm Email" noindex><EmailConfirmation /></PageMeta>} />
+              <Route path="/forgot-password" element={<PageMeta title="Forgot Password" noindex><ForgotPassword /></PageMeta>} />
+              <Route path="/reset-password" element={<PageMeta title="Reset Password" noindex><ResetPassword /></PageMeta>} />
+              <Route path="/unauthorized" element={<PageMeta title="Unauthorized" noindex><Unauthorized /></PageMeta>} />
+              <Route
+                path="/report"
+                element={
+                  <PageMeta title="Report an Issue" description="Report a mistake in Alaska Mountain Runners race results or Grand Prix standings.">
+                    <ReportIssue />
+                  </PageMeta>
+                }
+              />
 
               {/* Profile - requires login */}
               <Route
                 path="/profile"
                 element={
                   <ProtectedRoute>
-                    <Profile />
+                    <PageMeta title="Your Profile" noindex>
+                      <Profile />
+                    </PageMeta>
                   </ProtectedRoute>
                 }
               />
 
               {/* Public routes - landing, standings, race results, and athletes */}
-              <Route path="/" element={<Landing />} />
+              <Route path="/" element={<PageMeta rawTitle={DEFAULT_TITLE}><Landing /></PageMeta>} />
               <Route path="/standings" element={<Standings />} />
               <Route path="/standings/:year" element={<Standings />} />
-              <Route path="/race-results" element={<ResultsBrowser />} />
-              <Route path="/athletes" element={<Athletes />} />
+              <Route
+                path="/race-results"
+                element={
+                  <PageMeta
+                    title="Race Results"
+                    description="Browse results from Alaska mountain and trail races by year or by race series, back through every season on record."
+                  >
+                    <ResultsBrowser />
+                  </PageMeta>
+                }
+              />
+              <Route
+                path="/athletes"
+                element={
+                  <PageMeta
+                    title="Athletes"
+                    description="Search every runner in the Alaska Mountain Runners results archive and see their race history and best Grand Prix season."
+                  >
+                    <Athletes />
+                  </PageMeta>
+                }
+              />
               <Route path="/race-series/:seriesId" element={<RaceSeriesDetail />} />
               <Route path="/races/:raceId/results" element={<RaceResults />} />
               <Route path="/runners/:runnerId" element={<RunnerProfile />} />
@@ -89,7 +120,9 @@ function App() {
                 path="/admin/results"
                 element={
                   <ProtectedRoute roles={['Admin', 'Manager']}>
-                    <ResultsManagement />
+                    <PageMeta title="Results Management" noindex>
+                      <ResultsManagement />
+                    </PageMeta>
                   </ProtectedRoute>
                 }
               />
@@ -97,7 +130,9 @@ function App() {
                 path="/admin/results/upload"
                 element={
                   <ProtectedRoute roles={['Admin', 'Manager']}>
-                    <ResultsUpload />
+                    <PageMeta title="Upload Results" noindex>
+                      <ResultsUpload />
+                    </PageMeta>
                   </ProtectedRoute>
                 }
               />
@@ -105,7 +140,9 @@ function App() {
                 path="/admin/runners"
                 element={
                   <ProtectedRoute roles={['Admin', 'Manager']}>
-                    <RunnerManagement />
+                    <PageMeta title="Racer Management" noindex>
+                      <RunnerManagement />
+                    </PageMeta>
                   </ProtectedRoute>
                 }
               />
@@ -114,12 +151,14 @@ function App() {
                 path="/admin/users"
                 element={
                   <ProtectedRoute roles={['Admin']}>
-                    <UserManagement />
+                    <PageMeta title="User Management" noindex>
+                      <UserManagement />
+                    </PageMeta>
                   </ProtectedRoute>
                 }
               />
 
-              <Route path="*" element={<NotFound />} />
+              <Route path="*" element={<PageMeta title="Page Not Found" noindex><NotFound /></PageMeta>} />
             </Routes>
           </Suspense>
           <Footer />

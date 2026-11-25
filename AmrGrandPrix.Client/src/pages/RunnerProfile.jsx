@@ -8,6 +8,7 @@ import { Link, useParams } from 'react-router-dom';
 import { AlertCircle, ChevronRight, Loader2, Pencil } from 'lucide-react';
 import { useRunnerProfile } from '../hooks/useRunnerProfile';
 import { useEditRacer } from '../hooks/useEditRacer';
+import { usePageMeta } from '../hooks/usePageMeta';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { RunnerHeader, RunnerPageShell } from '@/components/runner/RunnerHeader';
@@ -56,6 +57,13 @@ export default function RunnerProfile() {
   const { runnerId } = useParams();
   const { profile, loading, error, reload } = useRunnerProfile(runnerId);
   const editor = useEditRacer({ onSaved: reload });
+
+  usePageMeta({
+    title: profile ? `${profile.fullName} – Race Results` : 'Runner Profile',
+    description: profile
+      ? `${profile.fullName}'s Alaska mountain race results: ${profile.results.length} ${profile.results.length === 1 ? 'race' : 'races'}, personal bests by course, and Grand Prix history.`
+      : undefined,
+  });
 
   return (
     <RunnerPageShell loading={loading} error={error}>
