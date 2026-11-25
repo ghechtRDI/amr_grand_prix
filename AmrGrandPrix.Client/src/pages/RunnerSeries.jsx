@@ -8,6 +8,7 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { BarChart3, Table2 } from 'lucide-react';
 import { useRunnerProfile } from '../hooks/useRunnerProfile';
+import { usePageMeta } from '../hooks/usePageMeta';
 import { RunnerHeader, RunnerPageShell } from '@/components/runner/RunnerHeader';
 import { RunnerResultsTable } from '@/components/runner/RunnerResultsTable';
 import { RunnerTimeChart } from '@/components/runner/RunnerTimeChart';
@@ -70,6 +71,13 @@ export default function RunnerSeries() {
   const { profile, loading, error } = useRunnerProfile(runnerId);
 
   const series = profile?.series.find((s) => s.raceSeriesId === seriesId);
+
+  usePageMeta({
+    title: profile && series ? `${profile.fullName} – ${series.name} Results` : 'Runner Profile',
+    description: profile && series
+      ? `${profile.fullName}'s ${series.name} results, year by year, with finish times charted by course.`
+      : undefined,
+  });
 
   // Sections follow the series summary's variant order (most-raced first).
   const sections = useMemo(() => {

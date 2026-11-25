@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { usePageMeta } from '@/hooks/usePageMeta';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronsUpDown, Trophy } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import * as tokenService from '../services/tokenService';
@@ -184,6 +185,14 @@ export default function RaceResults() {
   const [actionError, setActionError] = useState(null);
   const [ageGroupGender, setAgeGroupGender] = useState('Male');
   const [ageGroupCategory, setAgeGroupCategory] = useState(AGE_CATEGORIES[2]); // default 30-39
+
+  const raceLabel = race ? `${race.name}${race.courseVariant ? ` – ${race.courseVariant}` : ''} ${race.year}` : null;
+  usePageMeta({
+    title: raceLabel ? `${raceLabel} Results` : 'Race Results',
+    description: raceLabel
+      ? `Full results for ${raceLabel}${race.date ? `, run ${formatDateOnly(race.date)}` : ''}: ${race.resultsCount} results with times, places, and age groups.`
+      : undefined,
+  });
 
   const canEdit = isAuthenticated() && hasAnyRole(['Admin', 'Manager']);
   const canDelete = isAuthenticated() && hasRole('Admin');

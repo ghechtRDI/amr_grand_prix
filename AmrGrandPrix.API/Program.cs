@@ -12,6 +12,7 @@ using AmrGrandPrix.API.Services;
 using AmrGrandPrix.API.Services.Captcha;
 using AmrGrandPrix.API.Services.LlmExtraction;
 using AmrGrandPrix.API.Services.LlmExtraction.Providers;
+using AmrGrandPrix.API.Services.Seo;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -199,8 +200,13 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 builder.Services.AddHealthChecks();
 
-// Short-lived caches for hot public reads (e.g. the landing page's site totals)
+// Short-lived caches for hot public reads (e.g. the landing page's site totals, the sitemap)
 builder.Services.AddMemoryCache();
+
+// Search engines: real statuses and noindex for SPA routes, robots.txt, sitemap.xml
+builder.Services.AddSingleton<SpaIndexHtml>();
+builder.Services.AddScoped<SpaPageResolver>();
+builder.Services.AddScoped<SitemapBuilder>();
 
 var app = builder.Build();
 
@@ -238,8 +244,8 @@ if (app.Environment.IsDevelopment())
 // No UseHttpsRedirection: the container only listens on HTTP, and Cloudflare/Caddy
 // redirect HTTP to HTTPS before a request reaches the app.
 
-// Serve the built React app from wwwroot (Dockerfile.production copies the Vite build there)
-app.UseDefaultFiles();
+// Serve the built React app's assets from wwwroot (Dockerfile.production copies the Vite build
+// there). No UseDefaultFiles: "/" goes through the SPA fallback below like every other page.
 app.UseStaticFiles();
 
 app.UseRouting();
@@ -252,7 +258,21 @@ app.MapControllers();
 
 // Client-side routes (e.g. /standings/2026) get index.html; unknown API routes stay 404
 app.MapFallback("/api/{**path}", () => Results.NotFound());
-app.MapFallbackToFile("index.html");
+// The default fallback pattern skips file-like paths, so a missing /assets/x.js is a bare 404.
+// Unknown pages and missing IDs still get the app shell (it renders NotFound) but with a 404.
+app.MapFallback(async (HttpContext http, SpaPageResolver resolver, SpaIndexHtml indexHtml) =>
+{
+    if (!HttpMethods.IsGet(http.Request.Method) && !HttpMethods.IsHead(http.Request.Method))
+        return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+
+    var page = await resolver.ResolveAsync(http.Request.Path.Value ?? "/", http.RequestAborted);
+    if (page.NoIndex)
+        http.Response.Headers["X-Robots-Tag"] = "noindex";
+    // Always revalidate, so a deploy's new asset hashes are picked up right away
+    http.Response.Headers.CacheControl = "no-cache";
+
+    return Results.Content(indexHtml.Render(page), "text/html; charset=utf-8", statusCode: page.StatusCode);
+});
 
 app.Run();
 

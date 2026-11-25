@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { usePageMeta } from '@/hooks/usePageMeta';
 import { createColumnHelper } from '@tanstack/react-table';
 import { Trophy } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
@@ -160,6 +161,13 @@ export default function RaceSeriesDetail() {
   const [series, setSeries] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  usePageMeta({
+    title: series ? `${series.name} Results and Records` : 'Race Series',
+    description: series
+      ? `Every year of ${series.name} results, all-time top times, and course records.`
+      : undefined,
+  });
 
   const requestedTab = searchParams.get('tab');
   const initialTab = VALID_TABS.has(requestedTab) ? requestedTab : 'races';
