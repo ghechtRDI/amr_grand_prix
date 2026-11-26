@@ -141,7 +141,7 @@ export default function NavBar() {
               <DropdownMenuTrigger className={dropdownTriggerClass(location.pathname === '/profile')}>
                 <CircleUser className="size-4" aria-hidden="true" />
                 <span>{user?.firstName || user?.email}</span>
-                {user?.roles?.length > 0 && (
+                {isAdminOrManager && (
                   <Badge variant="secondary" className="border border-white/20 bg-white/10 text-secondary-foreground">
                     {user.roles.join(', ')}
                   </Badge>
@@ -221,7 +221,7 @@ export default function NavBar() {
                 <div className="flex items-center gap-2 px-1">
                   <CircleUser className="size-4 text-secondary-foreground/80" aria-hidden="true" />
                   <span className="text-sm font-medium">{user?.firstName || user?.email}</span>
-                  {user?.roles?.length > 0 && (
+                  {isAdminOrManager && (
                     <Badge variant="secondary" className="border border-white/20 bg-white/10 text-secondary-foreground">
                       {user.roles.join(', ')}
                     </Badge>
