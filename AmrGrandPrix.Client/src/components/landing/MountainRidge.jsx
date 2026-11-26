@@ -4,6 +4,10 @@
  * climbing to the snow-capped high peak, and a front range filled with the page background so the
  * next section appears to rest on the mountains. Colors come from theme tokens, so it re-tints
  * for light/dark mode with no assets.
+ *
+ * Sizing: the viewBox starts at y=80 (nothing is drawn above the far peak at y=90) and the SVG keeps
+ * that 6:1 ratio, so its height grows with the viewport and the peaks are never cropped on wide
+ * screens. Below 960px the 10rem minimum height takes over and `slice` trims the sides instead.
  */
 
 import { cn } from '@/lib/utils';
@@ -11,11 +15,11 @@ import { cn } from '@/lib/utils';
 export default function MountainRidge({ className }) {
   return (
     <svg
-      viewBox="0 0 1440 320"
+      viewBox="0 80 1440 240"
       preserveAspectRatio="xMidYMax slice"
       aria-hidden="true"
       focusable="false"
-      className={cn('block w-full', className)}
+      className={cn('block aspect-[6/1] min-h-40 w-full', className)}
     >
       {/* Sun / midnight sun */}
       <circle cx="930" cy="128" r="30" className="fill-secondary/60" />

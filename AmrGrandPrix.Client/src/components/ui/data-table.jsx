@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   useReactTable,
   getCoreRowModel,
@@ -21,7 +22,16 @@ import { cn } from '@/lib/utils';
  *
  * `initialSorting` sets the starting sort (TanStack `SortingState`, e.g. `[{ id: 'points', desc: true }]`).
  * `pageSize` turns on client-side paging for long tables; leave it unset to show every row.
+ * `getRowHref(rowData)` makes each row clickable, going to the returned path (cmd/ctrl/middle-click
+ * opens a new tab). It is a mouse convenience: put a real <Link> in one of the cells so the row is
+ * reachable by keyboard and screen reader too. Clicks on links/buttons inside the row, and drags
+ * that select text, are left alone.
  */
+function isRowLinkClick(event) {
+  if (event.target.closest('a, button, input, select, textarea, [role="button"]')) return false;
+  return !window.getSelection()?.toString();
+}
+
 export function DataTable({
   columns,
   data,
@@ -32,7 +42,9 @@ export function DataTable({
   pageSize,
   className,
   onSearchChange,
+  getRowHref,
 }) {
+  const navigate = useNavigate();
   const [sorting, setSorting] = useState(initialSorting);
   const [globalFilter, setGlobalFilterState] = useState('');
   // Typing in the search box (as opposed to the table resetting it) is reported to onSearchChange
@@ -107,7 +119,21 @@ export function DataTable({
             </TableRow>
           ) : (
             table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id}>
+              <TableRow
+                key={row.id}
+                {...(getRowHref && {
+                  className: 'cursor-pointer',
+                  onClick: (e) => {
+                    if (!isRowLinkClick(e)) return;
+                    const href = getRowHref(row.original);
+                    if (e.metaKey || e.ctrlKey) window.open(href, '_blank', 'noopener');
+                    else navigate(href);
+                  },
+                  onAuxClick: (e) => {
+                    if (e.button === 1 && isRowLinkClick(e)) window.open(getRowHref(row.original), '_blank', 'noopener');
+                  },
+                })}
+              >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                 ))}
