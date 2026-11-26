@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { usePageMeta } from '@/hooks/usePageMeta';
+import { trackEvent } from '@/lib/analytics';
 import { AlertCircle, Check } from 'lucide-react';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -184,7 +185,25 @@ export default function Standings() {
     loadStandings();
   }, [loadStandings]);
 
+  const trackChange = (change, value) => trackEvent('standings_view_change', { change, value: String(value) });
+
+  const handleTabChange = (tab) => {
+    setMainTab(tab);
+    trackChange('tab', tab);
+  };
+
+  const handleGenderChange = (g) => {
+    setGender(g);
+    trackChange('gender', g);
+  };
+
+  const handleAgeCategoryChange = (category) => {
+    setAgeCategory(category);
+    trackChange('age_category', category);
+  };
+
   const handleYearChange = (y) => {
+    trackChange('year', y);
     setSelectedYear(parseInt(y));
     navigate(`/standings/${y}`, { replace: true });
   };
@@ -221,7 +240,7 @@ export default function Standings() {
           </div>
         </div>
 
-        <Tabs value={mainTab} onValueChange={setMainTab}>
+        <Tabs value={mainTab} onValueChange={handleTabChange}>
           {/* Short labels on phones so all four tabs fit without scrolling. */}
           <TabsList variant="line" className="mb-6 h-auto w-full justify-start gap-3 border-b border-border p-0 sm:w-fit sm:gap-4">
             {MAIN_TABS.map(({ value, label, short }) => (
@@ -238,7 +257,7 @@ export default function Standings() {
 
           <TabsContent value={DIVISION_OPEN}>
             <div className="mb-6">
-              <GenderToggle value={gender} onChange={setGender} />
+              <GenderToggle value={gender} onChange={handleGenderChange} />
             </div>
           </TabsContent>
 
@@ -246,7 +265,7 @@ export default function Standings() {
             <div className="mb-6 flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Age Group:</span>
-                <Select value={ageCategory} onValueChange={setAgeCategory}>
+                <Select value={ageCategory} onValueChange={handleAgeCategoryChange}>
                   <SelectTrigger className="w-40">
                     <SelectValue>{(value) => value}</SelectValue>
                   </SelectTrigger>
@@ -257,13 +276,13 @@ export default function Standings() {
                   </SelectContent>
                 </Select>
               </div>
-              <GenderToggle value={gender} onChange={setGender} />
+              <GenderToggle value={gender} onChange={handleGenderChange} />
             </div>
           </TabsContent>
 
           <TabsContent value={VIEW_BREAKDOWN}>
             <div className="mb-6">
-              <GenderToggle value={gender} onChange={setGender} />
+              <GenderToggle value={gender} onChange={handleGenderChange} />
             </div>
           </TabsContent>
         </Tabs>

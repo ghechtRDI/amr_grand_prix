@@ -11,6 +11,7 @@ const LINKS = [
   { to: '/athletes', label: 'Athletes' },
   { to: '/standings', label: 'Grand Prix Standings' },
   { to: '/report', label: 'Report an Issue' },
+  { to: '/privacy', label: 'Privacy' },
 ];
 
 const linkClass = 'text-muted-foreground transition-colors hover:text-foreground';

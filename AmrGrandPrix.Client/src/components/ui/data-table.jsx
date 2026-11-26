@@ -31,9 +31,15 @@ export function DataTable({
   initialSorting = [],
   pageSize,
   className,
+  onSearchChange,
 }) {
   const [sorting, setSorting] = useState(initialSorting);
-  const [globalFilter, setGlobalFilter] = useState('');
+  const [globalFilter, setGlobalFilterState] = useState('');
+  // Typing in the search box (as opposed to the table resetting it) is reported to onSearchChange
+  const handleSearchInput = (value) => {
+    setGlobalFilterState(value);
+    onSearchChange?.(value);
+  };
   const paginated = pageSize > 0;
 
   const table = useReactTable({
@@ -41,7 +47,7 @@ export function DataTable({
     columns,
     state: { sorting, globalFilter },
     onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
+    onGlobalFilterChange: setGlobalFilterState,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -59,7 +65,7 @@ export function DataTable({
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       {searchable && (
-        <SearchInput value={globalFilter} onChange={setGlobalFilter} placeholder={searchPlaceholder} className="max-w-sm" />
+        <SearchInput value={globalFilter} onChange={handleSearchInput} placeholder={searchPlaceholder} className="max-w-sm" />
       )}
 
       <Table>

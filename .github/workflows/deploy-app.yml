@@ -34,6 +34,10 @@ jobs:
   build:
     needs: test
     uses: ./.github/workflows/_build.yml
+    with:
+      # Repository variable (Settings → Secrets and variables → Actions → Variables); the sandbox
+      # build doesn't pass one, so only production loads Google Analytics
+      ga_measurement_id: ${{ vars.GA_MEASUREMENT_ID }}
     permissions:
       contents: read
       packages: write

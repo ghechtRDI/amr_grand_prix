@@ -3,6 +3,11 @@ name: Build image
 
 on:
   workflow_call:
+    inputs:
+      ga_measurement_id:
+        description: GA4 measurement ID baked into the client; empty builds don't load Google Analytics
+        type: string
+        default: ""
     outputs:
       image:
         description: Full image reference that was pushed
@@ -37,5 +42,7 @@ jobs:
           file: Dockerfile.production
           push: true
           tags: ${{ steps.ref.outputs.image }}
+          build-args: |
+            VITE_GA_MEASUREMENT_ID=${{ inputs.ga_measurement_id }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -9,8 +9,11 @@ WORKDIR /client
 COPY AmrGrandPrix.Client/package*.json ./
 RUN npm ci
 
-# Copy client source and build
+# Copy client source and build. The GA4 measurement ID is baked in by Vite; only the production
+# deploy passes it, so dev and sandbox builds never load Google Analytics.
 COPY AmrGrandPrix.Client/ ./
+ARG VITE_GA_MEASUREMENT_ID=""
+ENV VITE_GA_MEASUREMENT_ID=$VITE_GA_MEASUREMENT_ID
 RUN npm run build
 
 # Stage 2: Build .NET Application

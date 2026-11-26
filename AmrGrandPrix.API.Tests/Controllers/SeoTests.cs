@@ -195,6 +195,7 @@ public class SpaFallbackHttpTests : IClassFixture<CustomWebApplicationFactory>, 
     [Theory]
     [InlineData("/")]
     [InlineData("/athletes")]
+    [InlineData("/privacy")]
     [InlineData("/Race-Results/")] // case-insensitive, trailing slash, like React Router
     [InlineData("/standings")]
     [InlineData("/standings/2031")]

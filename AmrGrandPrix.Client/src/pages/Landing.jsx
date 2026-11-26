@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { RankBadge } from '@/components/standings/shared';
 import MountainRidge from '@/components/landing/MountainRidge';
 import { useAuth } from '../hooks/useAuth';
+import { trackEvent } from '@/lib/analytics';
 
 const SNAPSHOT_SIZE = 5;
 const SNAPSHOT_GENDERS = ['female', 'male'];
@@ -186,7 +187,7 @@ function GrandPrixSection() {
                     size="sm"
                     nativeButton={false}
                     render={
-                      <Link to={`/standings/${year}`}>
+                      <Link to={`/standings/${year}`} onClick={() => trackEvent('landing_cta_click', { cta: 'full_standings' })}>
                         Full standings <ArrowRight className="size-4" aria-hidden="true" />
                       </Link>
                     }
@@ -239,7 +240,7 @@ export default function Landing() {
               size="lg"
               nativeButton={false}
               render={
-                <Link to="/race-results">
+                <Link to="/race-results" onClick={() => trackEvent('landing_cta_click', { cta: 'browse_results' })}>
                   <ListChecks className="size-4" aria-hidden="true" /> Browse Race Results
                 </Link>
               }
@@ -249,7 +250,7 @@ export default function Landing() {
               variant="outline"
               nativeButton={false}
               render={
-                <Link to="/athletes">
+                <Link to="/athletes" onClick={() => trackEvent('landing_cta_click', { cta: 'find_athlete' })}>
                   <Users className="size-4" aria-hidden="true" /> Find an Athlete
                 </Link>
               }
