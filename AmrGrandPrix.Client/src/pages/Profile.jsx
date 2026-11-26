@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { trackEvent } from '@/lib/analytics';
 import {
   Select,
   SelectContent,
@@ -201,10 +202,9 @@ function ClaimSuggestions() {
         body: JSON.stringify({ runnerId }),
       });
 
-      setClaimResults((prev) => ({
-        ...prev,
-        [runnerId]: res.status === 200 ? 'approved' : res.status === 201 ? 'pending' : 'error',
-      }));
+      const outcome = res.status === 200 ? 'approved' : res.status === 201 ? 'pending' : 'error';
+      setClaimResults((prev) => ({ ...prev, [runnerId]: outcome }));
+      trackEvent('result_claim', { outcome });
 
       if (res.status === 200) {
         await refreshUser();

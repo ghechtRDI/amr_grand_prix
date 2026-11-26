@@ -117,7 +117,8 @@ Google renders JavaScript, but Facebook, Slack, iMessage, and much of Bing do no
 
 ### Off-site
 
-- Verify the domain in **Google Search Console** via a DNS TXT record in the Cloudflare Terraform module (`terraform/modules/vps_app/dns.tf`), then submit the sitemap. Import into Bing Webmaster Tools from Search Console.
+- **Google Search Console:** no new verification is needed. `alaskamountainrunners.org` already has a `google-site-verification` TXT record at the zone root, which verifies a Domain property covering every subdomain, including `results.`. Make sure the shared AMR account owns that property (Settings → Users and permissions), then submit `https://results.alaskamountainrunners.org/sitemap.xml` under it. Import into Bing Webmaster Tools from Search Console.
+  - The verification record stays out of this repo's Terraform: it verifies the whole club domain, and destroying the results infrastructure would delete it. To re-verify (or verify another Google account), add a TXT record in the Cloudflare dashboard next to the existing one.
 - Ask alaskamountainrunners.org and the individual race sites to link to the results site; links from those sites will matter more than anything on-page.
 
 ### Decision: keep runners under 18 out of search engines
@@ -136,7 +137,8 @@ Approved: runners under 18 are not indexed.
 ## Phase 3: Google Analytics 4
 
 - **Account:** the shared Alaska Mountain Runners Gmail account owns the GA4 property and the Search Console verification. Add individual maintainers as users rather than making a personal account the owner.
-- **Configuration:** create a GA4 property; pass the measurement ID as `VITE_GA_MEASUREMENT_ID` through `Dockerfile.production` and CI, the same way `VITE_TURNSTILE_SITE_KEY` flows today. Unset (dev, sandbox) means GA never loads.
+- **Property:** the club's existing GA4 property for alaskamountainrunners.org, through a dedicated web data stream for the results site (the WordPress site keeps its own MonsterInsights stream). Setup and report filtering: `DOCS/DEPLOYMENT_SETUP.md` → Google Analytics.
+- **Configuration:** the measurement ID is the `GA_MEASUREMENT_ID` repository variable, which `deploy-app.yml` passes to `Dockerfile.production` as the `VITE_GA_MEASUREMENT_ID` build arg. The sandbox build doesn't pass it, and dev doesn't set it, so GA never loads there.
 - **Loader:** `lib/analytics.js` injects `gtag.js` with `send_page_view: false` and exposes `trackPageView` / `trackEvent`.
 - **SPA page views:** a `RouteTracker` component listens for route changes and sends `page_view` with the page path and title.
 - **Exclude internal traffic:** skip `/admin/*` routes and logged-in Admin/Manager users so volunteers uploading results don't skew the numbers.
@@ -148,7 +150,7 @@ Approved: runners under 18 are not indexed.
   - landing-page call-to-action clicks
 - **Privacy:**
   - Add a short `/privacy` page (linked in the footer) that names Google Analytics.
-  - Turn off Google signals and ad personalization in the GA property.
+  - Google signals and ad personalization are turned off in the results site's tag (`lib/analytics.js`). The property-wide toggles also cover the WordPress stream, so they're the club's call.
   - No consent banner is legally required for a US audience, but this can be revisited.
 - **Content-Security-Policy:** none exists today. If one is added later, allow `www.googletagmanager.com` and `*.google-analytics.com`.
 
@@ -162,7 +164,7 @@ Approved: runners under 18 are not indexed.
 | 2 | `usePageMeta`, noindex rules, `robots.txt`, `sitemap.xml`, real 404s | M |
 | 3 | Server-side meta and Open Graph filling, JSON-LD, OG image | M |
 | 4 | GA4 loader, RouteTracker, custom events, privacy page | S |
-| 5 | Search Console TXT record in Terraform; submit sitemap | XS |
+| ~~5~~ | ~~Search Console TXT record in Terraform~~: not needed, the club domain is already verified (see *Off-site*). Submitting the sitemap is a manual step after deploy | — |
 
 PR 1 doesn't depend on the others and gives the most visible result right away.
 

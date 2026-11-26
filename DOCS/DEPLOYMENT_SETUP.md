@@ -253,6 +253,20 @@ How the site moved from `grandprix.` to `results.alaskamountainrunners.org`; the
 
 The sandbox has no legacy hostname. Run **Sandbox down** before applying a rename to it, and set its `SITE_HOST` before the next **Sandbox up**.
 
+## Google Analytics
+
+GA4 loads only in production builds, and only once the measurement ID is set. Until then the site works the same, just without analytics.
+
+The results site reports to the club's existing GA4 property (the one for alaskamountainrunners.org), through **its own web data stream**. The WordPress site keeps its stream (MonsterInsights), so each site has its own measurement ID and stream settings, while the property shows both. Both sites set the same `_ga` cookie on `alaskamountainrunners.org`, so a visitor who uses both counts as one user in the property. Sessions are counted per stream, so a visit that crosses sites shows up as one session on each.
+
+1. Signed in as the shared Alaska Mountain Runners Google account: Admin → Data streams → the results site's web stream (name it e.g. "Results site", URL `https://results.alaskamountainrunners.org`). Copy its measurement ID (`G-…`). Don't reuse the WordPress stream's ID: step 3 would then change the WordPress site's tracking.
+2. **Property-wide settings:** Google signals (Admin → Data collection) and ads personalization (Admin → Data collection → Data collection for ads personalization) apply to every stream in the property, including WordPress. The results site turns both off in its own tag regardless (`lib/analytics.js`), which is what the `/privacy` page promises, so the property toggles are the club's choice for the WordPress site. The same goes for data retention. Add maintainers as users rather than making a personal account the owner.
+3. In the results stream's **Enhanced measurement** settings, turn off **Page changes based on browser history events**. The app sends its own page views (`RouteTracker`), so leaving it on would count each page twice. This setting is per stream and doesn't affect WordPress.
+4. `gh variable set GA_MEASUREMENT_ID --body "G-…"` (a repository variable: it's public in the page anyway). The next app deploy to production bakes it into the build; the sandbox never gets it.
+5. After the deploy, check GA's **Realtime** or **DebugView** report.
+
+**Reading the reports:** property reports combine both sites. To see one site, add a comparison or filter on **Stream name** (or **Hostname**: `results.alaskamountainrunners.org` vs. `alaskamountainrunners.org`). Custom events (`standings_view_change`, `athlete_search`, `result_claim`, `sign_up`, `landing_cta_click`) come only from the results site.
+
 ## First admin
 
 Registration always grants the `ReadOnly` role. Register and confirm your account on the site, then promote it on the server:

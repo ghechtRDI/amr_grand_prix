@@ -5,9 +5,10 @@
  * names). Admins and managers get a pencil button per row that opens the racer editor.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { createColumnHelper } from '@tanstack/react-table';
+import { trackEvent } from '@/lib/analytics';
 import { AlertCircle, Loader2, Pencil, X } from 'lucide-react';
 import * as runnerService from '../services/runnerService';
 import { useEditRacer } from '../hooks/useEditRacer';
@@ -94,6 +95,14 @@ export default function Athletes() {
 
   useEffect(load, [load]);
 
+  // Report that the search was used, once per visit - never what was typed, so no names reach GA
+  const searchTracked = useRef(false);
+  const handleSearchChange = useCallback((value) => {
+    if (searchTracked.current || !value.trim()) return;
+    searchTracked.current = true;
+    trackEvent('athlete_search');
+  }, []);
+
   const { canEdit, openEditor, loadingId, error: editError, clearError, dialog } = useEditRacer({ onSaved: load });
 
   const columns = useMemo(
@@ -168,6 +177,7 @@ export default function Athletes() {
             initialSorting={INITIAL_SORTING}
             pageSize={50}
             searchPlaceholder="Search athletes…"
+            onSearchChange={handleSearchChange}
             emptyMessage="No athletes found."
           />
         )}

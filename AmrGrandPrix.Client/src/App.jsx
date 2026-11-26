@@ -12,6 +12,7 @@ import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import NavBar from './components/layout/NavBar';
 import Footer from './components/layout/Footer';
 import PageMeta from './components/layout/PageMeta';
+import RouteTracker from './components/layout/RouteTracker';
 import { DEFAULT_TITLE } from './hooks/usePageMeta';
 
 // Route-level code splitting: each page (and its dependencies, e.g. the
@@ -33,6 +34,7 @@ const RaceSeriesDetail = lazy(() => import('./pages/RaceSeriesDetail'));
 const RunnerProfile = lazy(() => import('./pages/RunnerProfile'));
 const RunnerSeries = lazy(() => import('./pages/RunnerSeries'));
 const ReportIssue = lazy(() => import('./pages/ReportIssue'));
+const Privacy = lazy(() => import('./pages/Privacy'));
 const Unauthorized = lazy(() => import('./pages/Unauthorized'));
 const ResultsUpload = lazy(() => import('./pages/admin/ResultsUpload'));
 const ResultsManagement = lazy(() => import('./pages/admin/ResultsManagement'));
@@ -53,6 +55,7 @@ function App() {
     <Router>
       <ThemeProvider>
         <AuthProvider>
+          <RouteTracker />
           <NavBar />
           <Suspense fallback={<RouteFallback />}>
             <Routes>
@@ -68,6 +71,15 @@ function App() {
                 element={
                   <PageMeta title="Report an Issue" description="Report a mistake in Alaska Mountain Runners race results or Grand Prix standings.">
                     <ReportIssue />
+                  </PageMeta>
+                }
+              />
+
+              <Route
+                path="/privacy"
+                element={
+                  <PageMeta title="Privacy" description="What the Alaska Mountain Runners results site collects, including Google Analytics, and how it is used.">
+                    <Privacy />
                   </PageMeta>
                 }
               />

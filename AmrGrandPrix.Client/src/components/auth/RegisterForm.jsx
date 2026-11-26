@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Captcha } from './Captcha';
+import { trackEvent } from '@/lib/analytics';
 
 const CAPTCHA_REQUIRED = !!import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
@@ -70,6 +71,7 @@ export const RegisterForm = () => {
       const result = await registerUser(payload);
 
       if (result.success) {
+        trackEvent('sign_up', { method: 'email' });
         setSuccess(true);
         // Redirect to login after 3 seconds
         setTimeout(() => {

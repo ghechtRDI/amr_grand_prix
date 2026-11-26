@@ -66,6 +66,12 @@ public class SpaPageResolver
             Description = "Report a mistake in Alaska Mountain Runners race results or Grand Prix standings.",
             CanonicalPath = "/report"
         },
+        ["privacy"] = new()
+        {
+            Title = "Privacy",
+            Description = "What the Alaska Mountain Runners results site collects, including Google Analytics, and how it is used.",
+            CanonicalPath = "/privacy"
+        },
         ["login"] = SpaPage.Private("Login"),
         ["register"] = SpaPage.Private("Register"),
         ["confirm-email"] = SpaPage.Private("Confirm Email"),
