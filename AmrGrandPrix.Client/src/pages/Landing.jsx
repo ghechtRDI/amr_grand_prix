@@ -1,12 +1,25 @@
 /**
  * Landing Page (public, "/")
  * Introduces the site as the Alaska Mountain Runners results archive, then features the Grand Prix:
- * the basic rules and a leader snapshot for the latest season with standings.
+ * the basic rules and a leader snapshot for the latest season with standings. Signed-out visitors
+ * also get a "claim your results" call to action: a short one in the hero and a fuller pitch below
+ * the Grand Prix card.
  */
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Award, Flag, ListChecks, Mountain, MountainSnow, Trophy, Users } from 'lucide-react';
+import {
+  ArrowRight,
+  Award,
+  BadgeCheck,
+  Flag,
+  ListChecks,
+  Mountain,
+  MountainSnow,
+  Trophy,
+  UserPlus,
+  Users,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -38,6 +51,24 @@ const RULES = [
     icon: Flag,
     title: 'Run the Gamut',
     body: 'Finish 7 or more of the season’s Grand Prix events, scoring or not, to earn Run the Gamut honors.',
+  },
+];
+
+const ACCOUNT_BENEFITS = [
+  {
+    icon: BadgeCheck,
+    title: 'Claim your results',
+    body: 'Link your name in the archive to your account, so every race you’ve run is in one place.',
+  },
+  {
+    icon: Award,
+    title: 'Get placed correctly',
+    body: 'Add your birth date and preferred or alternate names so new results land on your record, in the right age group.',
+  },
+  {
+    icon: Trophy,
+    title: 'Follow your season',
+    body: 'Your race history, Grand Prix points, and personal bests are one click away from any page under My Results.',
   },
 ];
 
@@ -207,6 +238,60 @@ function GrandPrixSection() {
   );
 }
 
+/** Signed-out pitch for creating an account, shown below the Grand Prix card. */
+function ClaimResultsSection() {
+  return (
+    <section aria-labelledby="claim-heading" className="px-4 pb-12 md:pb-16">
+      <div className="mx-auto max-w-5xl rounded-2xl bg-gradient-to-br from-primary/10 via-card to-secondary/10 p-6 ring-1 ring-foreground/10 md:p-10">
+        <div className="grid gap-8 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] md:items-center">
+          <div>
+            <p className="mb-2 flex items-center gap-2 text-sm font-semibold tracking-wider text-primary uppercase">
+              <UserPlus className="size-4" aria-hidden="true" />
+              Free account
+            </p>
+            <h2 id="claim-heading" className="text-2xl font-semibold tracking-tight md:text-3xl">
+              Raced in Alaska? Claim your results.
+            </h2>
+            <p className="mt-3 text-muted-foreground">
+              Your results are probably already here. Create an account and we’ll suggest the
+              matching records so you can claim them as yours.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <Button
+                nativeButton={false}
+                render={
+                  <Link to="/register" onClick={() => trackEvent('landing_cta_click', { cta: 'register_section' })}>
+                    Create an account <ArrowRight className="size-4" aria-hidden="true" />
+                  </Link>
+                }
+              />
+              <span className="text-sm text-muted-foreground">
+                Have one?{' '}
+                <Link to="/login" className="font-medium text-primary hover:underline">
+                  Log in
+                </Link>
+              </span>
+            </div>
+          </div>
+          <ul className="grid gap-3">
+            {ACCOUNT_BENEFITS.map((b) => (
+              <li key={b.title} className="flex gap-3 rounded-xl bg-card/70 p-4 ring-1 ring-foreground/5">
+                <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                  <b.icon className="size-5" aria-hidden="true" />
+                </span>
+                <div>
+                  <h3 className="font-semibold">{b.title}</h3>
+                  <p className="text-sm text-muted-foreground">{b.body}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Landing() {
   const { user } = useAuth();
 
@@ -255,15 +340,28 @@ export default function Landing() {
                 </Link>
               }
             />
+            {!user && (
+              <Button
+                size="lg"
+                variant="outline"
+                nativeButton={false}
+                render={
+                  <Link to="/register" onClick={() => trackEvent('landing_cta_click', { cta: 'register_hero' })}>
+                    <UserPlus className="size-4" aria-hidden="true" /> Claim Your Results
+                  </Link>
+                }
+              />
+            )}
           </div>
           <div className="mt-6">
             <SiteTotals />
           </div>
         </div>
-        <MountainRidge className="-mt-4 h-40 md:-mt-10 md:h-64" />
+        <MountainRidge className="-mt-4 md:-mt-10" />
       </section>
 
       <GrandPrixSection />
+      {!user && <ClaimResultsSection />}
     </div>
   );
 }

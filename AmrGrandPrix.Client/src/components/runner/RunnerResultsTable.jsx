@@ -8,6 +8,8 @@ import { formatPercentBehind, formatTime, parseTimeSpanToSeconds } from '@/lib/t
 
 const columnHelper = createColumnHelper();
 
+const resultHref = (result) => `/races/${result.raceId}/results`;
+
 function raceLabel(result) {
   return result.courseVariant ? `${result.raceName} - ${result.courseVariant}` : result.raceName;
 }
@@ -36,21 +38,30 @@ const RACE_COLUMN = columnHelper.accessor(raceLabel, {
   id: 'race',
   header: 'Race',
   cell: ({ row, getValue }) => (
-    <Link to={`/races/${row.original.raceId}/results`} className="font-medium text-foreground hover:text-primary">
+    <Link to={resultHref(row.original)} className="font-medium text-foreground hover:text-primary">
       {getValue()}
     </Link>
   ),
 });
 
+const formatResultDate = (date) => formatDateOnly(date, { year: 'numeric', month: 'short', day: 'numeric' });
+
+const DATE_COLUMN = columnHelper.accessor('date', {
+  header: 'Date',
+  cell: (info) => <span className="whitespace-nowrap">{formatResultDate(info.getValue())}</span>,
+});
+
+// Without the Race column (series page) the date is the row's keyboard-reachable link.
+const DATE_LINK_COLUMN = columnHelper.accessor('date', {
+  header: 'Date',
+  cell: ({ row, getValue }) => (
+    <Link to={resultHref(row.original)} className="whitespace-nowrap font-medium text-foreground hover:text-primary">
+      {formatResultDate(getValue())}
+    </Link>
+  ),
+});
+
 const COLUMNS = [
-  columnHelper.accessor('date', {
-    header: 'Date',
-    cell: (info) => (
-      <span className="whitespace-nowrap">
-        {formatDateOnly(info.getValue(), { year: 'numeric', month: 'short', day: 'numeric' })}
-      </span>
-    ),
-  }),
   placeColumn('overallPlace', 'Overall', 'overallPlace', 'overallFinishers'),
   placeColumn('genderPlace', 'Gender', 'genderPlace', 'genderFinishers'),
   placeColumn('ageGroupPlace', 'Age Group', 'ageGroupPlace', 'ageGroupFinishers'),
@@ -96,15 +107,15 @@ const PR_COLUMN = columnHelper.accessor('isPersonalRecord', {
 });
 
 /**
- * A runner's results, newest first. `showRace` adds the "Race - Variant" column for the all-results
+ * A runner's results, newest first; each row links to that race's results. `showRace` adds the "Race - Variant" column for the all-results
  * table; the per-series page hides it (each table there is scoped to one variant) and instead adds
  * "Behind Winner" and, when any result qualifies, "Age-Graded".
  */
 export function RunnerResultsTable({ results, showRace = true }) {
   const hasAgeGraded = results.some((r) => r.ageGradedTime);
   const columns = showRace
-    ? [RACE_COLUMN, ...COLUMNS, PR_COLUMN]
-    : [...COLUMNS, BEHIND_COLUMN, ...(hasAgeGraded ? [AGE_GRADED_COLUMN] : []), PR_COLUMN];
+    ? [RACE_COLUMN, DATE_COLUMN, ...COLUMNS, PR_COLUMN]
+    : [DATE_LINK_COLUMN, ...COLUMNS, BEHIND_COLUMN, ...(hasAgeGraded ? [AGE_GRADED_COLUMN] : []), PR_COLUMN];
 
   return (
     <DataTable
@@ -113,6 +124,7 @@ export function RunnerResultsTable({ results, showRace = true }) {
       searchable={showRace}
       searchPlaceholder="Search races…"
       emptyMessage="No results recorded yet."
+      getRowHref={resultHref}
     />
   );
 }
