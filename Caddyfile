@@ -11,5 +11,12 @@
 		# client IP; without this the app would see Cloudflare's edge address and the
 		# per-IP rate limiter would lump all visitors together.
 		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+
+		# A deploy stops the old app container before the new one is listening. Instead of
+		# answering 502 in that gap, keep retrying the connection (every 250 ms) for up to
+		# 30 s, so visitors see a short pause rather than an error page. Only failed dials
+		# are retried, so a request is never sent to the app twice.
+		lb_try_duration 30s
+		lb_try_interval 250ms
 	}
 }

@@ -3,7 +3,9 @@
 # SSH is closed in the Vultr firewall, so this opens port 22 to the runner's IP for the
 # duration of the job and removes the rule afterwards (even on failure). Then it copies
 # docker-compose.prod.yml, the Caddyfile, and a .env rendered from this environment's
-# secrets, runs the database migrations, and restarts the stack.
+# secrets, runs the database migrations, and restarts the stack. Caddy holds requests while
+# the app container is swapped (lb_try_duration in the Caddyfile), so a deploy is a pause of a
+# few seconds, not a burst of 502s.
 #
 # GitHub Environment (production / sandbox) settings this reads:
 #   vars:    SITE_HOST, CLUB_NOTIFICATION_EMAIL, POSTGRES_DATA (prod only),
@@ -139,6 +141,9 @@ jobs:
           # `run` attaches stdin, which here is this script: it would swallow the lines below.
           $dc run --rm --entrypoint ./efbundle app </dev/null
           $dc up -d --wait --wait-timeout 180 --remove-orphans
+          # The Caddyfile is a bind mount, so editing it doesn't recreate the container; reload
+          # so a changed Caddyfile takes effect (a no-op if it didn't change)
+          $dc exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null
           docker logout ghcr.io
           docker image prune -f
           EOF
