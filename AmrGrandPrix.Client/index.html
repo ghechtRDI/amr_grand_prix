@@ -12,6 +12,7 @@
           var stored = localStorage.getItem('amr-theme');
           var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
           document.documentElement.classList.toggle('dark', dark);
+          document.documentElement.classList.toggle('gray', stored === 'gray');
         } catch (e) {
           // localStorage unavailable - default to light, ThemeProvider will reconcile
         }

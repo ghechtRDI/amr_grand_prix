@@ -99,7 +99,7 @@ dotnet ef database update
 
 ### Frontend (`AmrGrandPrix.Client/src/`)
 
-- **UI system**: Tailwind CSS v4 + shadcn/ui primitives in `components/ui/` (button, card, table, tabs, select, alert-dialog, etc.), styled with `class-variance-authority`; `lib/utils.js` has the `cn()` class merger. Light/dark theme via `hooks/useTheme.js`.
+- **UI system**: Tailwind CSS v4 + shadcn/ui primitives in `components/ui/` (button, card, table, tabs, select, alert-dialog, etc.), styled with `class-variance-authority`; `lib/utils.js` has the `cn()` class merger. Themes via `hooks/useTheme.js`: light, dark, and grayscale "gray" (red kept only for `--destructive`; nav toggle cycles them; each non-light theme is a class on `<html>` with its tokens in `index.css`, and gray also remaps Tailwind's hue palettes to neutral so hard-coded `bg-amber-500` etc. stay gray).
 - **Layout & feature components**: `components/layout/`, `components/auth/`, `components/upload/`
 - **Racer Management** (`pages/admin/RunnerManagement.jsx`, `/admin/runners`): "Possible Duplicates" and "All Racers" tabs; edit DOB/preferred/alternate names (`components/runner-management/EditRunnerDialog.jsx`) and merge runners through a preview-and-confirm modal (`MergeRunnersDialog.jsx`)
 - **Landing** (`pages/Landing.jsx`, `/`, public): site hero (results archive intro, `components/landing/MountainRidge.jsx` SVG, site totals) then a Grand Prix section (rules + top-5 Open leaders for the latest year with standings). `components/layout/Footer.jsx` renders on every page; unknown routes render `pages/NotFound.jsx`. Roadmap for SEO/GA: `DOCS/SEO_ANALYTICS_LANDING_PLAN.md`

@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, CircleUser, Menu, Moon, Mountain, Sun, X } from 'lucide-react';
+import { ChevronDown, Cloud, CircleUser, Menu, Moon, Mountain, Sun, X } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useTheme } from '../../hooks/useTheme';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,13 @@ const dropdownTriggerClass = (active) =>
   );
 
 const dropdownItemClass = 'text-sm';
+
+// The theme toggle shows where a click goes next: light -> dark -> gray (grayscale) -> light
+const NEXT_THEME = {
+  light: { icon: Moon, label: 'Switch to dark mode' },
+  dark: { icon: Cloud, label: 'Switch to grayscale mode' },
+  gray: { icon: Sun, label: 'Switch to light mode' },
+};
 
 export default function NavBar() {
   const { user, isAuthenticated, hasAnyRole, logout } = useAuth();
@@ -69,16 +76,18 @@ export default function NavBar() {
     navigate('/');
   };
 
+  const NextThemeIcon = NEXT_THEME[theme].icon;
   const ThemeToggle = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      aria-label={NEXT_THEME[theme].label}
+      title={NEXT_THEME[theme].label}
       onClick={toggleTheme}
       className="text-secondary-foreground/80 hover:bg-white/10 hover:text-secondary-foreground"
     >
-      {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+      <NextThemeIcon className="size-4" />
     </Button>
   );
 

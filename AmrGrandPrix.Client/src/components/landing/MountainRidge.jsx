@@ -35,7 +35,12 @@ export default function MountainRidge({ className }) {
         d="M0 270 L150 215 L260 245 L420 150 L540 225 L660 185 L780 240 L900 160 L1000 200 L1120 120 L1250 215 L1360 185 L1440 220 L1440 320 L0 320 Z"
         className="fill-primary/30"
       />
-      <path d="M1120 120 L1093 145 L1108 141 L1120 152 L1134 140 L1149 146 Z" className="fill-white/85" />
+      {/* Snowcap: its upper edges lie on the peak's slopes (1000,200 -> 1120,120 -> 1250,215), so
+          the snow meets the sky exactly; the lower edge is a jagged snow line ~30 units down */}
+      <path
+        d="M1120 120 L1161 150 L1146 146 L1134 156 L1121 147 L1108 155 L1094 145 L1075 150 Z"
+        className="fill-white/85"
+      />
 
       {/* Trail to the summit */}
       <path

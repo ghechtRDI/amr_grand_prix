@@ -110,6 +110,72 @@
   color-scheme: dark;
 }
 
+.gray {
+  /* shadcn semantic tokens - "overcast" grayscale theme (light base, charcoal nav); everything
+     is gray except --destructive */
+  --background: #f2f2f2;
+  --foreground: #1c1c1c;
+  --card: #ffffff;
+  --card-foreground: var(--foreground);
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+  --primary: #3a3a3a;
+  --primary-foreground: #fafafa;
+  --secondary: #4a4a4a;
+  --secondary-foreground: #fafafa;
+  --muted: #e6e6e6;
+  --muted-foreground: #626262;
+  --accent: #e6e6e6;
+  --accent-foreground: var(--foreground);
+  /* The one hue kept: red for destructive actions and errors (deep enough for red text on the
+     destructive button's tinted background) */
+  --destructive: #d32f2f;
+  --destructive-foreground: #ffffff;
+  --success: #575757;
+  --success-foreground: #fafafa;
+  --border: #dcdcdc;
+  --input: #d2d2d2;
+  --ring: #7a7a7a;
+  --chart-1: #2b2b2b;
+  --chart-2: #6b6b6b;
+  --chart-3: #9a9a9a;
+  --chart-4: #444444;
+  --chart-5: #bdbdbd;
+  --chart-runner-time: #3a3a3a;
+  --chart-runner-graded: #8c8c8c;
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Components that use Tailwind palette colors directly (amber/blue/sky status badges, etc.)
+     get the matching neutral shade, so nothing on the page keeps a hue. Unlayered, so these
+     win over Tailwind's own :root theme variables. Lightness steps match Tailwind's neutral. */
+  --color-red-50: oklch(0.985 0 0); --color-red-100: oklch(0.97 0 0); --color-red-200: oklch(0.922 0 0); --color-red-300: oklch(0.87 0 0); --color-red-400: oklch(0.708 0 0); --color-red-500: oklch(0.556 0 0); --color-red-600: oklch(0.439 0 0); --color-red-700: oklch(0.371 0 0); --color-red-800: oklch(0.269 0 0); --color-red-900: oklch(0.205 0 0); --color-red-950: oklch(0.145 0 0);
+  --color-orange-50: oklch(0.985 0 0); --color-orange-100: oklch(0.97 0 0); --color-orange-200: oklch(0.922 0 0); --color-orange-300: oklch(0.87 0 0); --color-orange-400: oklch(0.708 0 0); --color-orange-500: oklch(0.556 0 0); --color-orange-600: oklch(0.439 0 0); --color-orange-700: oklch(0.371 0 0); --color-orange-800: oklch(0.269 0 0); --color-orange-900: oklch(0.205 0 0); --color-orange-950: oklch(0.145 0 0);
+  --color-amber-50: oklch(0.985 0 0); --color-amber-100: oklch(0.97 0 0); --color-amber-200: oklch(0.922 0 0); --color-amber-300: oklch(0.87 0 0); --color-amber-400: oklch(0.708 0 0); --color-amber-500: oklch(0.556 0 0); --color-amber-600: oklch(0.439 0 0); --color-amber-700: oklch(0.371 0 0); --color-amber-800: oklch(0.269 0 0); --color-amber-900: oklch(0.205 0 0); --color-amber-950: oklch(0.145 0 0);
+  --color-yellow-50: oklch(0.985 0 0); --color-yellow-100: oklch(0.97 0 0); --color-yellow-200: oklch(0.922 0 0); --color-yellow-300: oklch(0.87 0 0); --color-yellow-400: oklch(0.708 0 0); --color-yellow-500: oklch(0.556 0 0); --color-yellow-600: oklch(0.439 0 0); --color-yellow-700: oklch(0.371 0 0); --color-yellow-800: oklch(0.269 0 0); --color-yellow-900: oklch(0.205 0 0); --color-yellow-950: oklch(0.145 0 0);
+  --color-lime-50: oklch(0.985 0 0); --color-lime-100: oklch(0.97 0 0); --color-lime-200: oklch(0.922 0 0); --color-lime-300: oklch(0.87 0 0); --color-lime-400: oklch(0.708 0 0); --color-lime-500: oklch(0.556 0 0); --color-lime-600: oklch(0.439 0 0); --color-lime-700: oklch(0.371 0 0); --color-lime-800: oklch(0.269 0 0); --color-lime-900: oklch(0.205 0 0); --color-lime-950: oklch(0.145 0 0);
+  --color-green-50: oklch(0.985 0 0); --color-green-100: oklch(0.97 0 0); --color-green-200: oklch(0.922 0 0); --color-green-300: oklch(0.87 0 0); --color-green-400: oklch(0.708 0 0); --color-green-500: oklch(0.556 0 0); --color-green-600: oklch(0.439 0 0); --color-green-700: oklch(0.371 0 0); --color-green-800: oklch(0.269 0 0); --color-green-900: oklch(0.205 0 0); --color-green-950: oklch(0.145 0 0);
+  --color-emerald-50: oklch(0.985 0 0); --color-emerald-100: oklch(0.97 0 0); --color-emerald-200: oklch(0.922 0 0); --color-emerald-300: oklch(0.87 0 0); --color-emerald-400: oklch(0.708 0 0); --color-emerald-500: oklch(0.556 0 0); --color-emerald-600: oklch(0.439 0 0); --color-emerald-700: oklch(0.371 0 0); --color-emerald-800: oklch(0.269 0 0); --color-emerald-900: oklch(0.205 0 0); --color-emerald-950: oklch(0.145 0 0);
+  --color-teal-50: oklch(0.985 0 0); --color-teal-100: oklch(0.97 0 0); --color-teal-200: oklch(0.922 0 0); --color-teal-300: oklch(0.87 0 0); --color-teal-400: oklch(0.708 0 0); --color-teal-500: oklch(0.556 0 0); --color-teal-600: oklch(0.439 0 0); --color-teal-700: oklch(0.371 0 0); --color-teal-800: oklch(0.269 0 0); --color-teal-900: oklch(0.205 0 0); --color-teal-950: oklch(0.145 0 0);
+  --color-cyan-50: oklch(0.985 0 0); --color-cyan-100: oklch(0.97 0 0); --color-cyan-200: oklch(0.922 0 0); --color-cyan-300: oklch(0.87 0 0); --color-cyan-400: oklch(0.708 0 0); --color-cyan-500: oklch(0.556 0 0); --color-cyan-600: oklch(0.439 0 0); --color-cyan-700: oklch(0.371 0 0); --color-cyan-800: oklch(0.269 0 0); --color-cyan-900: oklch(0.205 0 0); --color-cyan-950: oklch(0.145 0 0);
+  --color-sky-50: oklch(0.985 0 0); --color-sky-100: oklch(0.97 0 0); --color-sky-200: oklch(0.922 0 0); --color-sky-300: oklch(0.87 0 0); --color-sky-400: oklch(0.708 0 0); --color-sky-500: oklch(0.556 0 0); --color-sky-600: oklch(0.439 0 0); --color-sky-700: oklch(0.371 0 0); --color-sky-800: oklch(0.269 0 0); --color-sky-900: oklch(0.205 0 0); --color-sky-950: oklch(0.145 0 0);
+  --color-blue-50: oklch(0.985 0 0); --color-blue-100: oklch(0.97 0 0); --color-blue-200: oklch(0.922 0 0); --color-blue-300: oklch(0.87 0 0); --color-blue-400: oklch(0.708 0 0); --color-blue-500: oklch(0.556 0 0); --color-blue-600: oklch(0.439 0 0); --color-blue-700: oklch(0.371 0 0); --color-blue-800: oklch(0.269 0 0); --color-blue-900: oklch(0.205 0 0); --color-blue-950: oklch(0.145 0 0);
+  --color-indigo-50: oklch(0.985 0 0); --color-indigo-100: oklch(0.97 0 0); --color-indigo-200: oklch(0.922 0 0); --color-indigo-300: oklch(0.87 0 0); --color-indigo-400: oklch(0.708 0 0); --color-indigo-500: oklch(0.556 0 0); --color-indigo-600: oklch(0.439 0 0); --color-indigo-700: oklch(0.371 0 0); --color-indigo-800: oklch(0.269 0 0); --color-indigo-900: oklch(0.205 0 0); --color-indigo-950: oklch(0.145 0 0);
+  --color-violet-50: oklch(0.985 0 0); --color-violet-100: oklch(0.97 0 0); --color-violet-200: oklch(0.922 0 0); --color-violet-300: oklch(0.87 0 0); --color-violet-400: oklch(0.708 0 0); --color-violet-500: oklch(0.556 0 0); --color-violet-600: oklch(0.439 0 0); --color-violet-700: oklch(0.371 0 0); --color-violet-800: oklch(0.269 0 0); --color-violet-900: oklch(0.205 0 0); --color-violet-950: oklch(0.145 0 0);
+  --color-purple-50: oklch(0.985 0 0); --color-purple-100: oklch(0.97 0 0); --color-purple-200: oklch(0.922 0 0); --color-purple-300: oklch(0.87 0 0); --color-purple-400: oklch(0.708 0 0); --color-purple-500: oklch(0.556 0 0); --color-purple-600: oklch(0.439 0 0); --color-purple-700: oklch(0.371 0 0); --color-purple-800: oklch(0.269 0 0); --color-purple-900: oklch(0.205 0 0); --color-purple-950: oklch(0.145 0 0);
+  --color-fuchsia-50: oklch(0.985 0 0); --color-fuchsia-100: oklch(0.97 0 0); --color-fuchsia-200: oklch(0.922 0 0); --color-fuchsia-300: oklch(0.87 0 0); --color-fuchsia-400: oklch(0.708 0 0); --color-fuchsia-500: oklch(0.556 0 0); --color-fuchsia-600: oklch(0.439 0 0); --color-fuchsia-700: oklch(0.371 0 0); --color-fuchsia-800: oklch(0.269 0 0); --color-fuchsia-900: oklch(0.205 0 0); --color-fuchsia-950: oklch(0.145 0 0);
+  --color-pink-50: oklch(0.985 0 0); --color-pink-100: oklch(0.97 0 0); --color-pink-200: oklch(0.922 0 0); --color-pink-300: oklch(0.87 0 0); --color-pink-400: oklch(0.708 0 0); --color-pink-500: oklch(0.556 0 0); --color-pink-600: oklch(0.439 0 0); --color-pink-700: oklch(0.371 0 0); --color-pink-800: oklch(0.269 0 0); --color-pink-900: oklch(0.205 0 0); --color-pink-950: oklch(0.145 0 0);
+  --color-rose-50: oklch(0.985 0 0); --color-rose-100: oklch(0.97 0 0); --color-rose-200: oklch(0.922 0 0); --color-rose-300: oklch(0.87 0 0); --color-rose-400: oklch(0.708 0 0); --color-rose-500: oklch(0.556 0 0); --color-rose-600: oklch(0.439 0 0); --color-rose-700: oklch(0.371 0 0); --color-rose-800: oklch(0.269 0 0); --color-rose-900: oklch(0.205 0 0); --color-rose-950: oklch(0.145 0 0);
+
+  color-scheme: light;
+}
+
 body {
   margin: 0;
   min-width: 320px;
