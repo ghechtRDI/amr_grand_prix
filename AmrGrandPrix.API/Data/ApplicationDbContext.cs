@@ -23,6 +23,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<GrandPrixSeason> GrandPrixSeasons { get; set; } = null!;
     public DbSet<UploadBatch> UploadBatches { get; set; } = null!;
     public DbSet<RunnerClaim> RunnerClaims { get; set; } = null!;
+    public DbSet<RunnerNotDuplicate> RunnerNotDuplicates { get; set; } = null!;
     public DbSet<ResultReport> ResultReports { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -250,6 +251,23 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(c => c.Runner)
                 .WithMany()
                 .HasForeignKey(c => c.RunnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Configure RunnerNotDuplicate entity
+        builder.Entity<RunnerNotDuplicate>(entity =>
+        {
+            entity.HasIndex(n => new { n.RunnerAId, n.RunnerBId }).IsUnique();
+            entity.HasIndex(n => n.RunnerBId);
+
+            entity.HasOne(n => n.RunnerA)
+                .WithMany()
+                .HasForeignKey(n => n.RunnerAId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(n => n.RunnerB)
+                .WithMany()
+                .HasForeignKey(n => n.RunnerBId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

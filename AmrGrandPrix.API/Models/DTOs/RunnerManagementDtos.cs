@@ -45,6 +45,26 @@ public class PotentialDuplicateDto
 }
 
 /// <summary>
+/// A pair an admin marked as "not a match" — hidden from the Possible Duplicates list.
+/// </summary>
+public class DismissedDuplicateDto
+{
+    public RunnerAdminDto RunnerA { get; set; } = null!;
+    public RunnerAdminDto RunnerB { get; set; } = null!;
+    public DateTime DismissedAt { get; set; }
+
+    /// <summary>Email of the admin/manager who dismissed the pair, if known.</summary>
+    public string? DismissedBy { get; set; }
+}
+
+/// <summary>Two runners to mark as (or restore from) "not a match".</summary>
+public class RunnerPairRequest
+{
+    public Guid RunnerAId { get; set; }
+    public Guid RunnerBId { get; set; }
+}
+
+/// <summary>
 /// What merging <see cref="Source"/> into <see cref="Target"/> would do. Nothing is changed by
 /// producing a preview.
 /// </summary>

@@ -152,15 +152,81 @@ SSH in as root (needs `ADMIN_SSH_CIDRS` or a temporary port-22 rule in the Vultr
 systemctl start amrgp-backup && journalctl -u amrgp-backup --no-pager | tail
 ```
 
-Download `daily/db-<date>.dump.age` from the B2 bucket and restore it into a scratch database locally:
+After a few days, confirm the scheduled **Backup check** workflow is passing.
+
+### Restore a backup locally
+
+Do this at least once (and again after Postgres upgrades or key changes): it proves the backups are readable and that the age key in the password manager decrypts them.
+
+**Requirements**
+
+- The age private key (`amrgp-backup-key.txt`) from the club's password manager.
+- `brew install age` (plus `rclone` if downloading from the command line).
+- A Postgres **16+** client *and* server. Prod dumps are written by Postgres 16 (archive header 1.15); older clients fail with `pg_restore: error: unsupported version (1.15) in file header`, and restoring into an older server isn't supported. Homebrew's `postgresql@16` is keg-only, so put it on your PATH and make sure it is the server actually running:
+
+  ```bash
+  export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"   # add to ~/.zshrc to keep it
+  brew services list | grep postgres                       # stop any older postgresql@NN service
+  brew services start postgresql@16
+  psql -d postgres -c 'show server_version'                # 16.x
+  ```
+
+  A fresh 16 server has its own empty data directory and only a superuser role named after your macOS user. If the API's connection string used another role, point it at yours (no password needed for local connections):
+
+  ```bash
+  cd AmrGrandPrix.API
+  dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=amr_grand_prix;Username=$(whoami)"
+  ```
+
+**1. Download the newest backup.** Easiest: B2 web console → Buckets → `amrgp-backups` → `daily/` → download the newest `db-<date>.dump.age`. From the command line, the server key is write-only and the monitor key list-only, so create a temporary **read-only** application key for the bucket (App Keys → Add) and delete it afterwards:
 
 ```bash
-createdb amrgp_restore_test
-age --decrypt -i amrgp-backup-key.txt db-<date>.dump.age | pg_restore --no-owner -d amrgp_restore_test
-psql amrgp_restore_test -c 'select count(*) from "RaceResults"'
+mkdir -p ~/amrgp-restore && cd ~/amrgp-restore
+export RCLONE_CONFIG_B2_TYPE=b2 RCLONE_CONFIG_B2_ACCOUNT=<keyID> RCLONE_CONFIG_B2_KEY=<appKey>
+rclone ls b2:amrgp-backups/daily/
+rclone copy b2:amrgp-backups/daily/db-<date>.dump.age .
 ```
 
-After a few days, confirm the scheduled **Backup check** workflow is passing.
+If you used the browser, `mkdir -p ~/amrgp-restore` and move the file there.
+
+**2. Keep your local data** (skip if the local database doesn't exist yet or you don't need it):
+
+```bash
+pg_dump --format=custom -d amr_grand_prix -f ~/amrgp-restore/local-before-restore.dump
+```
+
+**3. Decrypt and sanity-check:**
+
+```bash
+cd ~/amrgp-restore
+age --decrypt -i /path/to/amrgp-backup-key.txt db-<date>.dump.age > prod.dump
+pg_restore --list prod.dump | head      # a table of contents, not an error
+```
+
+**4. Restore.** Stop the API first. Restore into your dev database to run the app against it, or into a scratch database (`amrgp_restore_test`) to leave your dev data alone. `--no-owner --no-privileges` is needed because the dump references prod's `amrgp` role:
+
+```bash
+dropdb --if-exists amr_grand_prix
+createdb amr_grand_prix
+pg_restore --exit-on-error --no-owner --no-privileges -d amr_grand_prix prod.dump
+```
+
+**5. Check it:**
+
+```bash
+psql amr_grand_prix -c 'select count(*) from "RaceResults"'
+cd AmrGrandPrix.API && dotnet ef migrations list   # none "(Pending)"; if your branch adds migrations, dotnet ef database update
+```
+
+Then run the API and client and compare a few pages (standings, a runner, a race) with the live site. Logins are now the production accounts; local email still goes to MailHog.
+
+**6. Clean up.** The decrypted dump holds password hashes and runners' personal details:
+
+```bash
+rm ~/amrgp-restore/prod.dump ~/amrgp-restore/db-*.dump.age
+```
+
+Delete the temporary B2 key if you made one. To get your old dev data back: `dropdb amr_grand_prix && createdb amr_grand_prix && pg_restore --no-owner -d amr_grand_prix ~/amrgp-restore/local-before-restore.dump`.
 
 ## Copy the local database
 

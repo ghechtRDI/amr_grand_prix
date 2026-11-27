@@ -259,6 +259,65 @@ public class RunnerMergeServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DismissDuplicate_HidesPairUntilRestored()
+    {
+        var a = AddRunner("Shauna", "Severson", Gender.Female);
+        var b = AddRunner("Shauna", "Severson", Gender.Female);
+        await _context.SaveChangesAsync();
+
+        (await _service.DismissDuplicateAsync(b.RunnerId, a.RunnerId, "admin-1")).Should().BeTrue();
+        (await _service.DismissDuplicateAsync(a.RunnerId, b.RunnerId, "admin-1")).Should().BeTrue("dismissing twice is a no-op");
+
+        _context.RunnerNotDuplicates.Should().ContainSingle();
+        (await _service.FindPotentialDuplicatesAsync()).Should().BeEmpty();
+        var dismissed = await _service.GetDismissedDuplicatesAsync();
+        dismissed.Should().ContainSingle();
+        new[] { dismissed[0].RunnerA.RunnerId, dismissed[0].RunnerB.RunnerId }.Should().BeEquivalentTo(new[] { a.RunnerId, b.RunnerId });
+
+        (await _service.RestoreDuplicateAsync(b.RunnerId, a.RunnerId)).Should().BeTrue();
+        (await _service.RestoreDuplicateAsync(a.RunnerId, b.RunnerId)).Should().BeFalse();
+        (await _service.FindPotentialDuplicatesAsync()).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task DismissDuplicate_ReturnsFalseForUnknownRunner()
+    {
+        var a = AddRunner("Josh", "Taylor");
+        await _context.SaveChangesAsync();
+
+        (await _service.DismissDuplicateAsync(a.RunnerId, Guid.NewGuid(), null)).Should().BeFalse();
+        _context.RunnerNotDuplicates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DismissDuplicate_ControllerRejectsSameRunner()
+    {
+        var a = AddRunner("Josh", "Taylor");
+        await _context.SaveChangesAsync();
+
+        var response = await _controller.DismissDuplicate(new RunnerPairRequest { RunnerAId = a.RunnerId, RunnerBId = a.RunnerId });
+
+        response.Should().BeOfType<BadRequestObjectResult>();
+    }
+
+    [Fact]
+    public async Task Merge_CarriesNotAMatchRulingsToTarget()
+    {
+        var target = AddRunner("Josh", "Taylor");
+        var source = AddRunner("Joshua", "Taylor");
+        var other = AddRunner("Josh", "Tayler");
+        await _context.SaveChangesAsync();
+        await _service.DismissDuplicateAsync(source.RunnerId, other.RunnerId, "admin-1");
+
+        await _service.MergeAsync(target.RunnerId, source.RunnerId);
+
+        var row = _context.RunnerNotDuplicates.Should().ContainSingle().Subject;
+        new[] { row.RunnerAId, row.RunnerBId }.Should().BeEquivalentTo(new[] { target.RunnerId, other.RunnerId });
+        row.DismissedByUserId.Should().Be("admin-1");
+        (await _service.FindPotentialDuplicatesAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task UpdateRunner_SetsDateOfBirthAndNormalizesAlternateNames()
     {
         var runner = AddRunner("Josh", "Taylor");

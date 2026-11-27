@@ -1,13 +1,14 @@
 /**
  * Racer Management (Admin/Manager)
- * Two views: likely duplicate runner records (75%+ identity match) with a merge action, and a
+ * Two views: likely duplicate runner records (75%+ identity match) with merge and "not a match"
+ * actions (dismissed pairs are hidden but can be restored), and a
  * searchable list of every runner for editing date of birth / alternate names or merging by hand
  * (e.g. a maiden name that's too different to be flagged automatically).
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle, CheckCircle2, Merge, Pencil, RefreshCw, Users, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, EyeOff, Merge, Pencil, RefreshCw, Undo2, UserX, Users, X } from 'lucide-react';
 import * as runnerService from '../../services/runnerService';
 import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +22,7 @@ import EditRunnerDialog from '@/components/runner-management/EditRunnerDialog';
 import MergeRunnersDialog from '@/components/runner-management/MergeRunnersDialog';
 import { AlternateNameChips, RunnerSummary } from '@/components/runner-management/shared';
 import { formatBirth, formatResults } from '@/components/runner-management/format';
+import { cn } from '@/lib/utils';
 
 const TAB_DUPLICATES = 'duplicates';
 const TAB_ALL = 'all';
@@ -30,7 +32,53 @@ function SignalBadge({ ok, label }) {
   return <Badge variant={ok ? 'success' : 'destructive'}>{label} {ok ? 'match' : 'differs'}</Badge>;
 }
 
-function DuplicatesPanel({ duplicates, loading, error, onMerge }) {
+const pairKey = (d) => [d.runnerA.runnerId, d.runnerB.runnerId].sort().join('-');
+
+/** Every name a runner might be searched by: legal, preferred, and alternate. */
+const runnerHaystack = (r) => [r.fullName, r.preferredName, ...(r.alternateNames ?? [])].filter(Boolean).join(' ').toLowerCase();
+
+/** True when either runner in the pair matches every search term. */
+function pairMatches(d, search) {
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  return [d.runnerA, d.runnerB].some((r) => {
+    const haystack = runnerHaystack(r);
+    return terms.every((t) => haystack.includes(t));
+  });
+}
+
+function PairCard({ pair, header, actions }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">{header}</div>
+          <div className="flex flex-wrap gap-2">{actions}</div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <RunnerSummary runner={pair.runnerA} />
+          <RunnerSummary runner={pair.runnerB} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function EmptyCard({ children }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
+        <Users className="size-8" aria-hidden="true" />
+        <p>{children}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DuplicatesPanel({ duplicates, dismissed, loading, error, busyKey, onMerge, onDismiss, onRestore }) {
+  const [search, setSearch] = useState('');
+  const [showDismissed, setShowDismissed] = useState(false);
+
   if (loading) {
     return (
       <div className="flex flex-col gap-3">
@@ -46,47 +94,100 @@ function DuplicatesPanel({ duplicates, loading, error, onMerge }) {
       </Alert>
     );
   }
-  if (duplicates.length === 0) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
-          <Users className="size-8" aria-hidden="true" />
-          <p>No likely duplicates found. Every pair of runners is under a 75% match.</p>
-        </CardContent>
-      </Card>
+
+  const source = showDismissed ? dismissed : duplicates;
+  const visible = source.filter((d) => pairMatches(d, search));
+  const searching = search.trim().length > 0;
+
+  let body;
+  if (source.length === 0) {
+    body = showDismissed ? (
+      <EmptyCard>No pairs have been marked as not a match.</EmptyCard>
+    ) : (
+      <EmptyCard>No likely duplicates found. Every pair of runners is under a 75% match.</EmptyCard>
     );
+  } else if (visible.length === 0) {
+    body = <EmptyCard>No pairs match &ldquo;{search}&rdquo;.</EmptyCard>;
+  } else if (showDismissed) {
+    body = visible.map((d) => (
+      <PairCard
+        key={pairKey(d)}
+        pair={d}
+        header={
+          <span className="text-sm text-muted-foreground">
+            Marked not a match {new Date(d.dismissedAt).toLocaleDateString()}
+            {d.dismissedBy && <> by {d.dismissedBy}</>}
+          </span>
+        }
+        actions={
+          <Button size="sm" variant="outline" disabled={busyKey === pairKey(d)} onClick={() => onRestore(d)}>
+            <Undo2 /> Restore
+          </Button>
+        }
+      />
+    ));
+  } else {
+    body = visible.map((d) => (
+      <PairCard
+        key={pairKey(d)}
+        pair={d}
+        header={
+          <>
+            <Badge variant={d.confidence >= 0.9 ? 'default' : 'secondary'}>
+              {Math.round(d.confidence * 100)}% match
+            </Badge>
+            <Badge variant="outline">Name {Math.round(d.nameSimilarity * 100)}%</Badge>
+            <SignalBadge ok={d.genderMatch} label="Gender" />
+            <SignalBadge ok={d.birthYearMatch} label="Birth year" />
+          </>
+        }
+        actions={
+          <>
+            <Button size="sm" variant="outline" disabled={busyKey === pairKey(d)} onClick={() => onDismiss(d)}>
+              <UserX /> Not a match
+            </Button>
+            <Button size="sm" onClick={() => onMerge([d.runnerA, d.runnerB])}>
+              <Merge /> Review &amp; Merge
+            </Button>
+          </>
+        }
+      />
+    ));
   }
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search names, including alternate names…"
+          className="w-full max-w-sm"
+        />
+        <Button variant="ghost" size="sm" onClick={() => setShowDismissed((v) => !v)}>
+          {showDismissed ? (
+            <><Users /> Back to possible duplicates</>
+          ) : (
+            <><EyeOff /> Not a match ({dismissed.length})</>
+          )}
+        </Button>
+      </div>
       <p className="text-sm text-muted-foreground">
-        {duplicates.length} pair{duplicates.length === 1 ? '' : 's'} of runners with a 75%+ match on
-        name, gender, and birth year. Pairs who ran the same race aren&rsquo;t shown — one person
-        can&rsquo;t finish a race twice.
+        {showDismissed ? (
+          <>
+            {searching ? `${visible.length} of ${source.length}` : source.length} pair{source.length === 1 ? '' : 's'}{' '}
+            marked as different people. Restore a pair to put it back on the duplicates list.
+          </>
+        ) : (
+          <>
+            {searching ? `${visible.length} of ${source.length}` : source.length} pair{source.length === 1 ? '' : 's'}{' '}
+            of runners with a 75%+ match on name, gender, and birth year. Pairs who ran the same race
+            aren&rsquo;t shown — one person can&rsquo;t finish a race twice — and neither are pairs
+            marked &ldquo;Not a match&rdquo;.
+          </>
+        )}
       </p>
-      {duplicates.map((d) => (
-        <Card key={`${d.runnerA.runnerId}-${d.runnerB.runnerId}`}>
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={d.confidence >= 0.9 ? 'default' : 'secondary'}>
-                  {Math.round(d.confidence * 100)}% match
-                </Badge>
-                <Badge variant="outline">Name {Math.round(d.nameSimilarity * 100)}%</Badge>
-                <SignalBadge ok={d.genderMatch} label="Gender" />
-                <SignalBadge ok={d.birthYearMatch} label="Birth year" />
-              </div>
-              <Button size="sm" onClick={() => onMerge([d.runnerA, d.runnerB])}>
-                <Merge /> Review &amp; Merge
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <RunnerSummary runner={d.runnerA} />
-              <RunnerSummary runner={d.runnerB} />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+      {body}
     </div>
   );
 }
@@ -197,6 +298,8 @@ function AllRunnersPanel({ refreshKey, onEdit, onMerge }) {
 export default function RunnerManagement() {
   const [tab, setTab] = useState(TAB_DUPLICATES);
   const [duplicates, setDuplicates] = useState([]);
+  const [dismissed, setDismissed] = useState([]);
+  const [busyKey, setBusyKey] = useState(null);
   const [duplicatesLoading, setDuplicatesLoading] = useState(true);
   const [duplicatesError, setDuplicatesError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -204,11 +307,17 @@ export default function RunnerManagement() {
   const [editing, setEditing] = useState(null);
   const [mergeRunners, setMergeRunners] = useState(null);
 
-  const loadDuplicates = useCallback(async () => {
-    setDuplicatesLoading(true);
+  // `quiet` reloads without the skeleton, e.g. after restoring a pair.
+  const loadDuplicates = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setDuplicatesLoading(true);
     setDuplicatesError(null);
     try {
-      setDuplicates(await runnerService.getPotentialDuplicates());
+      const [open, notMatches] = await Promise.all([
+        runnerService.getPotentialDuplicates(),
+        runnerService.getDismissedDuplicates(),
+      ]);
+      setDuplicates(open);
+      setDismissed(notMatches);
     } catch (err) {
       setDuplicatesError(err.message);
     } finally {
@@ -237,6 +346,42 @@ export default function RunnerManagement() {
     refreshAll();
   };
 
+  const restorePair = async (pair, { fromUndo = false } = {}) => {
+    const key = pairKey(pair);
+    setBusyKey(key);
+    try {
+      await runnerService.restoreDuplicate(pair.runnerA.runnerId, pair.runnerB.runnerId);
+      setMessage(fromUndo ? null : {
+        type: 'success',
+        text: `${pair.runnerA.fullName} and ${pair.runnerB.fullName} are back on the possible duplicates list.`,
+      });
+      await loadDuplicates({ quiet: true });
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleDismiss = async (pair) => {
+    const key = pairKey(pair);
+    setBusyKey(key);
+    try {
+      await runnerService.dismissDuplicate(pair.runnerA.runnerId, pair.runnerB.runnerId);
+      setDuplicates((list) => list.filter((d) => pairKey(d) !== key));
+      setDismissed((list) => [{ ...pair, dismissedAt: new Date().toISOString(), dismissedBy: null }, ...list]);
+      setMessage({
+        type: 'success',
+        text: `Marked ${pair.runnerA.fullName} and ${pair.runnerB.fullName} as not a match.`,
+        undo: () => restorePair(pair, { fromUndo: true }),
+      });
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const handleSaved = () => {
     setMessage({ type: 'success', text: `Saved ${editing.fullName}.` });
     refreshAll();
@@ -255,12 +400,20 @@ export default function RunnerManagement() {
         </div>
 
         {message && (
-          <Alert variant={message.type === 'success' ? 'success' : 'destructive'} className="mb-4">
+          <Alert
+            variant={message.type === 'success' ? 'success' : 'destructive'}
+            className={cn('mb-4', message.undo && 'has-data-[slot=alert-action]:pr-32')}
+          >
             {message.type === 'success' ? <CheckCircle2 /> : <AlertCircle />}
             <AlertDescription className={message.type === 'success' ? 'text-success' : undefined}>
               {message.text}
             </AlertDescription>
-            <AlertAction>
+            <AlertAction className="flex items-center gap-1">
+              {message.undo && (
+                <Button variant="outline" size="sm" onClick={message.undo}>
+                  <Undo2 /> Undo
+                </Button>
+              )}
               <Button variant="ghost" size="icon-sm" onClick={() => setMessage(null)} aria-label="Dismiss">
                 <X />
               </Button>
@@ -284,9 +437,13 @@ export default function RunnerManagement() {
           <TabsContent value={TAB_DUPLICATES}>
             <DuplicatesPanel
               duplicates={duplicates}
+              dismissed={dismissed}
               loading={duplicatesLoading}
               error={duplicatesError}
+              busyKey={busyKey}
               onMerge={setMergeRunners}
+              onDismiss={handleDismiss}
+              onRestore={(pair) => restorePair(pair)}
             />
           </TabsContent>
           <TabsContent value={TAB_ALL}>

@@ -11,9 +11,22 @@ public interface IRunnerMergeService
     /// Pairs of runners whose best name similarity (legal, preferred, and alternate names) is at
     /// least 75% and whose overall confidence — corroborated by gender and birth year — is at
     /// least <paramref name="minConfidence"/>. Pairs with results in the same race are left out,
-    /// since one person can't have two results in one race. Highest confidence first.
+    /// since one person can't have two results in one race, as are pairs an admin marked as not a
+    /// match (<see cref="DismissDuplicateAsync"/>). Highest confidence first.
     /// </summary>
     Task<List<PotentialDuplicateDto>> FindPotentialDuplicatesAsync(double minConfidence = 0.75, int limit = 200);
+
+    /// <summary>
+    /// Marks two runners as different people so the pair stops appearing as a possible duplicate.
+    /// Idempotent. False if either runner doesn't exist.
+    /// </summary>
+    Task<bool> DismissDuplicateAsync(Guid runnerAId, Guid runnerBId, string? userId);
+
+    /// <summary>Puts a dismissed pair back on the duplicates list. False if it wasn't dismissed.</summary>
+    Task<bool> RestoreDuplicateAsync(Guid runnerAId, Guid runnerBId);
+
+    /// <summary>Every pair marked as not a match, most recently dismissed first.</summary>
+    Task<List<DismissedDuplicateDto>> GetDismissedDuplicatesAsync();
 
     /// <summary>Admin summaries for the given runners, keyed by runner ID.</summary>
     Task<Dictionary<Guid, RunnerAdminDto>> GetAdminSummariesAsync(IReadOnlyCollection<Guid> runnerIds);
@@ -26,7 +39,7 @@ public interface IRunnerMergeService
 
     /// <summary>
     /// Moves every result, Grand Prix points record, claim, and account link from the source
-    /// runner to the target, adds both runners' names to the target's alternate names, fills in
+    /// runner to the target (along with its "not a match" rulings), adds both runners' names to the target's alternate names, fills in
     /// any identity fields the target is missing from the source, deletes the source, and
     /// recalculates the affected Grand Prix standings. Callers must check
     /// <see cref="PreviewMergeAsync"/>'s <see cref="RunnerMergePreviewDto.CanMerge"/> first;

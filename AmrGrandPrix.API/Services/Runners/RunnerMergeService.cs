@@ -42,6 +42,12 @@ public class RunnerMergeService : IRunnerMergeService
             .GroupBy(r => r.RunnerId)
             .ToDictionary(g => g.Key, g => g.Select(r => r.RaceId).ToHashSet());
 
+        var dismissed = (await _context.RunnerNotDuplicates
+                .Select(n => new { n.RunnerAId, n.RunnerBId })
+                .ToListAsync())
+            .Select(n => (n.RunnerAId, n.RunnerBId))
+            .ToHashSet();
+
         var candidates = runners
             .Select(r => (Runner: r, Names: NameCandidates(r), BirthYear: BirthYear(r)))
             .ToList();
@@ -70,6 +76,9 @@ public class RunnerMergeService : IRunnerMergeService
                     nameSimilarity * 0.70 + (genderMatch ? 0.15 : 0.0) + (birthYearMatch != false ? 0.15 : 0.0),
                     1.0);
                 if (confidence < minConfidence)
+                    continue;
+
+                if (dismissed.Contains(RunnerNotDuplicate.Order(a.Runner.RunnerId, b.Runner.RunnerId)))
                     continue;
 
                 // One person can't have two results in the same race.
@@ -103,6 +112,70 @@ public class RunnerMergeService : IRunnerMergeService
                     NameSimilarity = Math.Round(p.Name, 3),
                     GenderMatch = p.Gender,
                     BirthYearMatch = p.BirthYear
+                };
+            })
+            .ToList();
+    }
+
+    public async Task<bool> DismissDuplicateAsync(Guid runnerAId, Guid runnerBId, string? userId)
+    {
+        var (a, b) = RunnerNotDuplicate.Order(runnerAId, runnerBId);
+        if (await _context.Runners.CountAsync(r => r.RunnerId == a || r.RunnerId == b) != 2)
+            return false;
+
+        if (!await _context.RunnerNotDuplicates.AnyAsync(n => n.RunnerAId == a && n.RunnerBId == b))
+        {
+            _context.RunnerNotDuplicates.Add(new RunnerNotDuplicate
+            {
+                Id = Guid.NewGuid(),
+                RunnerAId = a,
+                RunnerBId = b,
+                DismissedByUserId = userId
+            });
+            await _context.SaveChangesAsync();
+        }
+        return true;
+    }
+
+    public async Task<bool> RestoreDuplicateAsync(Guid runnerAId, Guid runnerBId)
+    {
+        var (a, b) = RunnerNotDuplicate.Order(runnerAId, runnerBId);
+        var row = await _context.RunnerNotDuplicates.FirstOrDefaultAsync(n => n.RunnerAId == a && n.RunnerBId == b);
+        if (row == null)
+            return false;
+
+        _context.RunnerNotDuplicates.Remove(row);
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<List<DismissedDuplicateDto>> GetDismissedDuplicatesAsync()
+    {
+        var rows = await _context.RunnerNotDuplicates
+            .AsNoTracking()
+            .OrderByDescending(n => n.DismissedAt)
+            .ToListAsync();
+
+        var userIds = rows.Where(n => n.DismissedByUserId != null).Select(n => n.DismissedByUserId!).Distinct().ToList();
+        var emails = await _context.Users
+            .Where(u => userIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.Email);
+
+        var summaries = await GetAdminSummariesAsync(rows.SelectMany(n => new[] { n.RunnerAId, n.RunnerBId }).Distinct().ToList());
+
+        return rows
+            .Select(n =>
+            {
+                // Same ordering as the duplicates list: the record with more results first.
+                var (first, second) = summaries[n.RunnerAId].ResultCount >= summaries[n.RunnerBId].ResultCount
+                    ? (n.RunnerAId, n.RunnerBId)
+                    : (n.RunnerBId, n.RunnerAId);
+                return new DismissedDuplicateDto
+                {
+                    RunnerA = summaries[first],
+                    RunnerB = summaries[second],
+                    DismissedAt = n.DismissedAt,
+                    DismissedBy = n.DismissedByUserId == null ? null : emails.GetValueOrDefault(n.DismissedByUserId)
                 };
             })
             .ToList();
@@ -201,6 +274,8 @@ public class RunnerMergeService : IRunnerMergeService
         if (plan.SourceAccount != null)
             plan.SourceAccount.RunnerId = target.RunnerId;
 
+        await MoveNotDuplicateRulingsAsync(source.RunnerId, target.RunnerId);
+
         target.PreferredName = merged.PreferredName;
         target.AlternateNames = merged.AlternateNames;
         target.DateOfBirth = merged.DateOfBirth;
@@ -229,6 +304,43 @@ public class RunnerMergeService : IRunnerMergeService
             ResultsMoved = plan.Preview.ResultsToMove,
             YearsRecalculated = plan.Preview.GrandPrixYearsToRecalculate
         };
+    }
+
+    /// <summary>
+    /// "Source isn't X" still holds once source is folded into target, so each of the source's
+    /// rulings is carried over to the target (unless it already has it); the source's rows go.
+    /// </summary>
+    private async Task MoveNotDuplicateRulingsAsync(Guid sourceId, Guid targetId)
+    {
+        var rows = await _context.RunnerNotDuplicates
+            .Where(n => n.RunnerAId == sourceId || n.RunnerBId == sourceId ||
+                        n.RunnerAId == targetId || n.RunnerBId == targetId)
+            .ToListAsync();
+        var targetPairs = rows
+            .Where(n => n.RunnerAId == targetId || n.RunnerBId == targetId)
+            .Select(n => (n.RunnerAId, n.RunnerBId))
+            .ToHashSet();
+
+        foreach (var row in rows.Where(n => n.RunnerAId == sourceId || n.RunnerBId == sourceId))
+        {
+            _context.RunnerNotDuplicates.Remove(row);
+
+            var other = row.RunnerAId == sourceId ? row.RunnerBId : row.RunnerAId;
+            if (other == targetId)
+                continue;
+            var pair = RunnerNotDuplicate.Order(targetId, other);
+            if (!targetPairs.Add(pair))
+                continue;
+
+            _context.RunnerNotDuplicates.Add(new RunnerNotDuplicate
+            {
+                Id = Guid.NewGuid(),
+                RunnerAId = pair.A,
+                RunnerBId = pair.B,
+                DismissedAt = row.DismissedAt,
+                DismissedByUserId = row.DismissedByUserId
+            });
+        }
     }
 
     private sealed record MergePlan(Runner Target, Runner Source, ApplicationUser? SourceAccount, RunnerMergePreviewDto Preview);

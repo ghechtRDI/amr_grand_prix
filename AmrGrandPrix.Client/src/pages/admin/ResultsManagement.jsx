@@ -4,8 +4,8 @@
  * Grand Prix standings once the season is over.
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertCircle, AlertTriangle, CheckCircle2, Lock, LockOpen, Pencil, Trophy, X } from 'lucide-react';
 import * as tokenService from '../../services/tokenService';
 import * as raceService from '../../services/raceService';
@@ -40,7 +40,6 @@ import {
 import { cn, formatDateOnly } from '@/lib/utils';
 
 const CURRENT_YEAR = new Date().getFullYear();
-const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
 const UNGROUPED = '__ungrouped__';
 
 const BATCH_STATUS_BADGE_CLASSES = {
@@ -82,7 +81,24 @@ function BatchStatusBadge({ status, error }) {
 export default function ResultsManagement() {
   const navigate = useNavigate();
   const [batches, setBatches] = useState([]);
-  const [year, setYear] = useState(CURRENT_YEAR);
+  // The year lives in the URL (?year=) so it survives a reload
+  const [searchParams, setSearchParams] = useSearchParams();
+  const year = parseInt(searchParams.get('year')) || CURRENT_YEAR;
+  const setYear = (y) =>
+    setSearchParams(
+      (params) => {
+        params.set('year', String(y));
+        return params;
+      },
+      { replace: true }
+    );
+  // Every year with results, plus the current year (for a new season's first upload) and the
+  // selected one (a year from the URL whose only batches are still pending)
+  const [yearsWithResults, setYearsWithResults] = useState([]);
+  const yearOptions = useMemo(
+    () => [...new Set([CURRENT_YEAR, year, ...yearsWithResults])].sort((a, b) => b - a),
+    [year, yearsWithResults]
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(null);
@@ -129,6 +145,13 @@ export default function ResultsManagement() {
     setSeason(null);
     standingsService.getSeason(year).then(setSeason).catch(() => setSeason(null));
   }, [year]);
+
+  useEffect(() => {
+    fetch('/api/races/years')
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setYearsWithResults)
+      .catch(() => setYearsWithResults([]));
+  }, []);
 
   useEffect(() => {
     fetch('/api/race-series')
@@ -325,7 +348,7 @@ export default function ResultsManagement() {
                 <SelectValue>{(value) => value}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {YEAR_OPTIONS.map((y) => (
+                {yearOptions.map((y) => (
                   <SelectItem key={y} value={String(y)}>{y}</SelectItem>
                 ))}
               </SelectContent>
