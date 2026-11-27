@@ -155,6 +155,49 @@ function uploadedAgeOf(row) {
   return row.age === '' || row.age == null ? null : Number(row.age);
 }
 
+// Youngest/oldest the matched runner could be on the race date (equal for a verified DOB; a side
+// is null when unknown). Drafts saved before ageMin/ageMax existed only carry `age`.
+function matchAgeSpan(match) {
+  if (!('ageMin' in match) && !('ageMax' in match)) return { min: match.age ?? null, max: match.age ?? null };
+  return { min: match.ageMin ?? null, max: match.ageMax ?? null };
+}
+
+function hasAgeOnFile(match) {
+  const { min, max } = matchAgeSpan(match);
+  return min != null || max != null;
+}
+
+// "40", "40–41 (est.)", "40+ (est.)", or "?".
+function formatMatchAge(match) {
+  const { min, max } = matchAgeSpan(match);
+  if (min == null && max == null) return '?';
+  const est = match.hasVerifiedDateOfBirth ? '' : ' (est.)';
+  if (min === max) return `${min}${est}`;
+  if (min == null) return `≤${max}${est}`;
+  if (max == null) return `${min}+${est}`;
+  return `${min}–${max}${est}`;
+}
+
+// True when the uploaded exact age is outside every age the runner could be on the race date.
+// Saving then ignores it for the runner's estimate unless "Update estimated age" is ticked
+// (mirrors BirthDateRange.Combine reporting a conflict).
+function ageDisagrees(match, uploadedAge) {
+  if (!match || uploadedAge == null || !hasAgeOnFile(match)) return false;
+  const { min, max } = matchAgeSpan(match);
+  return (min != null && uploadedAge < min) || (max != null && uploadedAge > max);
+}
+
+const normalizeName = (name) => name.trim().split(/\s+/).join(' ').toLowerCase();
+
+// True when saving will add the row's name to the matched runner's alternate names: it isn't
+// one of the names the runner is already matched under (mirrors RunnerNames.IsKnownName).
+// Drafts saved before `knownNames` existed don't carry it, so they never show the hint.
+function willAddAlternateName(row, match) {
+  if (!match || !Array.isArray(match.knownNames) || !row.name?.trim()) return false;
+  const name = normalizeName(row.name);
+  return !match.knownNames.some(known => normalizeName(known) === name);
+}
+
 // Required fields mirror handleSubmit's check (and the backend's ValidateRow()).
 function isMissingRequired(row) {
   if (!row.name) return true;
@@ -181,8 +224,7 @@ function rowHasIssue(row, existingResult) {
   if (row.matchStatus === 'needs-confirmation') return true;
   const match = selectedMatchOf(row);
   if (row.matchStatus === 'auto-matched' && match && match.confidence < 1) return true;
-  const uploadedAge = uploadedAgeOf(row);
-  return !!match && uploadedAge != null && match.age != null && uploadedAge !== match.age && !row.updateRunnerAge;
+  return ageDisagrees(match, uploadedAgeOf(row)) && !row.updateRunnerAge;
 }
 
 const STATUS_BADGE_CLASSES = {
@@ -407,10 +449,10 @@ function RunnerMatchCell({ row, table }) {
 
   const selectedMatch = selectedMatchOf(row.original);
   const uploadedAge = uploadedAgeOf(row.original);
-  const hasAgeDiscrepancy =
-    !!selectedMatch && uploadedAge != null && selectedMatch.age != null && uploadedAge !== selectedMatch.age;
+  const hasAgeDiscrepancy = ageDisagrees(selectedMatch, uploadedAge);
   // The runner has no age on file at all: the backend records the uploaded age on save.
-  const willSetMissingAge = !!selectedMatch && uploadedAge != null && selectedMatch.age == null;
+  const willSetMissingAge = !!selectedMatch && uploadedAge != null && !hasAgeOnFile(selectedMatch);
+  const addsAlternateName = !existingResult && willAddAlternateName(row.original, selectedMatch);
 
   const statusPill = statusInfo && (
     <span
@@ -442,7 +484,7 @@ function RunnerMatchCell({ row, table }) {
         <option value="">+ New Runner</option>
         {matches.map(m => (
           <option key={m.runnerId} value={m.runnerId}>
-            {m.firstName} {m.lastName} · age {m.age ?? '?'}{m.age != null && !m.hasVerifiedDateOfBirth ? ' (est.)' : ''} · {Math.round(m.confidence * 100)}%
+            {m.firstName} {m.lastName} · age {formatMatchAge(m)} · {Math.round(m.confidence * 100)}%
           </option>
         ))}
       </select>
@@ -452,12 +494,12 @@ function RunnerMatchCell({ row, table }) {
             className="text-xs text-muted-foreground"
             title="This runner has a verified date of birth and can't be overwritten here"
           >
-            Verified age on file ({selectedMatch.age}) — uploaded age {uploadedAge} won&apos;t change it
+            Verified age on file ({formatMatchAge(selectedMatch)}) — uploaded age {uploadedAge} won&apos;t change it
           </span>
         ) : (
           <label
             className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400"
-            title="The uploaded age differs from this runner's estimated age"
+            title="The uploaded age doesn't fit the ages in this runner's earlier results. Without this, it's ignored for their estimated age."
           >
             <input
               type="checkbox"
@@ -465,7 +507,7 @@ function RunnerMatchCell({ row, table }) {
               checked={!!row.original.updateRunnerAge}
               onChange={(e) => updateData(row.index, 'updateRunnerAge', e.target.checked)}
             />
-            Update estimated age ({selectedMatch.age} &rarr; {uploadedAge})
+            Update estimated age ({formatMatchAge(selectedMatch).replace(' (est.)', '')} &rarr; {uploadedAge})
           </label>
         )
       )}
@@ -475,6 +517,14 @@ function RunnerMatchCell({ row, table }) {
           title="This runner has no age on file, so the uploaded age will be saved to their record"
         >
           No age on file &mdash; will be set to {uploadedAge}
+        </span>
+      )}
+      {addsAlternateName && (
+        <span
+          className="text-xs text-muted-foreground"
+          title="Future uploads listing this name will match this runner. Alternate names can be edited in Racer Management."
+        >
+          Will save &ldquo;{row.original.name.trim()}&rdquo; as an alternate name
         </span>
       )}
       {existingResult && (
@@ -830,14 +880,21 @@ function DataReviewHelpDialog({ open, onOpenChange }) {
               <li><strong>New runner</strong>: no existing runner looked similar, so a new record will be created.</li>
             </ul>
             <p>Each option in the dropdown shows the runner&rsquo;s age on file and the match confidence.</p>
+            <p>
+              If the name in the results isn&rsquo;t one the runner is already known by (e.g.
+              &ldquo;Bob&rdquo; for Robert), saving adds it to their alternate names so future
+              uploads match them automatically.
+            </p>
           </HelpSection>
 
           <HelpSection title="5. Resolve age disagreements">
             <p>
-              If the uploaded age doesn&rsquo;t match the selected runner&rsquo;s estimated age, tick
-              <strong> Update estimated age</strong> when the uploaded age is right. A runner who
-              entered their own date of birth can&rsquo;t be changed here. A runner with no age on file
-              gets the uploaded age automatically.
+              A runner&rsquo;s estimated age comes from the ages in all their earlier results, so it
+              may be a span (e.g. <strong>40&ndash;41</strong>). An uploaded age that fits narrows it
+              automatically. If it doesn&rsquo;t fit, it&rsquo;s ignored unless you tick
+              <strong> Update estimated age</strong>, which replaces the estimate with this age. A
+              runner who entered their own date of birth can&rsquo;t be changed here. A runner with no
+              age on file gets the uploaded age automatically.
             </p>
           </HelpSection>
 

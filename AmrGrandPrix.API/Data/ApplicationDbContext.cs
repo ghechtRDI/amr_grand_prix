@@ -131,6 +131,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(r => r.LastName).IsRequired().HasMaxLength(100);
             entity.Property(r => r.Gender).IsRequired();
             entity.Ignore(r => r.FullName); // Computed property, not stored in DB
+            // Computed from EstimatedDobEarliest/EstimatedDobLatest, which are the stored columns
+            entity.Ignore(r => r.EstimatedBirthRange);
+            entity.Ignore(r => r.EstimatedBirthYear);
         });
 
         // Configure RaceResult entity

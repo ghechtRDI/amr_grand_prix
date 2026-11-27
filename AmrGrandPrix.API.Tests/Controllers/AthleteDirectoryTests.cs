@@ -46,7 +46,7 @@ public class AthleteDirectoryTests : IClassFixture<CustomWebApplicationFactory>,
             LastName = "Person",
             Gender = Gender.Female,
             DateOfBirth = new DateOnly(1985, 6, 15),
-            EstimatedBirthYear = 1985,
+            EstimatedBirthRange = TestData.BornIn(1985),
             Email = "private.person@example.com",
             PreferredName = "Priv",
             AlternateNames = ["Maiden Name"]

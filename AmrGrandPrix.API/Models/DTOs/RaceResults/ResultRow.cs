@@ -52,8 +52,9 @@ public class ResultRow
     public Guid? MatchedRunnerId { get; set; }
 
     /// <summary>
-    /// When matched to an existing runner whose stored age differs from this row's reported age,
-    /// whether to overwrite the runner's stored date of birth with this row's exact age.
+    /// When matched to an existing runner whose estimated birth date range doesn't fit this row's
+    /// exact age, whether to replace the range with the one this age implies (otherwise the
+    /// contradicting age is ignored). Never affects a verified date of birth.
     /// </summary>
     public bool UpdateRunnerAge { get; set; }
 

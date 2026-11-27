@@ -3,7 +3,7 @@ using AmrGrandPrix.API.Models;
 namespace AmrGrandPrix.API.Common;
 
 /// <summary>
-/// Single source of truth for turning a date of birth (or an estimated birth year) into an age.
+/// Single source of truth for turning a date of birth (or an estimated birth date range) into an age.
 /// </summary>
 public static class AgeCalculator
 {
@@ -20,30 +20,43 @@ public static class AgeCalculator
     }
 
     /// <summary>
-    /// Approximate age as of <paramref name="asOf"/> when only a birth year is known. Without a
-    /// month/day this is inherently accurate to within about a year (it assumes the birthday has
-    /// already occurred in the reference year).
+    /// What's known about a runner's birth date: their verified <see cref="Runner.DateOfBirth"/> as
+    /// a one-day range if set, otherwise <see cref="Runner.EstimatedBirthRange"/>.
     /// </summary>
-    public static int CalculateAgeFromBirthYear(int birthYear, DateOnly asOf) => asOf.Year - birthYear;
+    public static BirthDateRange GetBirthRange(Runner runner) =>
+        runner.DateOfBirth is { } dob ? BirthDateRange.Exact(dob) : runner.EstimatedBirthRange;
 
     /// <summary>
     /// A runner's age as of <paramref name="asOf"/>, preferring a verified <see cref="Runner.DateOfBirth"/>
-    /// and falling back to <see cref="Runner.EstimatedBirthYear"/>. Null when neither is known.
+    /// and falling back to the middle of a narrow <see cref="Runner.EstimatedBirthRange"/>. Null when
+    /// neither is known (including when only age categories are known).
     /// </summary>
     public static int? GetRunnerAge(Runner runner, DateOnly asOf)
     {
-        if (runner.DateOfBirth.HasValue)
-            return CalculateAge(runner.DateOfBirth.Value, asOf);
+        if (runner.DateOfBirth is { } dob)
+            return CalculateAge(dob, asOf);
 
-        if (runner.EstimatedBirthYear.HasValue)
-            return CalculateAgeFromBirthYear(runner.EstimatedBirthYear.Value, asOf);
+        if (runner.EstimatedBirthRange.EstimatedDateOfBirth is { } estimate)
+            return CalculateAge(estimate, asOf);
 
         return null;
     }
 
     /// <summary>
+    /// The youngest and oldest the runner could be on <paramref name="asOf"/>. Equal for a verified
+    /// date of birth; either side null when that bound is unknown.
+    /// </summary>
+    public static (int? Min, int? Max) GetRunnerAgeRange(Runner runner, DateOnly asOf) =>
+        GetAgeRange(GetBirthRange(runner), asOf);
+
+    /// <inheritdoc cref="GetRunnerAgeRange"/>
+    public static (int? Min, int? Max) GetAgeRange(BirthDateRange range, DateOnly asOf) => (
+        range.Latest is { } latest ? CalculateAge(latest, asOf) : null,
+        range.Earliest is { } earliest ? CalculateAge(earliest, asOf) : null);
+
+    /// <summary>
     /// True when the runner's age can only be approximated (no verified date of birth on file).
     /// </summary>
     public static bool IsAgeEstimated(Runner runner) =>
-        !runner.DateOfBirth.HasValue && runner.EstimatedBirthYear.HasValue;
+        !runner.DateOfBirth.HasValue && runner.EstimatedBirthRange.IsNarrow;
 }

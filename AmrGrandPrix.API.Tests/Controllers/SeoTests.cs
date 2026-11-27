@@ -1,3 +1,4 @@
+using AmrGrandPrix.API.Common;
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -21,13 +22,17 @@ public class SearchIndexingTests
     private static readonly DateOnly Today = new(2026, 11, 25);
 
     [Theory]
-    [InlineData("2008-11-25", null, true)]  // 18 today
-    [InlineData("2008-11-26", null, false)] // 18 tomorrow
-    [InlineData(null, 2000, true)]
-    [InlineData(null, 2010, false)]
-    [InlineData(null, null, false)]         // unknown age fails closed
-    public void IsRunnerIndexable(string? dob, int? birthYear, bool expected) =>
-        SearchIndexing.IsRunnerIndexable(dob is null ? null : DateOnly.Parse(dob), birthYear, Today)
+    [InlineData("2008-11-25", null, true)]          // 18 today
+    [InlineData("2008-11-26", null, false)]         // 18 tomorrow
+    [InlineData(null, "2008-11-25", true)]          // youngest possible age is 18
+    [InlineData(null, "2008-11-26", false)]         // could still be 17
+    [InlineData("2000-01-01", "2010-01-01", true)]  // verified DOB wins over the estimate
+    [InlineData(null, null, false)]                 // unknown age (or no upper bound) fails closed
+    public void IsRunnerIndexable(string? dob, string? latestPossibleDob, bool expected) =>
+        SearchIndexing.IsRunnerIndexable(
+                dob is null ? null : DateOnly.Parse(dob),
+                latestPossibleDob is null ? null : DateOnly.Parse(latestPossibleDob),
+                Today)
             .Should().Be(expected);
 }
 
@@ -53,7 +58,7 @@ public class SitemapBuilderTests : IDisposable
         var runner = new Runner
         {
             RunnerId = Guid.NewGuid(), FirstName = "R", LastName = "R", Gender = Gender.Female,
-            DateOfBirth = dob, EstimatedBirthYear = birthYear
+            DateOfBirth = dob, EstimatedBirthRange = TestData.BornIn(birthYear)
         };
         _context.Runners.Add(runner);
         return runner;
@@ -109,6 +114,27 @@ public class SitemapBuilderTests : IDisposable
     }
 
     [Fact]
+    public async Task Build_CategoryOnlyRunners_IndexedOnlyWhenCertainlyAdult()
+    {
+        // Results that only report an age category: "30-39" is certainly an adult; "17 and Under"
+        // never is (no upper bound on the birth date that makes them 18+).
+        var race = new Race { RaceId = Guid.NewGuid(), RaceVariant = TestData.Variant("Bird Ridge"), Year = 2025, Date = new DateOnly(2025, 7, 4) };
+        _context.Races.Add(race);
+        var adult = AddRunner();
+        adult.EstimatedBirthRange = BirthDateRange.FromAgeCategory("30-39", race.Date);
+        var junior = AddRunner();
+        junior.EstimatedBirthRange = BirthDateRange.FromAgeCategory("17 and Under", race.Date);
+        AddResult(race, adult, new DateTime(2025, 7, 10, 0, 0, 0, DateTimeKind.Utc));
+        AddResult(race, junior, new DateTime(2025, 7, 10, 0, 0, 0, DateTimeKind.Utc));
+        await _context.SaveChangesAsync();
+
+        var xml = await new SitemapBuilder(_context).BuildAsync("https://example.org/", Today);
+
+        xml.Should().Contain($"/runners/{adult.RunnerId}");
+        xml.Should().NotContain($"/runners/{junior.RunnerId}");
+    }
+
+    [Fact]
     public async Task Build_EmptyDatabase_ListsStaticPagesWithoutLastmod()
     {
         var xml = await new SitemapBuilder(_context).BuildAsync("https://example.org", Today);
@@ -159,8 +185,8 @@ public class SpaFallbackHttpTests : IClassFixture<CustomWebApplicationFactory>, 
 
         var variant = TestData.Variant($"Series {Guid.NewGuid()}");
         var race = new Race { RaceId = Guid.NewGuid(), RaceVariant = variant, Year = 2031, Date = new DateOnly(2031, 7, 4), Location = "Seward" };
-        var adult = new Runner { RunnerId = Guid.NewGuid(), FirstName = "A", LastName = "Adult", Gender = Gender.Male, EstimatedBirthYear = 1985 };
-        var minor = new Runner { RunnerId = Guid.NewGuid(), FirstName = "M", LastName = "Minor", Gender = Gender.Male, EstimatedBirthYear = DateTime.Today.Year - 12 };
+        var adult = new Runner { RunnerId = Guid.NewGuid(), FirstName = "A", LastName = "Adult", Gender = Gender.Male, EstimatedBirthRange = TestData.BornIn(1985) };
+        var minor = new Runner { RunnerId = Guid.NewGuid(), FirstName = "M", LastName = "Minor", Gender = Gender.Male, EstimatedBirthRange = TestData.BornIn(DateTime.Today.Year - 12) };
         db.Races.Add(race);
         db.Runners.AddRange(adult, minor);
         foreach (var r in new[] { adult, minor })

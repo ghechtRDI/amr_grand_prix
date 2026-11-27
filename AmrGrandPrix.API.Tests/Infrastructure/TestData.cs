@@ -1,3 +1,4 @@
+using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Models;
 
 namespace AmrGrandPrix.API.Tests.Infrastructure;
@@ -37,4 +38,11 @@ public static class TestData
         series.Variants.Add(variant);
         return variant;
     }
+
+    /// <summary>
+    /// An estimated birth date range spanning <paramref name="year"/> (so the runner's computed
+    /// <see cref="Runner.EstimatedBirthYear"/> is that year), or unknown when null.
+    /// </summary>
+    public static BirthDateRange BornIn(int? year) =>
+        year is { } y ? BirthDateRange.ForYear(y) : BirthDateRange.Unknown;
 }

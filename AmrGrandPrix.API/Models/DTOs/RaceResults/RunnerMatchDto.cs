@@ -11,7 +11,20 @@ public class RunnerMatchDto
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string FullName => $"{FirstName} {LastName}";
+
+    /// <summary>
+    /// Every name the runner is matched under. Data Review uses it to show when saving will add
+    /// the row's name to the runner's alternate names.
+    /// </summary>
+    public List<string> KnownNames { get; set; } = new();
     public int? Age { get; set; }
+
+    /// <summary>
+    /// Youngest/oldest the runner could be on the race date, from their verified DOB (equal) or
+    /// estimated birth date range. Null when that side is unknown.
+    /// </summary>
+    public int? AgeMin { get; set; }
+    public int? AgeMax { get; set; }
     public bool HasVerifiedDateOfBirth { get; set; }
     public string? AgeCategory { get; set; }
     public Gender? Gender { get; set; }
@@ -30,7 +43,10 @@ public class RunnerMatchDto
             RunnerId = match.RunnerId,
             FirstName = match.FirstName,
             LastName = match.LastName,
+            KnownNames = match.KnownNames,
             Age = match.Age,
+            AgeMin = match.AgeMin,
+            AgeMax = match.AgeMax,
             HasVerifiedDateOfBirth = match.HasVerifiedDateOfBirth,
             AgeCategory = match.AgeCategory,
             Gender = match.Gender,

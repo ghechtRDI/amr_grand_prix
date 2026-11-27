@@ -296,7 +296,7 @@ public class SpaPageResolver
 
         var runner = await _context.Runners
             .Where(r => r.RunnerId == runnerId)
-            .Select(r => new { r.FirstName, r.LastName, r.DateOfBirth, r.EstimatedBirthYear, ResultCount = r.Results.Count })
+            .Select(r => new { r.FirstName, r.LastName, r.DateOfBirth, r.EstimatedDobLatest, ResultCount = r.Results.Count })
             .FirstOrDefaultAsync(ct);
         if (runner is null)
             return SpaPage.NotFound;
@@ -316,7 +316,7 @@ public class SpaPageResolver
                 return SpaPage.NotFound;
         }
 
-        if (!SearchIndexing.IsRunnerIndexable(runner.DateOfBirth, runner.EstimatedBirthYear, SearchIndexing.Today))
+        if (!SearchIndexing.IsRunnerIndexable(runner.DateOfBirth, runner.EstimatedDobLatest, SearchIndexing.Today))
             return MinorRunnerPage;
 
         var fullName = $"{runner.FirstName} {runner.LastName}";

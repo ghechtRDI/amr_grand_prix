@@ -134,7 +134,8 @@ erDiagram
         varchar(100) FirstName
         varchar(100) LastName
         date DateOfBirth "nullable"
-        integer EstimatedBirthYear "nullable"
+        date EstimatedDobEarliest "nullable"
+        date EstimatedDobLatest "nullable"
         integer Gender "enum Gender"
         varchar(200) Email "nullable"
         varchar(100) PreferredName "nullable"

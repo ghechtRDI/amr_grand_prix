@@ -43,7 +43,7 @@ public class SitemapBuilder
                 g.RunnerId,
                 g.LastModified,
                 r.DateOfBirth,
-                r.EstimatedBirthYear
+                r.EstimatedDobLatest
             })
             .ToListAsync(ct);
 
@@ -74,7 +74,7 @@ public class SitemapBuilder
             .Select(r => ($"/races/{r.RaceId}/results", (DateTime?)r.LastModified)));
 
         entries.AddRange(runners
-            .Where(r => SearchIndexing.IsRunnerIndexable(r.DateOfBirth, r.EstimatedBirthYear, today))
+            .Where(r => SearchIndexing.IsRunnerIndexable(r.DateOfBirth, r.EstimatedDobLatest, today))
             .OrderBy(r => r.RunnerId)
             .Select(r => ($"/runners/{r.RunnerId}", (DateTime?)r.LastModified)));
 

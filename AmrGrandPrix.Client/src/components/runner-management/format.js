@@ -15,6 +15,25 @@ export function formatBirth(runner) {
   return '—';
 }
 
+const MONTH_YEAR = { year: 'numeric', month: 'short' };
+
+/**
+ * The runner's estimated birth date range in words: "born Dec 1985 – Jun 1986 (~1985)",
+ * "born Jun 1976 – Jun 1986", "born before Jun 1936", or null when nothing is estimated.
+ */
+export function describeEstimatedBirth(runner) {
+  const earliest = runner?.estimatedDobEarliest;
+  const latest = runner?.estimatedDobLatest;
+  if (!earliest && !latest) return null;
+  const year = runner.estimatedBirthYear ? ` (~${runner.estimatedBirthYear})` : '';
+  if (earliest && latest) {
+    return `born ${formatDateOnly(earliest, MONTH_YEAR)} – ${formatDateOnly(latest, MONTH_YEAR)}${year}`;
+  }
+  return earliest
+    ? `born after ${formatDateOnly(earliest, MONTH_YEAR)}`
+    : `born before ${formatDateOnly(latest, MONTH_YEAR)}`;
+}
+
 /** "12 results · 2019–2025" */
 export function formatResults(runner) {
   const count = `${runner.resultCount} result${runner.resultCount === 1 ? '' : 's'}`;

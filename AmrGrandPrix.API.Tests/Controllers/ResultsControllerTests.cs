@@ -1,4 +1,5 @@
 using AmrGrandPrix.API.Controllers;
+using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Tests.Infrastructure;
@@ -209,7 +210,9 @@ public class ResultsControllerTests : IDisposable
 
         // Assert
         var runner = await _context.Runners.SingleAsync(r => r.FirstName == "New" && r.LastName == "Runner");
-        runner.EstimatedBirthYear.Should().Be(1990); // 2020 (race year) - 30, not DateTime.UtcNow.Year - 30
+        // 30 on 2020-06-01 (the race date, not DateTime.UtcNow): born 1989-06-02 .. 1990-06-01
+        runner.EstimatedBirthRange.Should().Be(new BirthDateRange(new DateOnly(1989, 6, 2), new DateOnly(1990, 6, 1)));
+        runner.EstimatedBirthYear.Should().Be(1989); // middle of the range
         runner.DateOfBirth.Should().BeNull();
     }
 
@@ -223,7 +226,7 @@ public class ResultsControllerTests : IDisposable
             FirstName = "Existing",
             LastName = "Runner",
             Gender = Gender.Male,
-            EstimatedBirthYear = 1980
+            EstimatedBirthRange = TestData.BornIn(1980)
         };
         var race = new Race
         {
@@ -263,20 +266,36 @@ public class ResultsControllerTests : IDisposable
 
         // Assert
         var updated = await _context.Runners.SingleAsync(r => r.RunnerId == runner.RunnerId);
-        updated.EstimatedBirthYear.Should().Be(1975); // 2020 (race year) - 45
+        // Replaced (not intersected - 1980 contradicts it) with 45 on 2020-06-01
+        updated.EstimatedBirthRange.Should().Be(new BirthDateRange(new DateOnly(1974, 6, 2), new DateOnly(1975, 6, 1)));
         updated.DateOfBirth.Should().BeNull();
     }
 
+    // Every case saves a result on 2020-06-01 for a runner whose range starts as
+    // [existingEarliest, existingLatest]. An age of 45 there means born 1974-06-02 .. 1975-06-01.
     [Theory]
-    [InlineData(null, false, 1975)] // no age on file - filled in from the upload even without the flag
-    [InlineData(1980, false, 1980)] // estimate on file, admin didn't opt to update - left alone
-    public async Task SaveResults_MatchedRunner_FillsMissingAgeButKeepsExistingEstimateUnlessAsked(
-        int? existingBirthYear, bool updateRunnerAge, int expectedBirthYear)
+    // no age on file - the result's window is recorded even without the flag
+    [InlineData(null, null, 45, null, false, "1974-06-02", "1975-06-01")]
+    // overlapping estimate - intersected (narrowed)
+    [InlineData("1975-01-01", "1975-12-31", 45, null, false, "1975-01-01", "1975-06-01")]
+    // contradicting estimate, admin didn't opt to update - left alone
+    [InlineData("1980-01-01", "1980-12-31", 45, null, false, "1980-01-01", "1980-12-31")]
+    // contradicting estimate, admin ticked "Update estimated age" - replaced
+    [InlineData("1980-01-01", "1980-12-31", 45, null, true, "1974-06-02", "1975-06-01")]
+    // category-only row (40-49) narrows an unknown runner to a decade
+    [InlineData(null, null, null, "40-49", false, "1970-06-02", "1980-06-01")]
+    // category-only row narrows an existing estimate it overlaps
+    [InlineData("1979-07-01", "1980-08-31", null, "40-49", false, "1979-07-01", "1980-06-01")]
+    public async Task SaveResults_MatchedRunner_FoldsResultIntoEstimatedBirthRange(
+        string? existingEarliest, string? existingLatest, int? age, string? ageCategory, bool updateRunnerAge,
+        string expectedEarliest, string expectedLatest)
     {
         var runner = new Runner
         {
             RunnerId = Guid.NewGuid(), FirstName = "Existing", LastName = "Runner",
-            Gender = Gender.Male, EstimatedBirthYear = existingBirthYear
+            Gender = Gender.Male,
+            EstimatedDobEarliest = existingEarliest is null ? null : DateOnly.Parse(existingEarliest),
+            EstimatedDobLatest = existingLatest is null ? null : DateOnly.Parse(existingLatest)
         };
         var race = new Race
         {
@@ -299,14 +318,61 @@ public class ResultsControllerTests : IDisposable
             RaceId = race.RaceId,
             Results = new List<ResultRow>
             {
-                new() { Name = "Existing Runner", Age = 45, Gender = Gender.Male, Place = 1,
+                new() { Name = "Existing Runner", Age = age, AgeCategory = ageCategory, Gender = Gender.Male, Place = 1,
                         TimeString = "20:00", Status = ResultStatus.Finished,
                         MatchedRunnerId = runner.RunnerId, UpdateRunnerAge = updateRunnerAge }
             }
         });
 
         var updated = await _context.Runners.SingleAsync(r => r.RunnerId == runner.RunnerId);
-        updated.EstimatedBirthYear.Should().Be(expectedBirthYear);
+        updated.EstimatedBirthRange.Should().Be(
+            new BirthDateRange(DateOnly.Parse(expectedEarliest), DateOnly.Parse(expectedLatest)));
+    }
+
+    [Theory]
+    [InlineData("Bob  Smith", new[] { "Bob Smith" })]          // new spelling - saved, whitespace cleaned
+    [InlineData("ROBERT SMITH", new string[0])]                 // legal name, different case - nothing added
+    [InlineData("rob smith", new string[0])]                    // already an alternate name - not duplicated
+    [InlineData("Bobby Smith", new string[0])]                  // preferred name + last name - already known
+    public async Task SaveResults_MatchedRunner_SavesUnknownUploadedNameAsAlternate(string uploadedName, string[] expectedAdded)
+    {
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(), FirstName = "Robert", LastName = "Smith",
+            PreferredName = "Bobby", AlternateNames = new List<string> { "Rob Smith" },
+            Gender = Gender.Male, EstimatedBirthRange = TestData.BornIn(1975)
+        };
+        var race = new Race
+        {
+            RaceId = Guid.NewGuid(), RaceVariant = TestData.Variant("Race"),
+            Date = new DateOnly(2020, 6, 1), Year = 2020
+        };
+        var batch = new UploadBatch
+        {
+            UploadBatchId = Guid.NewGuid(), RaceId = race.RaceId,
+            FileName = "test.csv", FileType = FileType.CSV, Status = UploadStatus.Pending
+        };
+        _context.Runners.Add(runner);
+        _context.Races.Add(race);
+        _context.UploadBatches.Add(batch);
+        await _context.SaveChangesAsync();
+
+        await _controller.SaveResults(new SaveResultsRequest
+        {
+            UploadBatchId = batch.UploadBatchId,
+            RaceId = race.RaceId,
+            Results = new List<ResultRow>
+            {
+                new() { Name = uploadedName, Age = 45, Gender = Gender.Male, Place = 1,
+                        TimeString = "20:00", Status = ResultStatus.Finished,
+                        MatchedRunnerId = runner.RunnerId }
+            }
+        });
+
+        var updated = await _context.Runners.SingleAsync(r => r.RunnerId == runner.RunnerId);
+        updated.AlternateNames.Should().Equal(new[] { "Rob Smith" }.Concat(expectedAdded));
+        updated.FirstName.Should().Be("Robert");
+        updated.LastName.Should().Be("Smith");
     }
 
     [Fact]
@@ -414,7 +480,9 @@ public class ResultsControllerTests : IDisposable
         // Assert
         var updated = await _context.Runners.SingleAsync(r => r.RunnerId == runner.RunnerId);
         updated.DateOfBirth.Should().Be(verifiedDob);
-        updated.EstimatedBirthYear.Should().BeNull();
+        // The estimated range still records what results say, but the verified DOB wins.
+        AgeCalculator.GetRunnerAge(updated, race.Date).Should().Be(45);
+        AgeCalculator.IsAgeEstimated(updated).Should().BeFalse();
     }
 
     [Fact]
