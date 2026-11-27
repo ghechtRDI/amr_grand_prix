@@ -593,6 +593,34 @@ namespace AmrGrandPrix.API.Migrations
                     b.ToTable("RunnerClaims");
                 });
 
+            modelBuilder.Entity("AmrGrandPrix.API.Models.RunnerNotDuplicate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("DismissedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DismissedByUserId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RunnerAId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RunnerBId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunnerBId");
+
+                    b.HasIndex("RunnerAId", "RunnerBId")
+                        .IsUnique();
+
+                    b.ToTable("RunnerNotDuplicates");
+                });
+
             modelBuilder.Entity("AmrGrandPrix.API.Models.UploadBatch", b =>
                 {
                     b.Property<Guid>("UploadBatchId")
@@ -941,6 +969,25 @@ namespace AmrGrandPrix.API.Migrations
                     b.Navigation("ApplicationUser");
 
                     b.Navigation("Runner");
+                });
+
+            modelBuilder.Entity("AmrGrandPrix.API.Models.RunnerNotDuplicate", b =>
+                {
+                    b.HasOne("AmrGrandPrix.API.Models.Runner", "RunnerA")
+                        .WithMany()
+                        .HasForeignKey("RunnerAId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("AmrGrandPrix.API.Models.Runner", "RunnerB")
+                        .WithMany()
+                        .HasForeignKey("RunnerBId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("RunnerA");
+
+                    b.Navigation("RunnerB");
                 });
 
             modelBuilder.Entity("AmrGrandPrix.API.Models.UploadBatch", b =>

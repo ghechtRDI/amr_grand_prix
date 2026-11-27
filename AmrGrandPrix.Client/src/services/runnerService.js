@@ -43,3 +43,22 @@ export const mergeRunners = (targetId, sourceId) =>
     headers: authHeaders(),
     body: JSON.stringify({ sourceRunnerId: sourceId }),
   });
+
+/** DismissedDuplicateDto[]: { runnerA, runnerB, dismissedAt, dismissedBy } — pairs marked "not a match". */
+export const getDismissedDuplicates = () =>
+  request('/api/runners/not-duplicates', { headers: authHeaders() });
+
+/** Marks two runners as different people, hiding the pair from the duplicates list. */
+export const dismissDuplicate = (runnerAId, runnerBId) =>
+  request('/api/runners/not-duplicates', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ runnerAId, runnerBId }),
+  });
+
+/** Puts a "not a match" pair back on the duplicates list. */
+export const restoreDuplicate = (runnerAId, runnerBId) =>
+  request(`/api/runners/not-duplicates?${new URLSearchParams({ runnerAId, runnerBId })}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });

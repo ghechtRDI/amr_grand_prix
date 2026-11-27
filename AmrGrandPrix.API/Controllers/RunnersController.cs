@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -212,6 +213,46 @@ public class RunnersController : ControllerBase
         [FromQuery] double minConfidence = 0.75)
     {
         return Ok(await _runnerMergeService.FindPotentialDuplicatesAsync(Math.Clamp(minConfidence, 0.5, 1.0)));
+    }
+
+    /// <summary>Pairs marked as "not a match", most recently dismissed first.</summary>
+    [HttpGet("not-duplicates")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(typeof(List<DismissedDuplicateDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<DismissedDuplicateDto>>> GetDismissedDuplicates()
+    {
+        return Ok(await _runnerMergeService.GetDismissedDuplicatesAsync());
+    }
+
+    /// <summary>
+    /// Marks two runners as different people so the pair no longer shows as a possible duplicate.
+    /// </summary>
+    [HttpPost("not-duplicates")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DismissDuplicate([FromBody] RunnerPairRequest request)
+    {
+        if (request.RunnerAId == request.RunnerBId)
+            return BadRequest(new { message = "Pick two different runners." });
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return await _runnerMergeService.DismissDuplicateAsync(request.RunnerAId, request.RunnerBId, userId)
+            ? NoContent()
+            : NotFound(new { message = "Runner not found" });
+    }
+
+    /// <summary>Puts a pair marked as "not a match" back on the possible duplicates list.</summary>
+    [HttpDelete("not-duplicates")]
+    [Authorize(Roles = "Admin,Manager")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RestoreDuplicate([FromQuery] Guid runnerAId, [FromQuery] Guid runnerBId)
+    {
+        return await _runnerMergeService.RestoreDuplicateAsync(runnerAId, runnerBId)
+            ? NoContent()
+            : NotFound(new { message = "That pair isn't marked as not a match." });
     }
 
     /// <summary>
