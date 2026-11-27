@@ -61,6 +61,30 @@ public class RacesControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task GetYearsWithResults_ListsOnlyYearsWithResults_NewestFirst()
+    {
+        var variant = TestData.Variant("Crazy Lazy");
+        _context.RaceVariants.Add(variant);
+        Race AddRace(int year)
+        {
+            var race = new Race { RaceId = Guid.NewGuid(), RaceVariantId = variant.RaceVariantId, Year = year, Date = new DateOnly(year, 6, 1) };
+            _context.Races.Add(race);
+            return race;
+        }
+        var race2015 = AddRace(2015);
+        var race2026 = AddRace(2026);
+        AddRace(2020); // no results
+        foreach (var race in new[] { race2015, race2015, race2026 })
+            _context.RaceResults.Add(new RaceResult { ResultId = Guid.NewGuid(), RaceId = race.RaceId, RunnerId = Guid.NewGuid() });
+        await _context.SaveChangesAsync();
+
+        var result = await _controller.GetYearsWithResults();
+
+        result.Result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeEquivalentTo(new[] { 2026, 2015 }, o => o.WithStrictOrdering());
+    }
+
+    [Fact]
     public async Task CreateRace_SingleVariantSeries_HasNoCourseVariantLabel()
     {
         var variant = TestData.Variant("Crazy Lazy");

@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Trophy } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,23 +25,32 @@ function GrandPrixBadge() {
 function ByYearView() {
   const [races, setRaces] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [year, setYear] = useState(null);
   const [search, setSearch] = useState('');
+  // The year lives in the URL (?year=) so it survives a reload
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
     fetch('/api/races')
       .then((r) => r.json())
-      .then((data) => {
-        setRaces(data);
-        if (data.length > 0) setYear(data[0].year);
-      })
+      .then(setRaces)
       .finally(() => setLoading(false));
   }, []);
 
+  // Only years with results: a race created ahead of time has nothing to browse yet
   const years = useMemo(
-    () => [...new Set(races.map((r) => r.year))].sort((a, b) => b - a),
+    () => [...new Set(races.filter((r) => r.resultsCount > 0).map((r) => r.year))].sort((a, b) => b - a),
     [races]
   );
+  const yearParam = parseInt(searchParams.get('year'));
+  const year = years.includes(yearParam) ? yearParam : (years[0] ?? null);
+  const setYear = (y) =>
+    setSearchParams(
+      (params) => {
+        params.set('year', String(y));
+        return params;
+      },
+      { replace: true }
+    );
 
   const racesForYear = useMemo(
     () =>

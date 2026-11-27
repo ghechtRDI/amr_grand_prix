@@ -46,6 +46,24 @@ public class RacesController : ControllerBase
     }
 
     /// <summary>
+    /// Years that have at least one race result, newest first. Feeds the year pickers so
+    /// historical seasons appear as soon as their results are loaded.
+    /// </summary>
+    [HttpGet("years")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<int>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<int>>> GetYearsWithResults()
+    {
+        var years = await _context.RaceResults
+            .Select(r => r.Race.Year)
+            .Distinct()
+            .OrderByDescending(y => y)
+            .ToListAsync();
+
+        return Ok(years);
+    }
+
+    /// <summary>
     /// Get a specific race by ID
     /// </summary>
     [HttpGet("detail/{id}")]
