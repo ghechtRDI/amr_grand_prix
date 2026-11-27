@@ -520,8 +520,11 @@ namespace AmrGrandPrix.API.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<int?>("EstimatedBirthYear")
-                        .HasColumnType("integer");
+                    b.Property<DateOnly?>("EstimatedDobEarliest")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("EstimatedDobLatest")
+                        .HasColumnType("date");
 
                     b.Property<string>("FirstName")
                         .IsRequired()

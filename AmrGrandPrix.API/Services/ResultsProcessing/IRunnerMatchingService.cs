@@ -54,7 +54,19 @@ public class RunnerMatch
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string FullName => $"{FirstName} {LastName}";
+
+    /// <summary>
+    /// Every name the runner is matched under (see <see cref="Runners.RunnerNames.NameCandidates(Runner)"/>).
+    /// </summary>
+    public List<string> KnownNames { get; set; } = new();
     public int? Age { get; set; }
+
+    /// <summary>
+    /// Youngest/oldest the runner could be on the race date, from their verified DOB (equal) or
+    /// estimated birth date range. Null when that side is unknown.
+    /// </summary>
+    public int? AgeMin { get; set; }
+    public int? AgeMax { get; set; }
     public bool HasVerifiedDateOfBirth { get; set; }
     public string? AgeCategory { get; set; }
     public Gender? Gender { get; set; }

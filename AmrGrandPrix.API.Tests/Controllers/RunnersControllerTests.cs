@@ -47,7 +47,7 @@ public class RunnersControllerTests : IDisposable
             FirstName = first,
             LastName = "Test",
             Gender = gender,
-            EstimatedBirthYear = estimatedBirthYear
+            EstimatedBirthRange = TestData.BornIn(estimatedBirthYear)
         };
         _context.Runners.Add(runner);
         return runner;

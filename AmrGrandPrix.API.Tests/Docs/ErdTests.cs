@@ -24,7 +24,9 @@ public class ErdTests
         File.Exists(path).Should().BeTrue(
             "DOCS/ERD.md should exist; create it with UPDATE_ERD=1 dotnet test --filter \"FullyQualifiedName~ErdTests\"");
         var actual = File.ReadAllText(path).ReplaceLineEndings("\n");
-        actual.Should().Be(expected,
+        // Compared as a bool: FluentAssertions formats string diffs as a format string, and the
+        // Mermaid braces in the ERD make it throw a FormatException instead of this message.
+        (actual == expected).Should().BeTrue(
             "DOCS/ERD.md is out of date with the EF Core model; regenerate it with UPDATE_ERD=1 dotnet test --filter \"FullyQualifiedName~ErdTests\"");
     }
 

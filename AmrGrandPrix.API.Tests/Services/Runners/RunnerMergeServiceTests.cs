@@ -1,4 +1,5 @@
 using AmrGrandPrix.API.Controllers;
+using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
@@ -50,7 +51,7 @@ public class RunnerMergeServiceTests : IDisposable
             FirstName = first,
             LastName = last,
             Gender = gender,
-            EstimatedBirthYear = estimatedBirthYear
+            EstimatedBirthRange = TestData.BornIn(estimatedBirthYear)
         };
         _context.Runners.Add(runner);
         return runner;
@@ -214,6 +215,45 @@ public class RunnerMergeServiceTests : IDisposable
 
         preview!.CanMerge.Should().BeTrue();
         preview.Warnings.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Merge_IntersectsEstimatedBirthRanges()
+    {
+        // Two records of one person, aged 40 in June and 40 in December of the same year.
+        var target = AddRunner("Sam", "Lee");
+        target.EstimatedBirthRange = BirthDateRange.FromAge(40, new DateOnly(Year, 6, 15));
+        var source = AddRunner("Sam", "Lee");
+        source.EstimatedBirthRange = BirthDateRange.FromAge(40, new DateOnly(Year, 12, 15));
+        await _context.SaveChangesAsync();
+
+        var preview = await _service.PreviewMergeAsync(target.RunnerId, source.RunnerId);
+        await _service.MergeAsync(target.RunnerId, source.RunnerId);
+
+        var expected = new BirthDateRange(new DateOnly(Year - 41, 12, 16), new DateOnly(Year - 40, 6, 15));
+        preview!.Warnings.Should().BeEmpty();
+        preview.Merged.EstimatedDobEarliest.Should().Be(expected.Earliest);
+        preview.Merged.EstimatedDobLatest.Should().Be(expected.Latest);
+        (await _context.Runners.SingleAsync(r => r.RunnerId == target.RunnerId))
+            .EstimatedBirthRange.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task Preview_ContradictingRangesWithCloseBirthYears_WarnsAndKeepsTarget()
+    {
+        // About a year apart (so the birth-year check is quiet) but both ranges are narrow and
+        // don't overlap.
+        var target = AddRunner("Sam", "Lee");
+        target.EstimatedBirthRange = BirthDateRange.FromAge(40, new DateOnly(Year, 6, 15));
+        var source = AddRunner("Sam", "Lee");
+        source.EstimatedBirthRange = BirthDateRange.FromAge(42, new DateOnly(Year, 6, 15));
+        await _context.SaveChangesAsync();
+
+        var preview = await _service.PreviewMergeAsync(target.RunnerId, source.RunnerId);
+
+        preview!.Warnings.Should().ContainSingle(w => w.Contains("don't agree"));
+        preview.Merged.EstimatedDobEarliest.Should().Be(target.EstimatedDobEarliest);
+        preview.Merged.EstimatedDobLatest.Should().Be(target.EstimatedDobLatest);
     }
 
     [Fact]

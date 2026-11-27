@@ -1,3 +1,4 @@
+using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
@@ -216,6 +217,8 @@ public class RunnerMergeService : IRunnerMergeService
                 Gender = r.Gender,
                 DateOfBirth = r.DateOfBirth,
                 EstimatedBirthYear = r.EstimatedBirthYear,
+                EstimatedDobEarliest = r.EstimatedDobEarliest,
+                EstimatedDobLatest = r.EstimatedDobLatest,
                 Email = r.Email,
                 ResultCount = years.Count,
                 FirstYear = years.Count > 0 ? years.Min() : null,
@@ -279,7 +282,8 @@ public class RunnerMergeService : IRunnerMergeService
         target.PreferredName = merged.PreferredName;
         target.AlternateNames = merged.AlternateNames;
         target.DateOfBirth = merged.DateOfBirth;
-        target.EstimatedBirthYear = merged.EstimatedBirthYear;
+        target.EstimatedDobEarliest = merged.EstimatedDobEarliest;
+        target.EstimatedDobLatest = merged.EstimatedDobLatest;
         target.Email = merged.Email;
         target.UpdatedAt = DateTime.UtcNow;
 
@@ -447,6 +451,14 @@ public class RunnerMergeService : IRunnerMergeService
             preview.Warnings.Add(
                 $"Birth years look different (about {targetYear} vs. {sourceYear}) — double-check these are the same person.");
         }
+        else if (!target.EstimatedBirthRange.IsUnknown && !source.EstimatedBirthRange.IsUnknown &&
+                 !target.EstimatedBirthRange.Overlaps(source.EstimatedBirthRange))
+        {
+            // Close birth years, but the result ages still contradict each other (e.g. a year
+            // apart where both ranges are narrow), so the ranges can't be combined.
+            preview.Warnings.Add(
+                "The ages in their results don't agree; the kept runner's estimated age is used.");
+        }
 
         if (!string.IsNullOrWhiteSpace(target.Email) && !string.IsNullOrWhiteSpace(source.Email) &&
             !string.Equals(target.Email, source.Email, StringComparison.OrdinalIgnoreCase))
@@ -473,6 +485,10 @@ public class RunnerMergeService : IRunnerMergeService
                 .Append(string.Equals(source.PreferredName, preferredName, StringComparison.OrdinalIgnoreCase) ? null : source.PreferredName)
                 .Concat(source.AlternateNames));
 
+        // Both runners' results now belong to one person, so their birth date ranges intersect;
+        // if they contradict, the target's is kept (the preview warns about it).
+        var birthRange = BirthDateRange.Combine(target.EstimatedBirthRange, source.EstimatedBirthRange, out _);
+
         return new MergedRunnerDto
         {
             FirstName = target.FirstName,
@@ -481,30 +497,17 @@ public class RunnerMergeService : IRunnerMergeService
             AlternateNames = alternateNames,
             Gender = target.Gender,
             DateOfBirth = target.DateOfBirth ?? source.DateOfBirth,
-            EstimatedBirthYear = target.EstimatedBirthYear ?? source.EstimatedBirthYear,
+            EstimatedDobEarliest = birthRange.Earliest,
+            EstimatedDobLatest = birthRange.Latest,
+            EstimatedBirthYear = birthRange.EstimatedYear,
             Email = string.IsNullOrWhiteSpace(target.Email) ? source.Email : target.Email
         };
     }
 
     private static int? BirthYear(Runner runner) => runner.DateOfBirth?.Year ?? runner.EstimatedBirthYear;
 
-    /// <summary>
-    /// Every full name a runner might appear under: legal, alternate, and preferred — the latter
-    /// also paired with the last name when it's just a first name (e.g. "Josh" → "Josh Taylor").
-    /// </summary>
-    private static List<NameKey> NameCandidates(Runner runner)
-    {
-        var names = new List<string?> { runner.FullName };
-        names.AddRange(runner.AlternateNames);
-        if (!string.IsNullOrWhiteSpace(runner.PreferredName))
-        {
-            names.Add(runner.PreferredName);
-            if (!runner.PreferredName.Trim().Contains(' '))
-                names.Add($"{runner.PreferredName} {runner.LastName}");
-        }
-
-        return RunnerNames.Normalize(names).Select(n => new NameKey(n.ToLowerInvariant())).ToList();
-    }
+    private static List<NameKey> NameCandidates(Runner runner) =>
+        RunnerNames.NameCandidates(runner).Select(n => new NameKey(n.ToLowerInvariant())).ToList();
 
     /// <summary>A lowercased name plus its letter counts, for a cheap edit-distance lower bound.</summary>
     private sealed class NameKey

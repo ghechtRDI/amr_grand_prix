@@ -2,6 +2,7 @@ using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs.RaceResults;
+using AmrGrandPrix.API.Services.Runners;
 using Microsoft.EntityFrameworkCore;
 
 namespace AmrGrandPrix.API.Services.ResultsProcessing;
@@ -16,7 +17,10 @@ public class RunnerMatchingService : IRunnerMatchingService
 
     // Matching thresholds
     private const double MinimumNameSimilarity = 0.75; // 75% similarity required
-    private const int MaxAgeDiscrepancy = 2; // Allow 2 years difference
+
+    // How far (in years) a row's age may sit outside the runner's birth-date range and still
+    // agree: absorbs results that report age as of Dec 31 or another reference date.
+    public const int AgeToleranceYears = 1;
 
     public RunnerMatchingService(
         ApplicationDbContext context,
@@ -33,74 +37,74 @@ public class RunnerMatchingService : IRunnerMatchingService
             return new List<RunnerMatch>();
         }
 
-        var allRunners = await _context.Runners.ToListAsync();
-        return ScoreMatches(allRunners, name, age, gender, ageCategory, asOfDate ?? DateOnly.FromDateTime(DateTime.Today));
+        var candidates = await LoadCandidatesAsync();
+        return ScoreMatches(candidates, name, age, gender, ageCategory, asOfDate ?? DateOnly.FromDateTime(DateTime.Today));
     }
 
+    /// <summary>A runner plus its name candidates, computed once per batch rather than once per row.</summary>
+    private sealed record Candidate(Runner Runner, List<string> Names);
+
+    private async Task<List<Candidate>> LoadCandidatesAsync() =>
+        (await _context.Runners.ToListAsync())
+            .Select(r => new Candidate(r, RunnerNames.NameCandidates(r)))
+            .ToList();
+
     /// <summary>
-    /// Scores every runner in <paramref name="allRunners"/> against the given name/age/gender.
-    /// Takes the runner list so batch callers can load it once instead of once per row.
+    /// Scores every runner in <paramref name="candidates"/> against the given name/age/gender.
+    /// Takes the candidate list so batch callers can load it once instead of once per row.
+    /// The rules are documented in DOCS/RUNNER_MATCHING.md.
     /// </summary>
-    private List<RunnerMatch> ScoreMatches(IReadOnlyList<Runner> allRunners, string name, int? age, Gender? gender, string? ageCategory, DateOnly effectiveAsOfDate)
+    private List<RunnerMatch> ScoreMatches(IReadOnlyList<Candidate> candidates, string name, int? age, Gender? gender, string? ageCategory, DateOnly effectiveAsOfDate)
     {
         _logger.LogDebug("Finding matches for: {Name}, Age: {Age}, AgeCategory: {AgeCategory}, Gender: {Gender}, AsOf: {AsOf}",
             name, age, ageCategory, gender, effectiveAsOfDate);
 
         var matches = new List<RunnerMatch>();
+        var rowRange = BirthDateRange.FromResult(age, ageCategory, effectiveAsOfDate);
 
-        foreach (var runner in allRunners)
+        foreach (var (runner, names) in candidates)
         {
-            var similarity = CalculateBestNameSimilarity(name, runner);
+            var similarity = CalculateBestNameSimilarity(name, names);
 
             // Only consider matches above minimum similarity threshold
             if (similarity < MinimumNameSimilarity)
                 continue;
 
-            // Check age match
-            var ageMatch = true;
+            // Age check: the birth dates the row's age (or category) allows must overlap the
+            // runner's known range, give or take AgeToleranceYears. true = agrees, false =
+            // disagrees, null = can't tell (either side unknown). Unknown is neutral — it doesn't
+            // count against the runner, it just can't help.
+            var runnerRange = AgeCalculator.GetBirthRange(runner);
+            bool? ageMatch = runnerRange.IsUnknown || rowRange.IsUnknown
+                ? null
+                : runnerRange.Widen(AgeToleranceYears).Overlaps(rowRange);
+
             var runnerAge = AgeCalculator.GetRunnerAge(runner, effectiveAsOfDate);
-            string? runnerAgeCategory = null;
-
-            if (runnerAge.HasValue)
-            {
-                runnerAgeCategory = GrandPrixConstants.GetAgeCategory(runnerAge.Value);
-
-                if (age.HasValue)
-                {
-                    var ageDifference = Math.Abs(age.Value - runnerAge.Value);
-                    ageMatch = ageDifference <= MaxAgeDiscrepancy;
-                }
-                else if (!string.IsNullOrEmpty(ageCategory))
-                {
-                    // Only a category is known for the incoming row — compare at the category
-                    // level instead of demanding an exact-age match.
-                    ageMatch = string.Equals(runnerAgeCategory, ageCategory, StringComparison.OrdinalIgnoreCase);
-                }
-            }
-            else if (age.HasValue || !string.IsNullOrEmpty(ageCategory))
-            {
-                // No DOB or estimated birth year in database, can't verify age
-                ageMatch = false;
-            }
+            var (runnerAgeMin, runnerAgeMax) = AgeCalculator.GetAgeRange(runnerRange, effectiveAsOfDate);
 
             // Check gender match
             var genderMatch = !gender.HasValue || runner.Gender == gender.Value;
 
             // Calculate overall confidence
-            var confidence = CalculateConfidence(similarity, ageMatch, genderMatch);
+            var confidence = CalculateConfidence(similarity, ageMatch != false, genderMatch);
 
             matches.Add(new RunnerMatch
             {
                 RunnerId = runner.RunnerId,
                 FirstName = runner.FirstName,
                 LastName = runner.LastName,
+                KnownNames = names,
                 Age = runnerAge,
+                AgeMin = runnerAgeMin,
+                AgeMax = runnerAgeMax,
                 HasVerifiedDateOfBirth = runner.DateOfBirth.HasValue,
-                AgeCategory = runnerAgeCategory,
+                AgeCategory = runnerAge.HasValue ? GrandPrixConstants.GetAgeCategory(runnerAge.Value) : null,
                 Gender = runner.Gender,
                 Confidence = confidence,
                 NameMatch = similarity >= 0.90,
-                AgeMatch = ageMatch,
+                // Reported only when confirmed, so a candidate whose age actually agrees sorts
+                // above an equally scored one with no age on file.
+                AgeMatch = ageMatch == true,
                 GenderMatch = genderMatch
             });
         }
@@ -122,14 +126,14 @@ public class RunnerMatchingService : IRunnerMatchingService
         _logger.LogInformation("Finding runner matches for {Count} result rows", resultRows.Count);
 
         // Load the runner table once for the whole batch rather than once per row
-        var allRunners = await _context.Runners.ToListAsync();
+        var candidates = await LoadCandidatesAsync();
 
         foreach (var row in resultRows)
         {
             if (string.IsNullOrWhiteSpace(row.Name))
                 continue;
 
-            var matches = ScoreMatches(allRunners, row.Name, row.Age, row.Gender, row.AgeCategory, raceDate);
+            var matches = ScoreMatches(candidates, row.Name, row.Age, row.Gender, row.AgeCategory, raceDate);
 
             // Only include matches with reasonable confidence (>= 0.70)
             row.RunnerMatches = matches
@@ -154,28 +158,19 @@ public class RunnerMatchingService : IRunnerMatchingService
     }
 
     /// <summary>
-    /// Compares <paramref name="candidateName"/> against the runner's legal full name first.
-    /// Only if that isn't a 100% match does it also try the runner's preferred name and each
-    /// alternate name, returning the best score found across all of them.
+    /// Best similarity between <paramref name="candidateName"/> and any of a runner's
+    /// <see cref="RunnerNames.NameCandidates(Runner)"/> (legal name first, so an exact legal-name
+    /// match returns immediately).
     /// </summary>
-    private double CalculateBestNameSimilarity(string candidateName, Runner runner)
+    private double CalculateBestNameSimilarity(string candidateName, IEnumerable<string> runnerNames)
     {
-        var legalNameSimilarity = CalculateNameSimilarity(candidateName, runner.FullName);
-        if (legalNameSimilarity >= 1.0)
-            return legalNameSimilarity;
-
-        var best = legalNameSimilarity;
-
-        if (!string.IsNullOrWhiteSpace(runner.PreferredName))
-            best = Math.Max(best, CalculateNameSimilarity(candidateName, runner.PreferredName));
-
-        foreach (var alternateName in runner.AlternateNames)
+        var best = 0.0;
+        foreach (var runnerName in runnerNames)
         {
-            if (string.IsNullOrWhiteSpace(alternateName))
-                continue;
-            best = Math.Max(best, CalculateNameSimilarity(candidateName, alternateName));
+            best = Math.Max(best, CalculateNameSimilarity(candidateName, runnerName));
+            if (best >= 1.0)
+                break;
         }
-
         return best;
     }
 
@@ -208,15 +203,18 @@ public class RunnerMatchingService : IRunnerMatchingService
                 continue;
 
             // Race results essentially never carry a verified DOB, so a runner's DateOfBirth is
-            // rarely set. EstimatedBirthYear (derived from a reported age) is the realistic
-            // signal here, so a birth-year match counts the same as an exact verified DOB match.
+            // rarely set. The estimated birth date range (narrowed from reported ages) is the
+            // realistic signal here: the user's DOB falling inside a narrow range (one reported
+            // age or tighter) counts the same as an exact verified DOB match. Category-only
+            // ranges span a decade and say too little to count.
             var dobMatch = user.DateOfBirth.HasValue && runner.DateOfBirth.HasValue &&
                            user.DateOfBirth.Value == runner.DateOfBirth.Value;
 
-            var birthYearMatch = !dobMatch && user.DateOfBirth.HasValue && runner.EstimatedBirthYear.HasValue &&
-                                  user.DateOfBirth.Value.Year == runner.EstimatedBirthYear.Value;
+            var estimatedRange = runner.EstimatedBirthRange;
+            var rangeMatch = !runner.DateOfBirth.HasValue && user.DateOfBirth.HasValue &&
+                             estimatedRange.IsNarrow && estimatedRange.Contains(user.DateOfBirth.Value);
 
-            var yearOfBirthMatch = dobMatch || birthYearMatch;
+            var yearOfBirthMatch = dobMatch || rangeMatch;
 
             // The user isn't required to set a gender on their profile, so an unset gender
             // doesn't penalize the match — it just means this signal has nothing to add.
@@ -234,8 +232,8 @@ public class RunnerMatchingService : IRunnerMatchingService
                 HasVerifiedDateOfBirth = runner.DateOfBirth.HasValue,
                 AgeCategory = runnerAgeCategory,
                 Gender = runner.Gender,
-                // Name (60%) is the primary signal; a year-of-birth match — verified DOB or,
-                // failing that, estimated birth year — (30%) and a gender match (10%) corroborate it.
+                // Name (60%) is the primary signal; a birth-date match — verified DOB or, failing
+                // that, the estimated range — (30%) and a gender match (10%) corroborate it.
                 Confidence = Math.Min((similarity * 0.60) + (yearOfBirthMatch ? 0.30 : 0.0) + (genderMatch ? 0.10 : 0.0), 1.0),
                 NameMatch = similarity >= 0.90,
                 AgeMatch = yearOfBirthMatch,
@@ -250,27 +248,22 @@ public class RunnerMatchingService : IRunnerMatchingService
     }
 
     /// <summary>
-    /// Compares the user's legal name against the runner first; only if that isn't a 100% match
-    /// does it also try the user's preferred name and each alternate name (each itself checked
-    /// against the runner's legal, preferred, and alternate names via <see cref="CalculateBestNameSimilarity"/>).
+    /// Best similarity between any of the user's names (legal, alternate, preferred — paired with
+    /// their last name when it's a single word) and any of the runner's name candidates.
     /// </summary>
     private double CalculateBestProfileNameSimilarity(ApplicationUser user, Runner runner)
     {
-        var legalName = $"{user.FirstName} {user.LastName}".Trim();
-        var best = CalculateBestNameSimilarity(legalName, runner);
-        if (best >= 1.0)
-            return best;
+        var userNames = RunnerNames.NameCandidates(
+            $"{user.FirstName} {user.LastName}", user.LastName, user.PreferredName, user.AlternateNames);
+        var runnerNames = RunnerNames.NameCandidates(runner);
 
-        if (!string.IsNullOrWhiteSpace(user.PreferredName))
-            best = Math.Max(best, CalculateBestNameSimilarity(user.PreferredName, runner));
-
-        foreach (var alternateName in user.AlternateNames)
+        var best = 0.0;
+        foreach (var userName in userNames)
         {
-            if (string.IsNullOrWhiteSpace(alternateName))
-                continue;
-            best = Math.Max(best, CalculateBestNameSimilarity(alternateName, runner));
+            best = Math.Max(best, CalculateBestNameSimilarity(userName, runnerNames));
+            if (best >= 1.0)
+                break;
         }
-
         return best;
     }
 

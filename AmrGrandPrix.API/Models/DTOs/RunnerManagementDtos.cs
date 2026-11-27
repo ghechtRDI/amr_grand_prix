@@ -14,7 +14,13 @@ public class RunnerAdminDto
     public List<string> AlternateNames { get; set; } = new();
     public Gender Gender { get; set; }
     public DateOnly? DateOfBirth { get; set; }
+
+    /// <summary>Middle of the estimated birth date range when it's narrow enough (see <c>Runner.EstimatedBirthYear</c>).</summary>
     public int? EstimatedBirthYear { get; set; }
+
+    /// <summary>Estimated birth date range from race-result ages (either bound may be open).</summary>
+    public DateOnly? EstimatedDobEarliest { get; set; }
+    public DateOnly? EstimatedDobLatest { get; set; }
     public string? Email { get; set; }
     public int ResultCount { get; set; }
     public int? FirstYear { get; set; }
@@ -107,7 +113,13 @@ public class MergedRunnerDto
     public List<string> AlternateNames { get; set; } = new();
     public Gender Gender { get; set; }
     public DateOnly? DateOfBirth { get; set; }
+
+    /// <summary>Middle of the estimated birth date range when it's narrow enough (see <c>Runner.EstimatedBirthYear</c>).</summary>
     public int? EstimatedBirthYear { get; set; }
+
+    /// <summary>Estimated birth date range from race-result ages (either bound may be open).</summary>
+    public DateOnly? EstimatedDobEarliest { get; set; }
+    public DateOnly? EstimatedDobLatest { get; set; }
     public string? Email { get; set; }
 }
 

@@ -20,7 +20,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { GENDER_OPTIONS } from './format';
+import { GENDER_OPTIONS, describeEstimatedBirth } from './format';
 
 const MAX_ALTERNATE_NAMES = 20;
 
@@ -134,9 +134,9 @@ export default function EditRunnerDialog({ runner, open, onOpenChange, onSaved }
             <div className="flex flex-col gap-2">
               <Label htmlFor="runner-dob">Date of Birth</Label>
               <Input id="runner-dob" type="date" {...register('dateOfBirth')} />
-              {!runner?.dateOfBirth && runner?.estimatedBirthYear && (
+              {!runner?.dateOfBirth && describeEstimatedBirth(runner) && (
                 <p className="text-xs text-muted-foreground">
-                  Currently estimated as ~{runner.estimatedBirthYear} from race ages.
+                  Estimated from race ages: {describeEstimatedBirth(runner)}.
                 </p>
               )}
             </div>

@@ -1,23 +1,25 @@
 using AmrGrandPrix.API.Common;
-using AmrGrandPrix.API.Models;
 
 namespace AmrGrandPrix.API.Services.Seo;
 
 /// <summary>
 /// Which runner pages search engines may index. Runners under 18 are kept out (noindex, left out
-/// of the sitemap); a runner with no date of birth and no estimated birth year counts as a minor,
-/// so an unknown age fails closed. Evaluated per request, so a runner becomes indexable on their
+/// of the sitemap). Without a verified date of birth, the runner must be 18+ even at the youngest
+/// their estimated birth date range allows; no upper bound on the birth date (unknown age, or only
+/// "17 and Under") fails closed. Evaluated per request, so a runner becomes indexable on their
 /// 18th birthday with no extra work.
 /// </summary>
 public static class SearchIndexing
 {
     public const int MinimumIndexableAge = 18;
 
-    public static bool IsRunnerIndexable(DateOnly? dateOfBirth, int? estimatedBirthYear, DateOnly today)
+    /// <param name="dateOfBirth">The runner's verified date of birth, if any.</param>
+    /// <param name="latestPossibleBirthDate">The runner's <c>EstimatedDobLatest</c>.</param>
+    /// <param name="today">The date to evaluate the age on.</param>
+    public static bool IsRunnerIndexable(DateOnly? dateOfBirth, DateOnly? latestPossibleBirthDate, DateOnly today)
     {
-        var age = AgeCalculator.GetRunnerAge(
-            new Runner { DateOfBirth = dateOfBirth, EstimatedBirthYear = estimatedBirthYear }, today);
-        return age >= MinimumIndexableAge;
+        var youngestBirthDate = dateOfBirth ?? latestPossibleBirthDate;
+        return youngestBirthDate is { } dob && AgeCalculator.CalculateAge(dob, today) >= MinimumIndexableAge;
     }
 
     public static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);

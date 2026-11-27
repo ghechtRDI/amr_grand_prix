@@ -107,7 +107,7 @@ public class RunnersController : ControllerBase
     {
         var runners = await _context.Runners
             .AsNoTracking()
-            .Select(r => new { r.RunnerId, r.FirstName, r.LastName, r.Gender, r.DateOfBirth, r.EstimatedBirthYear })
+            .Select(r => new { r.RunnerId, r.FirstName, r.LastName, r.Gender, r.DateOfBirth, r.EstimatedDobEarliest, r.EstimatedDobLatest })
             .ToListAsync();
 
         var resultCounts = await _context.RaceResults
@@ -131,7 +131,12 @@ public class RunnersController : ControllerBase
         return Ok(runners
             .Select(r =>
             {
-                var ageSource = new Runner { DateOfBirth = r.DateOfBirth, EstimatedBirthYear = r.EstimatedBirthYear };
+                var ageSource = new Runner
+                {
+                    DateOfBirth = r.DateOfBirth,
+                    EstimatedDobEarliest = r.EstimatedDobEarliest,
+                    EstimatedDobLatest = r.EstimatedDobLatest
+                };
                 var top = topScores.GetValueOrDefault(r.RunnerId);
                 return new AthleteDirectoryEntryDto
                 {

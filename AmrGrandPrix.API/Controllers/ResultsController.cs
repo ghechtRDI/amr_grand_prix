@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
 using AmrGrandPrix.API.Models.DTOs;
@@ -10,6 +11,7 @@ using AmrGrandPrix.API.Models.DTOs.RaceResults;
 using AmrGrandPrix.API.Services.LlmExtraction;
 using AmrGrandPrix.API.Services.ResultsProcessing;
 using AmrGrandPrix.API.Services.GrandPrix;
+using AmrGrandPrix.API.Services.Runners;
 using Npgsql;
 
 namespace AmrGrandPrix.API.Controllers;
@@ -367,20 +369,37 @@ public class ResultsController : ControllerBase
                     runnerId = resultRow.MatchedRunnerId.Value;
                     runnersInUpload[runnerId] = resultRow;
 
-                    // Record the uploaded age on the runner when the admin opted to correct the
-                    // stored estimate (e.g. it came from a previous upload that only reported an
-                    // age category), or when the runner has no age on file at all - otherwise a
-                    // runner first created without an age would never get one. Never overwrite a
-                    // runner's verified, self-reported date of birth this way.
-                    if (resultRow.Age.HasValue)
+                    var matchedRunner = await _context.Runners.FindAsync(runnerId);
+                    if (matchedRunner != null)
                     {
-                        var matchedRunner = await _context.Runners.FindAsync(runnerId);
-                        if (matchedRunner != null && !matchedRunner.DateOfBirth.HasValue
-                            && (resultRow.UpdateRunnerAge || !matchedRunner.EstimatedBirthYear.HasValue))
+                        var runnerChanged = false;
+
+                        // Narrow the runner's estimated birth date range with what this result
+                        // says (its exact age, or failing that its age category). A result that
+                        // contradicts the range is ignored, unless the admin chose "Update
+                        // estimated age", which replaces the range with this age's. A verified
+                        // date of birth is never touched; it takes precedence over the range.
+                        var evidence = BirthDateRange.FromResult(resultRow.Age, resultRow.AgeCategory, race.Date);
+                        var newRange = resultRow.UpdateRunnerAge && resultRow.Age.HasValue
+                            ? evidence
+                            : BirthDateRange.Combine(matchedRunner.EstimatedBirthRange, evidence, out _);
+                        if (newRange != matchedRunner.EstimatedBirthRange)
                         {
-                            matchedRunner.EstimatedBirthYear = race.Date.Year - resultRow.Age.Value;
-                            matchedRunner.UpdatedAt = DateTime.UtcNow;
+                            matchedRunner.EstimatedBirthRange = newRange;
+                            runnerChanged = true;
                         }
+
+                        // Remember the name this result was listed under (e.g. "Bob Smith" for
+                        // Robert Smith) so the next upload using it matches automatically.
+                        if (!RunnerNames.IsKnownName(matchedRunner, resultRow.Name))
+                        {
+                            matchedRunner.AlternateNames = RunnerNames.Normalize(
+                                matchedRunner.AlternateNames.Append(resultRow.Name));
+                            runnerChanged = true;
+                        }
+
+                        if (runnerChanged)
+                            matchedRunner.UpdatedAt = DateTime.UtcNow;
                     }
                 }
                 else
@@ -391,9 +410,7 @@ public class ResultsController : ControllerBase
                         FirstName   = resultRow.Name.Split(' ').FirstOrDefault() ?? resultRow.Name,
                         LastName    = string.Join(" ", resultRow.Name.Split(' ').Skip(1)),
                         Gender      = resultRow.Gender.Value,
-                        EstimatedBirthYear = resultRow.Age.HasValue
-                            ? race.Date.Year - resultRow.Age.Value
-                            : null,
+                        EstimatedBirthRange = BirthDateRange.FromResult(resultRow.Age, resultRow.AgeCategory, race.Date),
                         CreatedAt   = DateTime.UtcNow,
                         UpdatedAt   = DateTime.UtcNow
                     };

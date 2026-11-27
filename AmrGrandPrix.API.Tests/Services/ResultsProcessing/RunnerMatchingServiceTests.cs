@@ -1,5 +1,7 @@
+using AmrGrandPrix.API.Common;
 using AmrGrandPrix.API.Data;
 using AmrGrandPrix.API.Models;
+using AmrGrandPrix.API.Tests.Infrastructure;
 using AmrGrandPrix.API.Models.DTOs.RaceResults;
 using AmrGrandPrix.API.Services.ResultsProcessing;
 using FluentAssertions;
@@ -30,6 +32,13 @@ public class RunnerMatchingServiceTests : IDisposable
         SeedTestData();
     }
 
+    /// <summary>
+    /// A birth date that makes the runner exactly <paramref name="age"/> today (birthday two months
+    /// ago), so the seeded ages don't drift as the calendar moves on.
+    /// </summary>
+    private static DateOnly BornYearsAgo(int age) =>
+        DateOnly.FromDateTime(DateTime.Today).AddMonths(-2).AddYears(-age);
+
     private void SeedTestData()
     {
         var runners = new List<Runner>
@@ -39,7 +48,7 @@ public class RunnerMatchingServiceTests : IDisposable
                 RunnerId = Guid.NewGuid(),
                 FirstName = "John",
                 LastName = "Doe",
-                DateOfBirth = new DateOnly(1989, 5, 15), // Age ~35
+                DateOfBirth = BornYearsAgo(35), // Age 35
                 Gender = Gender.Male
             },
             new Runner
@@ -47,7 +56,7 @@ public class RunnerMatchingServiceTests : IDisposable
                 RunnerId = Guid.NewGuid(),
                 FirstName = "Jane",
                 LastName = "Smith",
-                DateOfBirth = new DateOnly(1996, 8, 20), // Age ~28
+                DateOfBirth = BornYearsAgo(28), // Age 28
                 Gender = Gender.Female
             },
             new Runner
@@ -55,7 +64,7 @@ public class RunnerMatchingServiceTests : IDisposable
                 RunnerId = Guid.NewGuid(),
                 FirstName = "Michael",
                 LastName = "Johnson",
-                DateOfBirth = new DateOnly(1982, 3, 10), // Age ~42
+                DateOfBirth = BornYearsAgo(42), // Age 42
                 Gender = Gender.Male
             },
             new Runner
@@ -266,7 +275,7 @@ public class RunnerMatchingServiceTests : IDisposable
             RunnerId = Guid.NewGuid(),
             FirstName = "John",
             LastName = "Doe",
-            DateOfBirth = new DateOnly(1984, 5, 15), // Age ~40 (5 years off)
+            DateOfBirth = BornYearsAgo(40), // Age 40 (5 years off)
             Gender = Gender.Male
         });
         await _context.SaveChangesAsync();
@@ -491,6 +500,204 @@ public class RunnerMatchingServiceTests : IDisposable
         match.Confidence.Should().BeGreaterThan(0.95);
     }
 
+    [Fact]
+    public async Task FindMatchesAsync_SingleWordPreferredName_IsPairedWithLastName()
+    {
+        // The preferred-name field holds a nickname ("Bob"), not a full name. On its own it scores
+        // ~0.33 against "Bob Jones"; paired with the last name it's an exact match.
+        _context.Runners.Add(new Runner
+        {
+            RunnerId = Guid.NewGuid(),
+            FirstName = "Robert",
+            LastName = "Jones",
+            PreferredName = "Bob",
+            Gender = Gender.Male
+        });
+        await _context.SaveChangesAsync();
+
+        var matches = await _service.FindMatchesAsync("Bob Jones", null, Gender.Male);
+
+        var match = matches.Single(m => m.LastName == "Jones");
+        match.Confidence.Should().Be(1.0);
+        match.KnownNames.Should().Equal("Robert Jones", "Bob", "Bob Jones");
+    }
+
+    #endregion
+
+    #region Unknown age Tests
+
+    [Fact]
+    public async Task FindMatchesAsync_RunnerWithNoAgeOnFile_AgeIsNeutral()
+    {
+        // Sarah Lee has no DOB and no estimated birth year. An uploaded age can't confirm or
+        // contradict her, so it neither adds nor removes confidence.
+        var matches = await _service.FindMatchesAsync("Sarah Lee", 30, Gender.Female);
+
+        var match = matches.Single(m => m.FirstName == "Sarah");
+        match.Confidence.Should().Be(1.0);
+        match.AgeMatch.Should().BeFalse(); // reported only when confirmed
+    }
+
+    [Fact]
+    public async Task FindMatchesAsync_RunnerWithNoAgeOnFile_CategoryRowIsNeutral()
+    {
+        var matches = await _service.FindMatchesAsync("Sarah Lee", null, Gender.Female, "30-39");
+
+        matches.Single(m => m.FirstName == "Sarah").Confidence.Should().Be(1.0);
+    }
+
+    [Fact]
+    public async Task FindMatchesAsync_ConfirmedAgeSortsAboveUnknownAgeAtEqualConfidence()
+    {
+        // Two runners with the same name: one whose age agrees, one with no age on file. Both
+        // score 1.0, but the confirmed one must come first (it's the one auto-selected).
+        var confirmed = new Runner
+        {
+            RunnerId = Guid.NewGuid(), FirstName = "Sam", LastName = "Hill",
+            EstimatedBirthRange = TestData.BornIn(DateTime.Today.Year - 40), Gender = Gender.Male
+        };
+        var unknown = new Runner
+        {
+            RunnerId = Guid.NewGuid(), FirstName = "Sam", LastName = "Hill", Gender = Gender.Male
+        };
+        _context.Runners.AddRange(unknown, confirmed);
+        await _context.SaveChangesAsync();
+
+        var matches = await _service.FindMatchesAsync("Sam Hill", 40, Gender.Male);
+
+        matches.Select(m => m.RunnerId).Should().StartWith(new[] { confirmed.RunnerId, unknown.RunnerId });
+        matches[0].AgeMatch.Should().BeTrue();
+        matches[1].Confidence.Should().Be(1.0);
+    }
+
+    [Fact]
+    public async Task FindMatchesAsync_KnownAgeOutsideTolerance_StillCountsAgainst()
+    {
+        var matches = await _service.FindMatchesAsync("John Doe", 60, Gender.Male);
+
+        var match = matches.Single(m => m.FirstName == "John" && m.LastName == "Doe");
+        match.Confidence.Should().BeApproximately(0.85, 0.0001);
+        match.AgeMatch.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region Birth date range Tests
+
+    private static readonly DateOnly RaceDate = new(2026, 6, 15);
+
+    private async Task<Runner> AddRangeRunnerAsync(BirthDateRange range)
+    {
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(), FirstName = "Pat", LastName = "Range",
+            Gender = Gender.Female, EstimatedBirthRange = range
+        };
+        _context.Runners.Add(runner);
+        await _context.SaveChangesAsync();
+        return runner;
+    }
+
+    [Theory]
+    [InlineData(39, true)]   // one under the range: within the 1-year tolerance
+    [InlineData(40, true)]
+    [InlineData(41, true)]   // one over
+    [InlineData(38, false)]
+    [InlineData(42, false)]
+    public async Task FindMatchesAsync_ExactAge_MatchesRangeWithinTolerance(int uploadedAge, bool expectedMatch)
+    {
+        await AddRangeRunnerAsync(BirthDateRange.FromAge(40, RaceDate));
+
+        var matches = await _service.FindMatchesAsync("Pat Range", uploadedAge, Gender.Female, asOfDate: RaceDate);
+
+        matches.Single().AgeMatch.Should().Be(expectedMatch);
+    }
+
+    [Fact]
+    public async Task FindMatchesAsync_CategoryRow_ComparesByOverlapNotComputedCategory()
+    {
+        // Born 1996-01-01 .. 1996-12-31: on the race date they're 29 or 30. The midpoint age (29)
+        // falls in 18-29, but a "30-39" row is still consistent with the range.
+        await AddRangeRunnerAsync(BirthDateRange.ForYear(1996));
+
+        var matches = await _service.FindMatchesAsync("Pat Range", null, Gender.Female, "30-39", RaceDate);
+
+        matches.Single().AgeMatch.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task FindMatchesAsync_CategoryOnlyRunner_IsCheckedAgainstExactAge()
+    {
+        await AddRangeRunnerAsync(BirthDateRange.FromAgeCategory("40-49", new DateOnly(2024, 6, 15)));
+
+        var inRange = await _service.FindMatchesAsync("Pat Range", 45, Gender.Female, asOfDate: RaceDate);
+        var outOfRange = await _service.FindMatchesAsync("Pat Range", 25, Gender.Female, asOfDate: RaceDate);
+
+        inRange.Single().AgeMatch.Should().BeTrue();
+        inRange.Single().Age.Should().BeNull("a decade-wide range doesn't give an estimated age");
+        inRange.Single().AgeMin.Should().Be(42);
+        inRange.Single().AgeMax.Should().Be(51);
+        outOfRange.Single().AgeMatch.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task FindMatchesAsync_ReportsPossibleAgeSpanOnRaceDate()
+    {
+        // 40 on 2026-06-15; by 2027-01-01 they could be 40 or 41.
+        await AddRangeRunnerAsync(BirthDateRange.FromAge(40, RaceDate));
+
+        var match = (await _service.FindMatchesAsync("Pat Range", 41, Gender.Female, asOfDate: new DateOnly(2027, 1, 1))).Single();
+
+        match.AgeMin.Should().Be(40);
+        match.AgeMax.Should().Be(41);
+        match.HasVerifiedDateOfBirth.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task FindMatchesAsync_VerifiedDob_WinsOverEstimatedRange()
+    {
+        var runner = await AddRangeRunnerAsync(BirthDateRange.FromAge(60, RaceDate));
+        runner.DateOfBirth = new DateOnly(1986, 1, 1);
+        await _context.SaveChangesAsync();
+
+        var match = (await _service.FindMatchesAsync("Pat Range", 40, Gender.Female, asOfDate: RaceDate)).Single();
+
+        match.AgeMatch.Should().BeTrue();
+        match.Age.Should().Be(40);
+        (match.AgeMin, match.AgeMax).Should().Be((40, 40));
+    }
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_UserDobInsideNarrowRange_CountsAsBirthMatch()
+    {
+        var runner = await AddRangeRunnerAsync(BirthDateRange.FromAge(40, RaceDate)); // 1985-06-16 .. 1986-06-15
+
+        var inside = await _service.FindMatchesForProfileAsync(new ApplicationUser
+        {
+            Id = "u-in", FirstName = "Pat", LastName = "Range", DateOfBirth = new DateOnly(1986, 3, 1)
+        });
+        var outside = await _service.FindMatchesForProfileAsync(new ApplicationUser
+        {
+            Id = "u-out", FirstName = "Pat", LastName = "Range", DateOfBirth = new DateOnly(1986, 7, 1)
+        });
+
+        inside.Single(m => m.RunnerId == runner.RunnerId).AgeMatch.Should().BeTrue();
+        outside.Single(m => m.RunnerId == runner.RunnerId).AgeMatch.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_CategoryOnlyRange_IsNotABirthMatch()
+    {
+        var runner = await AddRangeRunnerAsync(BirthDateRange.FromAgeCategory("40-49", RaceDate));
+
+        var matches = await _service.FindMatchesForProfileAsync(new ApplicationUser
+        {
+            Id = "u-cat", FirstName = "Pat", LastName = "Range", DateOfBirth = new DateOnly(1980, 1, 1)
+        });
+
+        matches.Single(m => m.RunnerId == runner.RunnerId).AgeMatch.Should().BeFalse();
+    }
+
     #endregion
 
     #region FindMatchesForProfileAsync Tests
@@ -525,6 +732,30 @@ public class RunnerMatchingServiceTests : IDisposable
         var match = matches.FirstOrDefault(m => m.RunnerId == runner.RunnerId);
         match.Should().NotBeNull();
         match!.Confidence.Should().BeGreaterThanOrEqualTo(0.90);
+    }
+
+    [Fact]
+    public async Task FindMatchesForProfileAsync_UserSingleWordPreferredName_IsPairedWithLastName()
+    {
+        // Results list the runner as "Bob Jones"; the user registered as Robert Jones with
+        // preferred name "Bob".
+        var runner = new Runner
+        {
+            RunnerId = Guid.NewGuid(), FirstName = "Bob", LastName = "Jones", Gender = Gender.Male
+        };
+        _context.Runners.Add(runner);
+        await _context.SaveChangesAsync();
+
+        var user = new ApplicationUser
+        {
+            Id = "user-bob", FirstName = "Robert", LastName = "Jones", PreferredName = "Bob"
+        };
+
+        var matches = await _service.FindMatchesForProfileAsync(user);
+
+        var match = matches.Single(m => m.RunnerId == runner.RunnerId);
+        match.NameMatch.Should().BeTrue();
+        match.Confidence.Should().BeApproximately(0.70, 0.0001); // name 0.60 + gender (unset) 0.10
     }
 
     [Fact]
@@ -569,7 +800,7 @@ public class RunnerMatchingServiceTests : IDisposable
             RunnerId = Guid.NewGuid(),
             FirstName = "Alex",
             LastName = "Rivera",
-            EstimatedBirthYear = 1990,
+            EstimatedBirthRange = TestData.BornIn(1990),
             Gender = Gender.Male
         };
         _context.Runners.Add(runner);
@@ -639,7 +870,7 @@ public class RunnerMatchingServiceTests : IDisposable
             RunnerId = Guid.NewGuid(),
             FirstName = "Alex",
             LastName = "Rivera",
-            EstimatedBirthYear = 1990,
+            EstimatedBirthRange = TestData.BornIn(1990),
             Gender = Gender.Female
         };
         _context.Runners.Add(runner);

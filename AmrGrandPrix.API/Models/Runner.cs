@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using AmrGrandPrix.API.Common;
 
 namespace AmrGrandPrix.API.Models;
 
@@ -22,11 +23,39 @@ public class Runner
     public DateOnly? DateOfBirth { get; set; }
 
     /// <summary>
-    /// Estimated birth year, derived from an age reported in a race result assuming that age was
-    /// accurate as of the race date. Used only when <see cref="DateOfBirth"/> is not set, and
-    /// overwritten whenever an admin corrects a runner's age during results review.
+    /// Earliest possible birth date implied by the ages and age categories in this runner's race
+    /// results (null = no lower bound). See <see cref="EstimatedBirthRange"/>.
     /// </summary>
-    public int? EstimatedBirthYear { get; set; }
+    public DateOnly? EstimatedDobEarliest { get; set; }
+
+    /// <summary>
+    /// Latest possible birth date implied by the runner's race results (null = no upper bound).
+    /// See <see cref="EstimatedBirthRange"/>.
+    /// </summary>
+    public DateOnly? EstimatedDobLatest { get; set; }
+
+    /// <summary>
+    /// The span of possible birth dates, narrowed by every result saved for this runner (each
+    /// result's window is intersected in; a contradicting result is ignored unless an admin
+    /// chooses to replace the estimate). Maintained even when <see cref="DateOfBirth"/> is set,
+    /// but a verified date of birth always takes precedence when reading an age. Not mapped:
+    /// it's a view over <see cref="EstimatedDobEarliest"/>/<see cref="EstimatedDobLatest"/>.
+    /// </summary>
+    public BirthDateRange EstimatedBirthRange
+    {
+        get => new(EstimatedDobEarliest, EstimatedDobLatest);
+        set
+        {
+            EstimatedDobEarliest = value.Earliest;
+            EstimatedDobLatest = value.Latest;
+        }
+    }
+
+    /// <summary>
+    /// Computed (not stored): the year in the middle of <see cref="EstimatedBirthRange"/>, or null
+    /// when the range is wider than one reported age (e.g. only age categories are known).
+    /// </summary>
+    public int? EstimatedBirthYear => EstimatedBirthRange.EstimatedYear;
 
     [Required]
     public Gender Gender { get; set; }
